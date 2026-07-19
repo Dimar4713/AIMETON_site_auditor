@@ -7,11 +7,12 @@ from fastapi.staticfiles import StaticFiles
 
 from app.discovery import run_hunt
 from app.heuristics import heuristic_analysis
+from app.hunter_handbook import handbook
 from app.llm import analyze_with_routerai, chat_with_routerai
 from app.models import AnalyzeRequest, ChatRequest, HuntRequest
 from app.scraper import FetchError, fetch_site
 
-app = FastAPI(title="AIMETON Site Auditor", version="0.2.0")
+app = FastAPI(title="AIMETON Site Auditor", version="0.3.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -22,7 +23,13 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": "0.3.0"}
+
+
+@app.get("/api/hunter-handbook")
+def hunter_handbook():
+    """Иерархический справочник отраслей, бизнес-моделей и экономических возможностей."""
+    return handbook()
 
 
 @app.post("/api/analyze")
