@@ -1,0 +1,33 @@
+capability_id: dynamic_site_rendering
+version: 1.0.0-experiment
+status: rejected_in_current_sandbox
+candidates:
+  - provider: playwright
+    adapter: PlaywrightSiteFetcher
+    result: rejected
+    reason: bundled Playwright driver is incomplete/incompatible in sandbox
+  - provider: chromium-cli
+    adapter: ChromiumCliSiteFetcher
+    result: rejected
+    reason: sandbox denies required browser runtime operations; render times out
+provides_target:
+  - rendered_html
+  - visible_text
+  - page_title
+  - final_url
+activation_target:
+  strategy: fallback
+  conditions:
+    - insufficient_static_text
+    - javascript_application_markers
+constraints:
+  timeout_seconds: 30
+  public_network_only: true
+  max_rendered_html_bytes: 3000000
+security_conditions_before_acceptance:
+  - validate every redirect target
+  - isolate browser network namespace
+  - block private and link-local subresources
+  - enforce process and memory limits
+trust_level: not_registered
+next_environment: replit_or_codex_with_supported_browser_runtime
