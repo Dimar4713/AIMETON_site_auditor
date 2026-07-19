@@ -1,23 +1,29 @@
 from pathlib import Path
+
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from app.models import AnalyzeRequest, ChatRequest
-from app.scraper import fetch_site, FetchError
-from app.llm import analyze_with_routerai, chat_with_routerai
-from app.heuristics import heuristic_analysis
 
-app = FastAPI(title="AIMETON Site Auditor", version="0.1.0")
+from app.discovery import run_hunt
+from app.heuristics import heuristic_analysis
+from app.llm import analyze_with_routerai, chat_with_routerai
+from app.models import AnalyzeRequest, ChatRequest, HuntRequest
+from app.scraper import FetchError, fetch_site
+
+app = FastAPI(title="AIMETON Site Auditor", version="0.2.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 @app.get("/")
 def index():
     return FileResponse(Path("static/index.html"))
 
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": "0.2.0"}
+
 
 @app.post("/api/analyze")
 async def analyze(req: AnalyzeRequest):
@@ -27,10 +33,19 @@ async def analyze(req: AnalyzeRequest):
             result = await analyze_with_routerai(page["final_url"], page["title"], page["text"])
         except Exception:
             result = heuristic_analysis(page["final_url"], page["title"], page["text"])
-            result.risks_and_assumptions.append("Использован резервный локальный анализ; LLM была недоступна или вернула невалидный ответ.")
+            result.risks_and_assumptions.append(
+                "Использован резервный локальный анализ; LLM была недоступна или вернула невалидный ответ."
+            )
         return result
     except (FetchError, httpx.HTTPError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/hunt")
+async def hunt(req: HuntRequest):
+    """Автономная экономическая разведка по территории и параметрам охоты."""
+    return await run_hunt(req)
+
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
