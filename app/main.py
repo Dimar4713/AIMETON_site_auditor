@@ -11,9 +11,10 @@ from app.hunter_handbook import handbook
 from app.hunter_sources import get_hunter_sources
 from app.llm import analyze_with_routerai, chat_with_routerai
 from app.models import AnalyzeRequest, ChatRequest, HuntRequest
+from app.osint_tools import get_osint_tools
 from app.scraper import FetchError, fetch_site
 
-app = FastAPI(title="AIMETON Site Auditor", version="0.3.1")
+app = FastAPI(title="AIMETON Site Auditor", version="0.3.2")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -24,7 +25,7 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.3.1"}
+    return {"status": "ok", "version": "0.3.2"}
 
 
 @app.get("/api/hunter-handbook")
@@ -37,6 +38,12 @@ def hunter_handbook():
 def hunter_sources():
     """Каталог источников обнаружения и подтверждения компаний."""
     return get_hunter_sources()
+
+
+@app.get("/api/osint-tools")
+def osint_tools():
+    """Каталог OSINT-инструментов и уровней достоверности информационного запаха."""
+    return get_osint_tools()
 
 
 @app.post("/api/analyze")
