@@ -7,22 +7,10 @@ from urllib.parse import urlparse
 import httpx
 
 from app.heuristics import heuristic_analysis
+from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries
 from app.models import HuntCandidate, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
 
-
-DEFAULT_INDUSTRIES = [
-    "отопление и вентиляция",
-    "строительные материалы",
-    "промышленное оборудование",
-    "автозапчасти и автосервис",
-    "мебель и кухни",
-    "окна двери фасады",
-    "стоматология и медицинские центры",
-    "недвижимость и строительство",
-    "образовательные центры",
-    "туризм и базы отдыха",
-]
 
 EXCLUDED_HOSTS = {
     "vk.com",
@@ -40,20 +28,36 @@ EXCLUDED_HOSTS = {
 
 
 def _domain(url: str) -> str:
-    host = (urlparse(url).hostname or "").lower().removeprefix("www.")
-    return host
+    return (urlparse(url).hostname or "").lower().removeprefix("www.")
 
 
 def _build_queries(req: HuntRequest) -> list[str]:
-    industries = req.industries or DEFAULT_INDUSTRIES
+    selected = resolve_industries(req.industries)
     queries: list[str] = []
-    for industry in industries:
-        queries.append(f'{industry} {req.region} официальный сайт компания')
-        if req.search_zone:
-            queries.append(f'{industry} {req.search_zone} {req.region} официальный сайт')
+    seen: set[str] = set()
+
+    def add(query: str) -> None:
+        normalized = " ".join(query.split())
+        if normalized and normalized not in seen and len(queries) < req.max_queries:
+            seen.add(normalized)
+            queries.append(normalized)
+
+    for industry in selected:
+        variants = [industry["name"], *industry["aliases"]]
+        for variant in variants[:4]:
+            add(f'{variant} {req.region} официальный сайт компания')
+            if req.search_zone:
+                add(f'{variant} {req.search_zone} официальный сайт')
+
+        signal_ids = industry.get("signals", [])
+        for signal_id in signal_ids[:3]:
+            signal = OPPORTUNITY_PATTERNS.get(signal_id, signal_id)
+            add(f'{industry["name"]} {signal} {req.region} компания')
+
     for focus in req.focus:
-        queries.append(f'{focus} {req.region} компания официальный сайт')
-    return queries[: req.max_queries]
+        add(f'{focus} {req.region} компания официальный сайт')
+
+    return queries
 
 
 async def _search_searxng(query: str, limit: int) -> list[dict]:
@@ -64,8 +68,7 @@ async def _search_searxng(query: str, limit: int) -> list[dict]:
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         response = await client.get(f"{base_url.rstrip('/')}/search", params=params)
         response.raise_for_status()
-    data = response.json()
-    return list(data.get("results", []))[:limit]
+    return list(response.json().get("results", []))[:limit]
 
 
 def _pre_score(req: HuntRequest, title: str, snippet: str, url: str) -> tuple[int, list[str]]:
@@ -75,13 +78,16 @@ def _pre_score(req: HuntRequest, title: str, snippet: str, url: str) -> tuple[in
     region_tokens = [x.strip().lower() for x in req.region.replace(",", " ").split() if len(x.strip()) > 3]
     if any(token in haystack for token in region_tokens):
         score += 25
-        reasons.append("обнаружено соответствие региону")
+        reasons.append("обнаружено соответствие территории охоты")
     if any(x in haystack for x in ["каталог", "товар", "оборудован", "услуг", "подбор", "расчет", "заказать"]):
         score += 20
         reasons.append("есть признаки коммерческого каталога или сложного выбора")
     if any(x in haystack for x in ["опт", "производ", "монтаж", "проект", "комплектац", "прайс"]):
         score += 15
         reasons.append("есть признаки содержательной коммерческой задачи")
+    if any(focus.lower() in haystack for focus in req.focus):
+        score += 10
+        reasons.append("обнаружено соответствие заданному фокусу охоты")
     if _domain(url).endswith(".ru"):
         score += 5
     return min(score, 100), reasons
@@ -163,6 +169,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         discovered=len(unique),
         candidates=candidates[: req.output_limit],
         notes=[
+            "План охоты сформирован по Справочнику охотника.",
             "Поиск, дедупликация, предварительная фильтрация и ранжирование выполнены автоматически.",
             "Глубокий пакет коммерческой возможности сохранён только для целей, прошедших порог deep_audit_score.",
         ],
