@@ -21,6 +21,7 @@ from app.scraper import FetchError, fetch_site
 DIRECTORY_HOSTS = {
     "companies.rbc.ru", "rusprofile.ru", "www.rusprofile.ru", "2gis.ru", "www.2gis.ru",
     "yandex.ru", "www.yandex.ru", "checko.ru", "www.checko.ru", "list-org.com", "www.list-org.com",
+    "audit-it.ru", "www.audit-it.ru", "egrul.nalog.ru", "bo.nalog.ru",
 }
 REVIEW_HOSTS = {
     "flamp.ru", "www.flamp.ru", "prodoctorov.ru", "www.prodoctorov.ru", "zoon.ru", "www.zoon.ru",
@@ -35,17 +36,49 @@ TENDER_HOSTS = {
     "zakupki.gov.ru", "www.zakupki.gov.ru", "rostender.info", "www.rostender.info", "b2b-center.ru", "www.b2b-center.ru",
 }
 PATENT_HOSTS = {"new.fips.ru", "fips.ru", "www.fips.ru", "patents.google.com"}
+COURT_HOSTS = {
+    "sudrf.ru", "www.sudrf.ru", "mos-gorsud.ru", "www.mos-gorsud.ru", "sudact.ru", "www.sudact.ru",
+}
+ARBITRATION_HOSTS = {"kad.arbitr.ru", "arbitr.ru", "www.arbitr.ru", "ras.arbitr.ru"}
+ENFORCEMENT_HOSTS = {
+    "fssp.gov.ru", "www.fssp.gov.ru", "bankrot.fedresurs.ru", "fedresurs.ru", "www.fedresurs.ru",
+}
 NEWS_MARKERS = ("news", "vedomosti", "kommersant", "rbc.ru", "tass.ru", "ria.ru", "interfax", "ngs.ru")
+
+
+QUERY_LABELS = {
+    "official": "официальный сайт",
+    "registry": "государственные и коммерческие реестры",
+    "ownership": "учредители, владельцы и руководители",
+    "affiliation": "аффилированные лица и связанные компании",
+    "court": "суды общей юрисдикции",
+    "arbitration": "арбитражные дела",
+    "enforcement": "исполнительные производства и банкротство",
+    "news": "новости",
+    "review": "отзывы",
+    "jobs": "вакансии",
+    "social": "социальные площадки",
+    "tender": "тендеры и закупки",
+    "patent": "патенты",
+}
 
 
 def _host(url: str) -> str:
     return (urlparse(url).hostname or "").lower()
 
 
-def _classify_source(url: str, official_host: str | None) -> str:
+def _classify_source(url: str, official_host: str | None, query_kind: str | None = None) -> str:
     host = _host(url)
     if official_host and (host == official_host or host.endswith(f".{official_host}")):
         return "official"
+    if query_kind in {"ownership", "affiliation", "court", "arbitration", "enforcement"}:
+        return query_kind
+    if host in ARBITRATION_HOSTS:
+        return "arbitration"
+    if host in COURT_HOSTS:
+        return "court"
+    if host in ENFORCEMENT_HOSTS:
+        return "enforcement"
     if host in SOCIAL_HOSTS:
         return "social"
     if host in REVIEW_HOSTS:
@@ -66,9 +99,9 @@ def _classify_source(url: str, official_host: str | None) -> str:
 def _evidence_level(source_class: str) -> str:
     if source_class == "official":
         return "confirmed_fact"
-    if source_class in {"registry", "news", "tender", "patent"}:
+    if source_class in {"registry", "court", "arbitration", "enforcement", "news", "tender", "patent"}:
         return "corroborated_signal"
-    if source_class in {"review", "jobs", "social"}:
+    if source_class in {"ownership", "affiliation", "review", "jobs", "social"}:
         return "weak_signal"
     return "unverified_mention"
 
@@ -77,6 +110,11 @@ def _source_type(source_class: str) -> str:
     mapping = {
         "official": "official_page",
         "registry": "registry",
+        "court": "court",
+        "arbitration": "arbitration",
+        "enforcement": "enforcement",
+        "ownership": "ownership",
+        "affiliation": "affiliation",
         "news": "news",
         "social": "social",
         "review": "review",
@@ -98,17 +136,26 @@ async def _search(query: str, limit: int) -> list[dict]:
     return list(response.json().get("results", []))[:limit]
 
 
-def _query_plan(company_name: str, region: str | None = None) -> list[str]:
+def _query_plan(company_name: str, region: str | None = None) -> list[tuple[str, str]]:
     suffix = f" {region}" if region else ""
     return [
-        f'"{company_name}" официальный сайт{suffix}',
-        f'"{company_name}" ИНН ОГРН руководитель{suffix}',
-        f'"{company_name}" новости{suffix}',
-        f'"{company_name}" отзывы{suffix}',
-        f'"{company_name}" вакансии',
-        f'"{company_name}" site:vk.com OR site:t.me OR site:ok.ru',
-        f'"{company_name}" тендер OR закупка OR контракт',
-        f'"{company_name}" патент OR изобретение',
+        ("official", f'"{company_name}" официальный сайт{suffix}'),
+        ("registry", f'"{company_name}" ИНН ОГРН выписка ЕГРЮЛ{suffix}'),
+        ("ownership", f'"{company_name}" учредитель генеральный директор владелец бенефициар'),
+        ("ownership", f'"{company_name}" конечный бенефициар фактический владелец доля участия'),
+        ("affiliation", f'"{company_name}" аффилированные лица связанные компании группа компаний'),
+        ("affiliation", f'"{company_name}" общий учредитель директор адрес телефон домен'),
+        ("arbitration", f'"{company_name}" site:kad.arbitr.ru OR site:arbitr.ru'),
+        ("arbitration", f'"{company_name}" арбитражный суд истец ответчик дело'),
+        ("court", f'"{company_name}" суд иск решение взыскание'),
+        ("enforcement", f'"{company_name}" ФССП исполнительное производство задолженность'),
+        ("enforcement", f'"{company_name}" банкротство Федресурс сообщение кредитор'),
+        ("news", f'"{company_name}" новости{suffix}'),
+        ("review", f'"{company_name}" отзывы{suffix}'),
+        ("jobs", f'"{company_name}" вакансии'),
+        ("social", f'"{company_name}" site:vk.com OR site:t.me OR site:ok.ru'),
+        ("tender", f'"{company_name}" тендер OR закупка OR контракт'),
+        ("patent", f'"{company_name}" патент OR изобретение'),
     ]
 
 
@@ -116,7 +163,7 @@ async def collect_external_sources(
     company_name: str,
     official_url: str | None,
     region: str | None = None,
-    max_sources: int = 30,
+    max_sources: int = 40,
 ) -> tuple[list[IntelligenceSource], list[str]]:
     notes: list[str] = []
     if not os.getenv("SEARXNG_BASE_URL"):
@@ -124,10 +171,14 @@ async def collect_external_sources(
 
     raw: list[dict] = []
     queries = _query_plan(company_name, region)
-    per_query = max(3, min(8, max_sources // max(1, len(queries)) + 1))
-    for query in queries:
+    per_query = max(2, min(6, max_sources // max(1, len(queries)) + 1))
+    for query_kind, query in queries:
         try:
-            raw.extend(await _search(query, per_query))
+            for item in await _search(query, per_query):
+                enriched = dict(item)
+                enriched["_query_kind"] = query_kind
+                enriched["_query"] = query
+                raw.append(enriched)
         except httpx.HTTPError as exc:
             notes.append(f"Часть внешнего поиска недоступна для запроса {query!r}: {exc}")
 
@@ -140,12 +191,16 @@ async def collect_external_sources(
         if not url or url in seen_urls:
             continue
         seen_urls.add(url)
-        source_class = _classify_source(url, official_host)
+        query_kind = str(item.get("_query_kind") or "") or None
+        source_class = _classify_source(url, official_host, query_kind)
+        snippet = str(item.get("content") or item.get("snippet") or "")[:700]
+        if query_kind in {"ownership", "affiliation"} and snippet:
+            snippet = f"Поисковое направление: {QUERY_LABELS[query_kind]}. {snippet}"
         sources.append(IntelligenceSource(
             id=f"E{len(sources) + 1}",
             title=str(item.get("title") or _host(url) or url)[:300],
             url=url,
-            snippet=str(item.get("content") or item.get("snippet") or "")[:700],
+            snippet=snippet,
             accessed_at=accessed_at,
             source_class=source_class,
             evidence_level=_evidence_level(source_class),
@@ -173,7 +228,7 @@ def _to_llm_sources(sources: list[IntelligenceSource]) -> list[dict]:
 
 async def run_enriched_site_analysis(url: str, title: str, text: str) -> SiteAnalysis:
     company_hint = title.split("—")[0].split("|")[0].strip() or _host(url)
-    external_sources, notes = await collect_external_sources(company_hint, url, max_sources=30)
+    external_sources, notes = await collect_external_sources(company_hint, url, max_sources=40)
     try:
         analysis = await analyze_with_routerai(url, title, text, _to_llm_sources(external_sources))
     except Exception:
@@ -208,6 +263,9 @@ async def run_enriched_site_analysis(url: str, title: str, text: str) -> SiteAna
     else:
         analysis.risks_and_assumptions.append("Внешние источники не найдены или поисковый контур недоступен.")
     analysis.risks_and_assumptions.extend(notes)
+    analysis.risks_and_assumptions.append(
+        "Сведения о фактических владельцах и аффилированности являются гипотезой до подтверждения ЕГРЮЛ, раскрытием бенефициаров, судебным актом или двумя независимыми источниками. Совпадение ФИО, адреса, телефона или домена само по себе не доказывает контроль."
+    )
     return analysis
 
 
@@ -235,9 +293,13 @@ async def run_company_intelligence(req: CompanyIntelligenceRequest) -> CompanyIn
                 official_url = source.url
                 break
         if not official_url:
+            excluded = {
+                "registry", "ownership", "affiliation", "court", "arbitration", "enforcement",
+                "review", "jobs", "social", "tender", "patent",
+            }
             for source in sources:
                 host = _host(source.url)
-                if source.source_class not in {"registry", "review", "jobs", "social", "tender", "patent"} and host:
+                if source.source_class not in excluded and host:
                     official_url = source.url
                     break
 
@@ -255,6 +317,11 @@ async def run_company_intelligence(req: CompanyIntelligenceRequest) -> CompanyIn
         "news": "новостных публикаций",
         "review": "источников отзывов",
         "registry": "реестровых/справочных источников",
+        "ownership": "источников о владельцах и руководителях",
+        "affiliation": "источников о связях и аффилированности",
+        "court": "материалов судов общей юрисдикции",
+        "arbitration": "материалов арбитражных дел",
+        "enforcement": "материалов об исполнительных производствах или банкротстве",
         "jobs": "кадровых источников",
         "social": "социальных площадок",
         "tender": "тендерных источников",
