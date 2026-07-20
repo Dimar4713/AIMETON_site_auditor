@@ -16,27 +16,13 @@ class EvidenceSource(BaseModel):
     accessed_at: str = Field(description="Дата и время проверки в ISO 8601")
     evidence_quote: str = Field(description="Короткая дословная цитата или описание наблюдаемого элемента")
     source_type: Literal[
-        "official_page",
-        "registry",
-        "court",
-        "arbitration",
-        "enforcement",
-        "ownership",
-        "affiliation",
-        "news",
-        "social",
-        "review",
-        "jobs",
-        "tender",
-        "patent",
-        "external_source",
-        "visual_observation",
+        "official_page", "registry", "court", "arbitration", "enforcement",
+        "ownership", "affiliation", "finance", "workforce", "contact",
+        "news", "social", "review", "jobs", "tender", "patent",
+        "external_source", "visual_observation",
     ] = "external_source"
     evidence_level: Literal[
-        "confirmed_fact",
-        "corroborated_signal",
-        "weak_signal",
-        "unverified_mention",
+        "confirmed_fact", "corroborated_signal", "weak_signal", "unverified_mention"
     ] = "unverified_mention"
 
 
@@ -46,6 +32,39 @@ class EconomicSignal(BaseModel):
     business_effect: str
     confidence: Literal["Высокая", "Средняя", "Низкая"] = "Средняя"
     source_ids: list[str] = Field(default_factory=list, description="Ссылки на EvidenceSource.id")
+
+
+class CompanyFact(BaseModel):
+    field: Literal[
+        "legal_name", "brand_name", "inn", "ogrn", "registration_status",
+        "address", "phones", "emails", "website", "social_accounts",
+        "headcount", "revenue", "profit", "assets", "taxes",
+        "founders", "executives", "beneficial_owners", "affiliates",
+        "geography", "products", "customers", "suppliers", "other",
+    ]
+    value: str
+    period: str | None = None
+    confidence: Literal["Высокая", "Средняя", "Низкая"] = "Средняя"
+    source_ids: list[str] = Field(default_factory=list)
+    note: str = ""
+
+
+class BusinessMachineCell(BaseModel):
+    code: str = Field(description="Код ячейки, например I-EXT")
+    engine: Literal[
+        "I — Коммуникационные системы",
+        "II — Люди",
+        "III — Технологии",
+        "IV — Менеджмент",
+    ]
+    dimension: Literal[
+        "Внешний контур", "Внутренний контур", "Ресурсы и масштаб", "Результат и риски"
+    ]
+    finding: str
+    status: Literal["Подтверждено", "Частично", "Гипотеза", "Нет данных"] = "Нет данных"
+    confidence: Literal["Высокая", "Средняя", "Низкая"] = "Низкая"
+    source_ids: list[str] = Field(default_factory=list)
+    gap_or_opportunity: str = ""
 
 
 class CommercialOpportunity(BaseModel):
@@ -71,6 +90,8 @@ class SiteAnalysis(BaseModel):
     business_summary: str
     evidence: list[str] = Field(default_factory=list)
     sources: list[EvidenceSource] = Field(default_factory=list)
+    company_facts: list[CompanyFact] = Field(default_factory=list)
+    business_machine_4x4: list[BusinessMachineCell] = Field(default_factory=list, max_length=16)
     economic_signals: list[EconomicSignal] = Field(default_factory=list)
     commercial_opportunity: CommercialOpportunity
     agents: list[AgentRecommendation] = Field(min_length=3, max_length=10)
@@ -127,20 +148,9 @@ class IntelligenceSource(BaseModel):
     snippet: str = ""
     accessed_at: str
     source_class: Literal[
-        "official",
-        "registry",
-        "court",
-        "arbitration",
-        "enforcement",
-        "ownership",
-        "affiliation",
-        "news",
-        "social",
-        "review",
-        "jobs",
-        "tender",
-        "patent",
-        "other",
+        "official", "registry", "court", "arbitration", "enforcement",
+        "ownership", "affiliation", "finance", "workforce", "contact",
+        "news", "social", "review", "jobs", "tender", "patent", "other",
     ] = "other"
     evidence_level: Literal["confirmed_fact", "corroborated_signal", "weak_signal", "unverified_mention"] = "unverified_mention"
 
@@ -149,7 +159,7 @@ class CompanyIntelligenceRequest(BaseModel):
     company_name: str = Field(min_length=2)
     url: HttpUrl | None = None
     region: str | None = None
-    max_sources: int = Field(default=40, ge=5, le=100)
+    max_sources: int = Field(default=60, ge=5, le=140)
 
 
 class CompanyIntelligenceResult(BaseModel):
