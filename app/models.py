@@ -18,6 +18,11 @@ class EvidenceSource(BaseModel):
     source_type: Literal[
         "official_page",
         "registry",
+        "court",
+        "arbitration",
+        "enforcement",
+        "ownership",
+        "affiliation",
         "news",
         "social",
         "review",
@@ -124,6 +129,11 @@ class IntelligenceSource(BaseModel):
     source_class: Literal[
         "official",
         "registry",
+        "court",
+        "arbitration",
+        "enforcement",
+        "ownership",
+        "affiliation",
         "news",
         "social",
         "review",
@@ -139,7 +149,7 @@ class CompanyIntelligenceRequest(BaseModel):
     company_name: str = Field(min_length=2)
     url: HttpUrl | None = None
     region: str | None = None
-    max_sources: int = Field(default=30, ge=5, le=80)
+    max_sources: int = Field(default=40, ge=5, le=100)
 
 
 class CompanyIntelligenceResult(BaseModel):
