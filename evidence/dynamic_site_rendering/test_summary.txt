@@ -1,0 +1,19 @@
+Experiment: dynamic_site_rendering
+Environment: ChatGPT isolated sandbox
+
+Candidate A: Playwright
+Result: rejected in sandbox
+Evidence:
+- bundled driver node: OSError [Errno 14] Bad address
+- system Node override: driver/package/cli.js missing
+
+Candidate B: Chromium CLI
+Result: rejected in sandbox
+Evidence:
+- Chromium 144 is present
+- browser reports NETLINK socket permission denied
+- rendering does not finish before timeout
+
+Decision:
+Do not register capability in current runtime.
+Preserve adapters and repeat the same contract tests in Replit/Codex.

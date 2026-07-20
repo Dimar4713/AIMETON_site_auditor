@@ -1,4 +1,11 @@
-from app.models import AgentRecommendation, SiteAnalysis
+from app.models import (
+    ActionPackage,
+    AgentRecommendation,
+    CommercialOpportunity,
+    EconomicSignal,
+    SiteAnalysis,
+)
+
 
 INDUSTRIES = [
     ("Логистика и доставка", ["логист", "доставк", "курьер", "посылк", "груз", "склад"]),
@@ -41,10 +48,87 @@ CATALOG = {
     ],
 }
 
+
 def heuristic_analysis(url: str, title: str, text: str) -> SiteAnalysis:
     source = f"{title}\n{text}".lower()
-    industry, score = max(((name, sum(source.count(k) for k in keys)) for name, keys in INDUSTRIES), key=lambda x: x[1])
-    if score == 0:
+    industry, industry_score = max(
+        ((name, sum(source.count(k) for k in keys)) for name, keys in INDUSTRIES),
+        key=lambda x: x[1],
+    )
+    if industry_score == 0:
         industry = "Профессиональные услуги"
-    agents = [AgentRecommendation(name=n, purpose=p, benefit=b, priority="Высокий" if i < 3 else "Средний") for i, (n, p, b) in enumerate(CATALOG[industry])]
-    return SiteAnalysis(url=url, company_name=title.split("—")[0].split("|")[0].strip() or url, business_summary=f"Компания относится к категории «{industry}».", evidence=[x for x in text.splitlines()[:5] if x], agents=agents, risks_and_assumptions=["Анализ ограничен главной страницей.", "Перед внедрением требуется интервью с компанией."])
+
+    has_catalog = any(k in source for k in ("каталог", "товар", "модель", "комплект", "цена"))
+    has_contact = any(k in source for k in ("телефон", "позвон", "оставить заявку", "заказать", "консультац"))
+    has_complexity = any(k in source for k in ("подбор", "характеристик", "совместим", "расчёт", "конфигурац"))
+
+    economic_signals = []
+    if has_catalog:
+        economic_signals.append(EconomicSignal(
+            signal="Многовариантное предложение",
+            evidence="На странице обнаружены признаки каталога, моделей или цен.",
+            business_effect="Покупатель может отказаться от обращения из-за сложности самостоятельного выбора.",
+            confidence="Средняя",
+        ))
+    if has_contact:
+        economic_signals.append(EconomicSignal(
+            signal="Продажа зависит от ручной консультации",
+            evidence="На странице присутствуют призывы позвонить, заказать или оставить заявку.",
+            business_effect="Часть спроса может теряться вне рабочего времени или до разговора с менеджером.",
+            confidence="Средняя",
+        ))
+    if has_complexity:
+        economic_signals.append(EconomicSignal(
+            signal="Необходим предварительный подбор или расчёт",
+            evidence="Обнаружены слова о подборе, характеристиках, совместимости или расчёте.",
+            business_effect="AI-квалификатор способен подготовить структурированную заявку и сократить пресейл.",
+            confidence="Высокая",
+        ))
+    if not economic_signals:
+        economic_signals.append(EconomicSignal(
+            signal="Недостаточно явных коммерческих сигналов",
+            evidence="Главная страница не содержит достаточной информации для уверенной квалификации.",
+            business_effect="Требуется исследование внутренних страниц или ручная проверка.",
+            confidence="Низкая",
+        ))
+
+    score = min(100, 20 + industry_score * 5 + has_catalog * 20 + has_contact * 15 + has_complexity * 25)
+    qualification = "Приоритетная" if score >= 75 else "Перспективная" if score >= 50 else "Наблюдение" if score >= 30 else "Недостаточно данных"
+    agents = [
+        AgentRecommendation(name=n, purpose=p, benefit=b, priority="Высокий" if i < 3 else "Средний")
+        for i, (n, p, b) in enumerate(CATALOG[industry])
+    ]
+    recommended = agents[0]
+    company_name = title.split("—")[0].split("|")[0].strip() or url
+
+    return SiteAnalysis(
+        url=url,
+        company_name=company_name,
+        business_summary=f"Компания относится к категории «{industry}».",
+        evidence=[x for x in text.splitlines()[:5] if x],
+        economic_signals=economic_signals,
+        commercial_opportunity=CommercialOpportunity(
+            opportunity_type="Автоматизация клиентской консультации и квалификации спроса",
+            problem_hypothesis="Компания может терять часть обращений из-за сложности выбора и зависимости от ручной консультации.",
+            recommended_solution=recommended.name,
+            expected_value=recommended.benefit,
+            score=score,
+            qualification=qualification,
+        ),
+        agents=agents,
+        action_package=ActionPackage(
+            decision_maker_hypothesis="Владелец, коммерческий директор или руководитель продаж",
+            contact_reason=f"Показать, как {recommended.name.lower()} может сократить потери обращений и подготовить клиента до контакта с менеджером.",
+            demo_scenario=["Уточнение потребности клиента", "Подбор подходящего варианта", "Формирование структурированной заявки"],
+            first_message=(
+                f"Изучили сайт компании «{company_name}» и увидели возможность упростить клиенту выбор. "
+                f"Можно показать прототип решения «{recommended.name}», который уточняет потребность и передаёт менеджеру подготовленную заявку."
+            ),
+            next_action="Проверить внутренние страницы, найти официальный контакт и подготовить персональный демонстрационный сценарий.",
+        ),
+        risks_and_assumptions=[
+            "Анализ ограничен доступным текстом сайта.",
+            "Коммерческие потери являются гипотезой до подтверждения интервью или данными компании.",
+            "Контакт допускается только по публичным деловым каналам без массового спама.",
+        ],
+    )
