@@ -20,13 +20,14 @@
     if (!data) return;
 
     const facts = Array.isArray(data.company_facts) ? data.company_facts : [];
-    const matrix = Array.isArray(data.business_machine_4x4) ? data.business_machine_4x4 : [];
+    const km = Array.isArray(data.business_machine_4x4) ? data.business_machine_4x4 : [];
     const section = document.createElement('div');
     section.dataset.aimetonExtended = 'true';
 
     const factsHtml = facts.length ? `
       <section class="panel">
         <h3>Проверяемый профиль компании</h3>
+        <p><small>Профиль углубляет понимание компании и повышает точность AI-предложения. Он не заменяет коммерческую возможность.</small></p>
         <div class="grid">
           ${facts.map((fact) => `<article class="card">
             <span class="tag">${esc(fact.confidence || 'Средняя')}</span>
@@ -39,25 +40,26 @@
         </div>
       </section>` : '';
 
-    const matrixHtml = matrix.length ? `
+    const kmHtml = km.length ? `
       <section class="panel">
-        <h3>Бизнес-машина 4×4 — проекция КМ</h3>
-        <p><small>I — коммуникации · II — люди · III — технологии · IV — менеджмент. «Нет данных» означает информационный пробел, а не отсутствие функции.</small></p>
+        <h3>Профиль бизнес-машины по каноническому КМ</h3>
+        <p><small>Четыре детализирующих оператора: коммуникационные системы, люди, технологии и менеджмент. Каждый раскрывается в четыре нормативные вершины. Это аналитическая оптика для усиления AI-продажи, а не замена коммерческого контура.</small></p>
         <div class="grid">
-          ${matrix.map((cell) => `<article class="card">
+          ${km.map((cell) => `<article class="card">
             <span class="tag">${esc(cell.code)} · ${esc(cell.status)}</span>
-            <h3>${esc(cell.engine)}</h3>
-            <p><strong>${esc(cell.dimension)}</strong></p>
+            <h3>${esc(cell.detail_operator)}</h3>
+            <p><strong>${esc(cell.vertex)}</strong></p>
             <p>${esc(cell.finding)}</p>
-            ${cell.gap_or_opportunity ? `<p><strong>Разрыв / возможность</strong><br>${esc(cell.gap_or_opportunity)}</p>` : ''}
+            ${cell.sales_relevance ? `<p><strong>Значение для AI-продажи</strong><br>${esc(cell.sales_relevance)}</p>` : ''}
             <p><small>Уверенность: ${esc(cell.confidence)} · Источники: ${refs(cell.source_ids)}</small></p>
           </article>`).join('')}
         </div>
       </section>` : '';
 
-    section.innerHTML = factsHtml + matrixHtml;
-    const opportunity = root.querySelector('.panel');
-    if (opportunity) opportunity.insertAdjacentElement('afterend', section);
+    section.innerHTML = factsHtml + kmHtml;
+    const opportunityPanels = root.querySelectorAll('.panel');
+    const firstOpportunity = opportunityPanels[0];
+    if (firstOpportunity) firstOpportunity.insertAdjacentElement('afterend', section);
     else root.appendChild(section);
   }
 
@@ -97,16 +99,6 @@
         }).join('')}
       </ol>`;
     root.appendChild(section);
-
-    const cards = root.querySelectorAll('.grid .card');
-    (data.economic_signals || []).forEach((signal, index) => {
-      const card = cards[index];
-      if (!card || !signal.source_ids?.length || card.querySelector('.source-refs')) return;
-      const p = document.createElement('p');
-      p.className = 'source-refs';
-      p.innerHTML = `<strong>Источники:</strong> ${refs(signal.source_ids)}`;
-      card.appendChild(p);
-    });
   }
 
   const observer = new MutationObserver(renderSources);
