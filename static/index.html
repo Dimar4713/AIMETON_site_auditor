@@ -1,1 +1,60 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AIMETON Site Auditor</title><link rel="stylesheet" href="/static/style.css"></head><body><main><header><p class="eyebrow">AIMETON · экономическая разведка</p><h1>Site Auditor</h1><p>Исследует цифровое присутствие компании, выявляет экономические сигналы, квалифицирует коммерческую возможность и готовит пакет действия.</p></header><section class="panel"><form id="form"><input id="url" type="url" placeholder="https://example.com" required><button>Исследовать компанию</button></form><p id="status"></p></section><section id="result" class="hidden"></section><section id="chat" class="panel hidden"><h2>Уточнить коммерческую возможность</h2><div id="messages"></div><form id="chatForm"><input id="question" placeholder="Какой демонстрационный сценарий будет убедительнее?" required><button>Отправить</button></form></section></main><script src="/static/app.js"></script></body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AIMETON Site Auditor</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260720b">
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">
+      <div class="brand-logo">
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="36" height="36" rx="10" fill="#5b61e6"/>
+          <path d="M9 27L14.5 9H18L23.5 27H20.2L19 23H13L11.8 27H9ZM13.8 20.5H18.2L16 13.5L13.8 20.5Z" fill="white"/>
+          <circle cx="26" cy="13" r="3" fill="#a5d8ff"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <p class="eyebrow">AIMETON · экономическая разведка</p>
+        <h1>Site Auditor</h1>
+      </div>
+    </div>
+    <p class="tagline">Исследует цифровое присутствие компании, выявляет экономические сигналы, квалифицирует коммерческую возможность и готовит пакет действия.</p>
+  </header>
+
+  <section class="panel">
+    <form id="form">
+      <input id="url" type="url" placeholder="https://example.com" required>
+      <button id="analyzeBtn">Исследовать</button>
+    </form>
+    <p id="status"></p>
+  </section>
+
+  <section id="history" class="hidden">
+    <div class="history-header">
+      <h3>История анализов</h3>
+      <button id="clearHistoryBtn" class="btn-ghost btn-sm">Очистить всё</button>
+    </div>
+    <div id="historyList"></div>
+  </section>
+
+  <section id="result" class="hidden"></section>
+
+  <section id="chat" class="panel hidden">
+    <h2>Уточнить коммерческую возможность</h2>
+    <div id="messages"></div>
+    <form id="chatForm">
+      <input id="question" placeholder="Какой демонстрационный сценарий будет убедительнее?" required>
+      <button id="chatBtn">Отправить</button>
+    </form>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="/static/app.js?v=20260720b"></script>
+</body>
+</html>
