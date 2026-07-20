@@ -11,7 +11,7 @@ from app.heuristics import heuristic_analysis
 from app.hunter_handbook import handbook
 from app.hunter_sources import get_hunter_sources
 from app.llm import analyze_with_routerai, chat_with_routerai
-from app.mcp_server import mcp_http_app
+from app.mcp_server import mcp, mcp_http_app
 from app.models import AnalyzeRequest, ChatRequest, CompanyIntelligenceRequest, HuntRequest
 from app.osint_tools import get_osint_tools
 from app.scraper import FetchError, fetch_site
@@ -20,7 +20,7 @@ from app.scraper import FetchError, fetch_site
 app = FastAPI(
     title="AIMETON Site Auditor",
     version="0.4.0",
-    lifespan=mcp_http_app.lifespan,
+    lifespan=lambda _app: mcp.session_manager.run(),
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/mcp", mcp_http_app, name="mcp")
