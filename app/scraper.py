@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import ipaddress
 import shutil
 import socket
@@ -40,6 +41,7 @@ class FetchError(RuntimeError):
 def normalize_url(raw: str) -> str:
     """Normalize a user-supplied web address before security validation."""
     url = (raw or "").strip().replace("\\", "/")
+    url = re.sub(r"^(https?):/+", r"\1://", url, flags=re.IGNORECASE)
     parsed = urlparse(url)
     if not parsed.scheme:
         url = f"https://{url}"
