@@ -4,6 +4,19 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """Serve static assets with cache disabled so browsers always fetch the
+    latest JS/CSS (avoids stale app.js causing old export bugs to persist)."""
+
+    def file_response(self, *args, **kwargs) -> Response:
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
 from app.company_intelligence import run_company_intelligence
 from app.discovery import run_hunt
@@ -22,13 +35,20 @@ app = FastAPI(
     version="0.4.0",
     lifespan=lambda _app: mcp.session_manager.run(),
 )
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
 app.mount("/mcp", mcp_http_app, name="mcp")
 
 
 @app.get("/")
 def index():
-    return FileResponse(Path("static/index.html"))
+    return FileResponse(
+        Path("static/index.html"),
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/api/health")
