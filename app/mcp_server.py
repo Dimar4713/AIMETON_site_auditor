@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from app.company_intelligence import run_company_intelligence
 from app.discovery import run_hunt
@@ -9,6 +10,24 @@ from app.llm import analyze_with_routerai
 from app.models import CompanyIntelligenceRequest, HuntRequest
 from app.scraper import fetch_site
 
+
+MCP_TRANSPORT_SECURITY = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=[
+        "auditor.aimeton.ru",
+        "auditor.aimeton.ru:443",
+        "git-hub-site-auditor.replit.app",
+        "git-hub-site-auditor.replit.app:443",
+        "localhost",
+        "localhost:8000",
+        "127.0.0.1",
+        "127.0.0.1:8000",
+    ],
+    allowed_origins=[
+        "https://auditor.aimeton.ru",
+        "https://git-hub-site-auditor.replit.app",
+    ],
+)
 
 mcp = FastMCP(
     "AIMETON Site Auditor",
@@ -20,6 +39,7 @@ mcp = FastMCP(
     stateless_http=True,
     json_response=True,
     streamable_http_path="/",
+    transport_security=MCP_TRANSPORT_SECURITY,
 )
 
 
