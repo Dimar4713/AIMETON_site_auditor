@@ -9,11 +9,21 @@ class AgentRecommendation(BaseModel):
     priority: Literal["Высокий", "Средний", "Низкий"] = "Средний"
 
 
+class EvidenceSource(BaseModel):
+    id: str = Field(description="Короткий идентификатор источника, например S1")
+    title: str
+    url: str
+    accessed_at: str = Field(description="Дата и время проверки в ISO 8601")
+    evidence_quote: str = Field(description="Короткая дословная цитата или описание наблюдаемого элемента")
+    source_type: Literal["official_page", "external_source", "visual_observation"] = "official_page"
+
+
 class EconomicSignal(BaseModel):
     signal: str
     evidence: str
     business_effect: str
     confidence: Literal["Высокая", "Средняя", "Низкая"] = "Средняя"
+    source_ids: list[str] = Field(default_factory=list, description="Ссылки на EvidenceSource.id")
 
 
 class CommercialOpportunity(BaseModel):
@@ -38,6 +48,7 @@ class SiteAnalysis(BaseModel):
     company_name: str
     business_summary: str
     evidence: list[str] = Field(default_factory=list)
+    sources: list[EvidenceSource] = Field(default_factory=list)
     economic_signals: list[EconomicSignal] = Field(default_factory=list)
     commercial_opportunity: CommercialOpportunity
     agents: list[AgentRecommendation] = Field(min_length=3, max_length=10)
