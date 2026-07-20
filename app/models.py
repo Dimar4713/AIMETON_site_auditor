@@ -15,7 +15,24 @@ class EvidenceSource(BaseModel):
     url: str
     accessed_at: str = Field(description="Дата и время проверки в ISO 8601")
     evidence_quote: str = Field(description="Короткая дословная цитата или описание наблюдаемого элемента")
-    source_type: Literal["official_page", "external_source", "visual_observation"] = "official_page"
+    source_type: Literal[
+        "official_page",
+        "registry",
+        "news",
+        "social",
+        "review",
+        "jobs",
+        "tender",
+        "patent",
+        "external_source",
+        "visual_observation",
+    ] = "external_source"
+    evidence_level: Literal[
+        "confirmed_fact",
+        "corroborated_signal",
+        "weak_signal",
+        "unverified_mention",
+    ] = "unverified_mention"
 
 
 class EconomicSignal(BaseModel):
@@ -57,8 +74,6 @@ class SiteAnalysis(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    # Raw string is normalized and security-validated by app.scraper.
-    # This intentionally accepts addresses copied with backslashes or without a scheme.
     url: str = Field(min_length=1, max_length=2048)
 
 
@@ -101,10 +116,22 @@ class HuntResult(BaseModel):
 
 
 class IntelligenceSource(BaseModel):
+    id: str
     title: str
     url: str
     snippet: str = ""
-    source_class: Literal["official", "news", "directory", "review", "jobs", "other"] = "other"
+    accessed_at: str
+    source_class: Literal[
+        "official",
+        "registry",
+        "news",
+        "social",
+        "review",
+        "jobs",
+        "tender",
+        "patent",
+        "other",
+    ] = "other"
     evidence_level: Literal["confirmed_fact", "corroborated_signal", "weak_signal", "unverified_mention"] = "unverified_mention"
 
 
@@ -112,7 +139,7 @@ class CompanyIntelligenceRequest(BaseModel):
     company_name: str = Field(min_length=2)
     url: HttpUrl | None = None
     region: str | None = None
-    max_sources: int = Field(default=20, ge=5, le=60)
+    max_sources: int = Field(default=30, ge=5, le=80)
 
 
 class CompanyIntelligenceResult(BaseModel):
