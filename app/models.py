@@ -46,7 +46,9 @@ class SiteAnalysis(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    url: HttpUrl
+    # Raw string is normalized and security-validated by app.scraper.
+    # This intentionally accepts addresses copied with backslashes or without a scheme.
+    url: str = Field(min_length=1, max_length=2048)
 
 
 class HuntRequest(BaseModel):
