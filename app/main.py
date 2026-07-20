@@ -31,7 +31,7 @@ from app.scraper import FetchError, fetch_site
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.6.0",
+    version="0.6.1",
     lifespan=lambda _app: mcp.session_manager.run(),
 )
 app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
@@ -54,8 +54,8 @@ def index():
 def health():
     return {
         "status": "ok",
-        "version": "0.6.0",
-        "analysis_mode": "km-business-machine-4x4",
+        "version": "0.6.1",
+        "analysis_mode": "ai-sales-with-canonical-km-company-profile",
         "osint": "contacts-finance-workforce-legal-ownership",
         "api": "/docs",
         "mcp": "/mcp",
@@ -79,7 +79,7 @@ def osint_tools():
 
 @app.post("/api/analyze")
 async def analyze(req: AnalyzeRequest):
-    """Reconstructs a source-traceable KM 4x4 business machine from the site and external OSINT."""
+    """Finds an AI sales opportunity and enriches it with a source-traceable company and canonical KM profile."""
     try:
         page = await fetch_site(str(req.url))
         return await run_enriched_site_analysis(page["final_url"], page["title"], page["text"])
