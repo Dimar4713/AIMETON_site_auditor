@@ -87,6 +87,34 @@ class HuntResult(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class IntelligenceSource(BaseModel):
+    title: str
+    url: str
+    snippet: str = ""
+    source_class: Literal["official", "news", "directory", "review", "jobs", "other"] = "other"
+    evidence_level: Literal["confirmed_fact", "corroborated_signal", "weak_signal", "unverified_mention"] = "unverified_mention"
+
+
+class CompanyIntelligenceRequest(BaseModel):
+    company_name: str = Field(min_length=2)
+    url: HttpUrl | None = None
+    region: str | None = None
+    max_sources: int = Field(default=20, ge=5, le=60)
+
+
+class CompanyIntelligenceResult(BaseModel):
+    company_name: str
+    region: str | None = None
+    official_url: str | None = None
+    site_analysis: SiteAnalysis | None = None
+    sources: list[IntelligenceSource] = Field(default_factory=list)
+    scent_summary: list[str] = Field(default_factory=list)
+    confidence_notes: list[str] = Field(default_factory=list)
+    commercial_score: int = Field(ge=0, le=100)
+    recommended_solution: str
+    status: Literal["complete", "partial"] = "partial"
+
+
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
