@@ -31,7 +31,7 @@ from app.scraper import FetchError, fetch_site
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.5.1",
+    version="0.6.0",
     lifespan=lambda _app: mcp.session_manager.run(),
 )
 app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
@@ -54,8 +54,9 @@ def index():
 def health():
     return {
         "status": "ok",
-        "version": "0.5.1",
-        "analysis_mode": "multi-source-osint-legal-ownership",
+        "version": "0.6.0",
+        "analysis_mode": "km-business-machine-4x4",
+        "osint": "contacts-finance-workforce-legal-ownership",
         "api": "/docs",
         "mcp": "/mcp",
     }
@@ -63,25 +64,22 @@ def health():
 
 @app.get("/api/hunter-handbook")
 def hunter_handbook():
-    """Иерархический справочник отраслей, бизнес-моделей и экономических возможностей."""
     return handbook()
 
 
 @app.get("/api/hunter-sources")
 def hunter_sources():
-    """Каталог источников обнаружения и подтверждения компаний."""
     return get_hunter_sources()
 
 
 @app.get("/api/osint-tools")
 def osint_tools():
-    """Каталог OSINT-инструментов и уровней достоверности."""
     return get_osint_tools()
 
 
 @app.post("/api/analyze")
 async def analyze(req: AnalyzeRequest):
-    """Исследует сайт, внешние источники, судебный фон, владение и возможные связи."""
+    """Reconstructs a source-traceable KM 4x4 business machine from the site and external OSINT."""
     try:
         page = await fetch_site(str(req.url))
         return await run_enriched_site_analysis(page["final_url"], page["title"], page["text"])
@@ -91,7 +89,6 @@ async def analyze(req: AnalyzeRequest):
 
 @app.post("/api/company-intelligence")
 async def company_intelligence(req: CompanyIntelligenceRequest):
-    """Расширенный OSINT-профиль компании с юридическим и корпоративным контуром."""
     try:
         return await run_company_intelligence(req)
     except (FetchError, httpx.HTTPError, ValueError) as exc:
@@ -100,7 +97,6 @@ async def company_intelligence(req: CompanyIntelligenceRequest):
 
 @app.post("/api/hunt")
 async def hunt(req: HuntRequest):
-    """Автономная экономическая разведка по территории и параметрам охоты."""
     return await run_hunt(req)
 
 
