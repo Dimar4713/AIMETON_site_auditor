@@ -31,7 +31,7 @@ from app.scraper import FetchError, fetch_site
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.5.0",
+    version="0.5.1",
     lifespan=lambda _app: mcp.session_manager.run(),
 )
 app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
@@ -54,8 +54,8 @@ def index():
 def health():
     return {
         "status": "ok",
-        "version": "0.5.0",
-        "analysis_mode": "multi-source-osint",
+        "version": "0.5.1",
+        "analysis_mode": "multi-source-osint-legal-ownership",
         "api": "/docs",
         "mcp": "/mcp",
     }
@@ -81,7 +81,7 @@ def osint_tools():
 
 @app.post("/api/analyze")
 async def analyze(req: AnalyzeRequest):
-    """Исследует официальный сайт и автоматически выполняет внешний OSINT-поиск."""
+    """Исследует сайт, внешние источники, судебный фон, владение и возможные связи."""
     try:
         page = await fetch_site(str(req.url))
         return await run_enriched_site_analysis(page["final_url"], page["title"], page["text"])
@@ -91,7 +91,7 @@ async def analyze(req: AnalyzeRequest):
 
 @app.post("/api/company-intelligence")
 async def company_intelligence(req: CompanyIntelligenceRequest):
-    """Рабочий OSINT-профиль компании с информационным запахом и коммерческой квалификацией."""
+    """Расширенный OSINT-профиль компании с юридическим и корпоративным контуром."""
     try:
         return await run_company_intelligence(req)
     except (FetchError, httpx.HTTPError, ValueError) as exc:
