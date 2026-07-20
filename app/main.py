@@ -8,8 +8,7 @@ from starlette.responses import Response
 
 
 class NoCacheStaticFiles(StaticFiles):
-    """Serve static assets with cache disabled so browsers always fetch the
-    latest JS/CSS (avoids stale app.js causing old export bugs to persist)."""
+    """Serve static assets with cache disabled so browsers always fetch the latest JS/CSS."""
 
     def file_response(self, *args, **kwargs) -> Response:
         resp = super().file_response(*args, **kwargs)
@@ -18,12 +17,12 @@ class NoCacheStaticFiles(StaticFiles):
         resp.headers["Expires"] = "0"
         return resp
 
-from app.company_intelligence import run_company_intelligence
+
+from app.company_intelligence import run_company_intelligence, run_enriched_site_analysis
 from app.discovery import run_hunt
-from app.heuristics import heuristic_analysis
 from app.hunter_handbook import handbook
 from app.hunter_sources import get_hunter_sources
-from app.llm import analyze_with_routerai, chat_with_routerai
+from app.llm import chat_with_routerai
 from app.mcp_server import mcp, mcp_http_app
 from app.models import AnalyzeRequest, ChatRequest, CompanyIntelligenceRequest, HuntRequest
 from app.osint_tools import get_osint_tools
@@ -32,7 +31,7 @@ from app.scraper import FetchError, fetch_site
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lambda _app: mcp.session_manager.run(),
 )
 app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
@@ -55,7 +54,8 @@ def index():
 def health():
     return {
         "status": "ok",
-        "version": "0.4.0",
+        "version": "0.5.0",
+        "analysis_mode": "multi-source-osint",
         "api": "/docs",
         "mcp": "/mcp",
     }
@@ -81,17 +81,11 @@ def osint_tools():
 
 @app.post("/api/analyze")
 async def analyze(req: AnalyzeRequest):
+    """Исследует официальный сайт и автоматически выполняет внешний OSINT-поиск."""
     try:
         page = await fetch_site(str(req.url))
-        try:
-            result = await analyze_with_routerai(page["final_url"], page["title"], page["text"])
-        except Exception:
-            result = heuristic_analysis(page["final_url"], page["title"], page["text"])
-            result.risks_and_assumptions.append(
-                "Использован резервный локальный анализ; LLM была недоступна или вернула невалидный ответ."
-            )
-        return result
-    except (FetchError, httpx.HTTPError) as exc:
+        return await run_enriched_site_analysis(page["final_url"], page["title"], page["text"])
+    except (FetchError, httpx.HTTPError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
