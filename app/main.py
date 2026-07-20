@@ -5,17 +5,25 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.company_intelligence import run_company_intelligence
 from app.discovery import run_hunt
 from app.heuristics import heuristic_analysis
 from app.hunter_handbook import handbook
 from app.hunter_sources import get_hunter_sources
 from app.llm import analyze_with_routerai, chat_with_routerai
-from app.models import AnalyzeRequest, ChatRequest, HuntRequest
+from app.mcp_server import mcp_http_app
+from app.models import AnalyzeRequest, ChatRequest, CompanyIntelligenceRequest, HuntRequest
 from app.osint_tools import get_osint_tools
 from app.scraper import FetchError, fetch_site
 
-app = FastAPI(title="AIMETON Site Auditor", version="0.3.2")
+
+app = FastAPI(
+    title="AIMETON Site Auditor",
+    version="0.4.0",
+    lifespan=mcp_http_app.lifespan,
+)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/mcp", mcp_http_app, name="mcp")
 
 
 @app.get("/")
@@ -25,7 +33,12 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.3.2"}
+    return {
+        "status": "ok",
+        "version": "0.4.0",
+        "api": "/docs",
+        "mcp": "/mcp",
+    }
 
 
 @app.get("/api/hunter-handbook")
@@ -42,7 +55,7 @@ def hunter_sources():
 
 @app.get("/api/osint-tools")
 def osint_tools():
-    """Каталог OSINT-инструментов и уровней достоверности информационного запаха."""
+    """Каталог OSINT-инструментов и уровней достоверности."""
     return get_osint_tools()
 
 
@@ -59,6 +72,15 @@ async def analyze(req: AnalyzeRequest):
             )
         return result
     except (FetchError, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/company-intelligence")
+async def company_intelligence(req: CompanyIntelligenceRequest):
+    """Рабочий OSINT-профиль компании с информационным запахом и коммерческой квалификацией."""
+    try:
+        return await run_company_intelligence(req)
+    except (FetchError, httpx.HTTPError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
