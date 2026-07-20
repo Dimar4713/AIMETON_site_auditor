@@ -50,21 +50,29 @@ class CompanyFact(BaseModel):
 
 
 class BusinessMachineCell(BaseModel):
-    code: str = Field(description="Код ячейки, например I-EXT")
-    engine: Literal[
+    code: Literal[
+        "I-I", "I-II", "I-III", "I-IV",
+        "II-I", "II-II", "II-III", "II-IV",
+        "III-I", "III-II", "III-III", "III-IV",
+        "IV-I", "IV-II", "IV-III", "IV-IV",
+    ]
+    detail_operator: Literal[
         "I — Коммуникационные системы",
         "II — Люди",
         "III — Технологии",
         "IV — Менеджмент",
     ]
-    dimension: Literal[
-        "Внешний контур", "Внутренний контур", "Ресурсы и масштаб", "Результат и риски"
+    vertex: Literal[
+        "Взаимодействие", "Влияние", "Зависимость", "Противодействие",
+        "Учредители и собственники", "Ось люди-управленцы", "Обслуживающий персонал и роботы", "Виртуозы и специалисты",
+        "Знания и наука", "Стандартная процедура", "Рабочая процедура", "Продукты, товар и услуга",
+        "Управление коммуникационными системами", "Управление людьми", "Управление технологиями", "Самоуправление",
     ]
     finding: str
     status: Literal["Подтверждено", "Частично", "Гипотеза", "Нет данных"] = "Нет данных"
     confidence: Literal["Высокая", "Средняя", "Низкая"] = "Низкая"
     source_ids: list[str] = Field(default_factory=list)
-    gap_or_opportunity: str = ""
+    sales_relevance: str = Field(default="", description="Как узел влияет на AI-продажу, пилот или ценностное предложение")
 
 
 class CommercialOpportunity(BaseModel):
