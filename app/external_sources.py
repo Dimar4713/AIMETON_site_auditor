@@ -9,7 +9,7 @@ import httpx
 
 from app.heuristics import heuristic_analysis
 from app.llm import analyze_with_routerai
-from app.models import EvidenceSource, IntelligenceSource, SiteAnalysis, SourceKind
+from app.models import IntelligenceSource, SiteAnalysis, SourceKind
 
 
 HOST_CLASSES: dict[str, set[str]] = {
@@ -76,7 +76,7 @@ def classification_state(source_class: SourceKind, result_kind: SourceKind) -> s
     return "classified"
 
 
-def evidence_level(source_class: SourceKind) -> str:
+def verified_evidence_level(source_class: SourceKind) -> str:
     if source_class == "official":
         return "confirmed_fact"
     if source_class in {"registry", "finance", "court", "arbitration", "enforcement", "news", "tender", "patent"}:
@@ -172,11 +172,13 @@ async def collect_external_sources(company_name: str, official_url: str | None, 
         source_class = classify_source_domain(url, official_host)
         result_kind = classify_result(title, snippet)
         sources.append(IntelligenceSource(
-            id=f"E{len(sources) + 1}", title=title, url=url, snippet=snippet,
+            id=f"H{len(sources) + 1}", title=title, url=url, snippet=snippet,
             accessed_at=accessed_at, query_kind=query_kind, result_kind=result_kind,
             source_class=source_class,
             classification_state=classification_state(source_class, result_kind),
-            evidence_level=evidence_level(source_class),
+            lifecycle_state="discovery_hint",
+            evidence_level="unverified_mention",
+            verification_note="Поисковый сниппет; первичный документ не загружен и не проверен.",
         ))
         if len(sources) >= max_sources:
             break
@@ -189,6 +191,8 @@ def to_llm_sources(sources: list[IntelligenceSource]) -> list[dict]:
         "accessed_at": source.accessed_at, "query_kind": source.query_kind,
         "result_kind": source.result_kind, "source_class": source.source_class,
         "classification_state": source.classification_state,
+        "lifecycle_state": source.lifecycle_state,
+        "verification_note": source.verification_note,
         "source_type": source_type(source.source_class), "evidence_level": source.evidence_level,
     } for source in sources]
 
@@ -201,16 +205,8 @@ async def run_enriched_site_analysis(url: str, title: str, text: str) -> SiteAna
     except Exception as exc:
         analysis = heuristic_analysis(url, title, text)
         analysis.risks_and_assumptions.append(f"Использован резервный локальный анализ: {type(exc).__name__}.")
-
-    known = {source.id for source in analysis.sources}
-    for item in external_sources:
-        if item.id in known:
-            continue
-        analysis.sources.append(EvidenceSource(
-            id=item.id, title=item.title, url=item.url, accessed_at=item.accessed_at,
-            evidence_quote=item.snippet or "Поисковый результат без сниппета; требуется ручная проверка.",
-            source_type=source_type(item.source_class), evidence_level=item.evidence_level,
-        ))
-        known.add(item.id)
+    analysis.risks_and_assumptions.append(
+        f"Внешний поиск дал discovery_hint={len(external_sources)}; поисковые сниппеты не включены в evidence до проверки первичных документов."
+    )
     analysis.risks_and_assumptions.extend(notes)
     return analysis
