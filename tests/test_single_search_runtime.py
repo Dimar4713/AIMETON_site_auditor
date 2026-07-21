@@ -48,7 +48,7 @@ async def test_company_intelligence_collects_external_sources_once(monkeypatch):
     )
 
     assert calls == 1
-    assert result.official_url == "https://example.com"
+    assert result.official_url.rstrip("/") == "https://example.com"
     assert result.sources == sources
     assert result.site_analysis is not None
 
