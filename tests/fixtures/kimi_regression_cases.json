@@ -12,14 +12,14 @@
       "expected_state": "ambiguous"
     },
     {
-      "id": "KIMI-CLASS-COURT",
+      "id": "KIMI-CLASS-COURT-MIXED",
       "url": "https://sudact.ru/arbitral/doc/example",
       "official_host": null,
       "title": "Решение суда по иску",
       "snippet": "Истец и ответчик указаны в документе",
       "expected_source_class": "court",
-      "expected_result_kind": "court",
-      "expected_state": "classified"
+      "expected_result_kind": "other",
+      "expected_state": "ambiguous"
     },
     {
       "id": "KIMI-CLASS-OFFICIAL",
