@@ -26,7 +26,7 @@
       "url": "https://example-company.ru/about",
       "official_host": "example-company.ru",
       "title": "О компании",
-      "snippet": "Официальная информация",
+      "snippet": "Официальный сайт компании",
       "expected_source_class": "official",
       "expected_result_kind": "official",
       "expected_state": "classified"
