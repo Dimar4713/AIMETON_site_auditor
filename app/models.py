@@ -14,7 +14,7 @@ class EvidenceSource(BaseModel):
     title: str
     url: str
     accessed_at: str = Field(description="Дата и время проверки в ISO 8601")
-    evidence_quote: str = Field(description="Короткая дословная цитата или описание наблюдаемого элемента")
+    evidence_quote: str = Field(description="Короткая дословная цитата из загруженного первичного документа")
     source_type: Literal[
         "official_page", "registry", "court", "arbitration", "enforcement",
         "ownership", "affiliation", "finance", "workforce", "contact",
@@ -24,6 +24,9 @@ class EvidenceSource(BaseModel):
     evidence_level: Literal[
         "confirmed_fact", "corroborated_signal", "weak_signal", "unverified_mention"
     ] = "unverified_mention"
+    document_url: str | None = None
+    document_title: str | None = None
+    document_accessed_at: str | None = None
 
 
 class EconomicSignal(BaseModel):
@@ -167,7 +170,13 @@ class IntelligenceSource(BaseModel):
     query_kind: SourceKind = "unknown"
     result_kind: SourceKind = "unknown"
     classification_state: Literal["classified", "ambiguous", "unknown"] = "unknown"
+    lifecycle_state: Literal["discovery_hint", "source_candidate", "evidence"] = "discovery_hint"
     evidence_level: Literal["confirmed_fact", "corroborated_signal", "weak_signal", "unverified_mention"] = "unverified_mention"
+    document_url: str | None = None
+    document_title: str | None = None
+    document_accessed_at: str | None = None
+    evidence_quote: str | None = None
+    verification_note: str = "Поисковый сниппет; первичный документ не проверен."
 
 
 class CompanyIntelligenceRequest(BaseModel):
