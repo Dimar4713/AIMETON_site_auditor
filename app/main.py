@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
@@ -34,6 +34,16 @@ app = FastAPI(
     version="0.6.1",
     lifespan=lambda _app: mcp.session_manager.run(),
 )
+
+
+@app.middleware("http")
+async def canonical_mcp_path(request: Request, call_next):
+    """Use a relative redirect so an HTTPS reverse proxy cannot produce an HTTP loop."""
+    if request.url.path == "/mcp":
+        return RedirectResponse(url="/mcp/", status_code=307)
+    return await call_next(request)
+
+
 app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
 app.mount("/mcp", mcp_http_app, name="mcp")
 
