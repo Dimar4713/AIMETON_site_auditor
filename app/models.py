@@ -149,17 +149,24 @@ class HuntResult(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+SourceKind = Literal[
+    "official", "registry", "court", "arbitration", "enforcement",
+    "ownership", "affiliation", "finance", "workforce", "contact",
+    "news", "social", "review", "jobs", "tender", "patent",
+    "aggregator", "other", "unknown",
+]
+
+
 class IntelligenceSource(BaseModel):
     id: str
     title: str
     url: str
     snippet: str = ""
     accessed_at: str
-    source_class: Literal[
-        "official", "registry", "court", "arbitration", "enforcement",
-        "ownership", "affiliation", "finance", "workforce", "contact",
-        "news", "social", "review", "jobs", "tender", "patent", "other",
-    ] = "other"
+    source_class: SourceKind = "unknown"
+    query_kind: SourceKind = "unknown"
+    result_kind: SourceKind = "unknown"
+    classification_state: Literal["classified", "ambiguous", "unknown"] = "unknown"
     evidence_level: Literal["confirmed_fact", "corroborated_signal", "weak_signal", "unverified_mention"] = "unverified_mention"
 
 
