@@ -1,0 +1,71 @@
+name: Baseline CI
+
+on:
+  push:
+    branches:
+      - main
+      - "agent/**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Record environment
+        run: |
+          python --version
+          pip freeze | sort | tee baseline-dependencies.txt
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Verify application import
+        run: python -c "from app.main import app; assert app.title == 'AIMETON Site Auditor'; print(app.version)"
+
+      - name: Local API and MCP route smoke
+        run: |
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from app.main import app
+
+          paths = {route.path for route in app.routes}
+          assert "/api/health" in paths
+          assert any(path == "/mcp" or path.startswith("/mcp") for path in paths)
+
+          with TestClient(app) as client:
+              response = client.get("/api/health")
+              assert response.status_code == 200, response.text
+              payload = response.json()
+              assert payload["status"] == "ok"
+              assert payload["version"] == app.version
+              print(payload)
+          PY
+
+      - name: Upload baseline environment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-environment-${{ github.sha }}
+          path: baseline-dependencies.txt
+          if-no-files-found: error
