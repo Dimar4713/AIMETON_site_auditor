@@ -24,7 +24,6 @@ BASE_HEADERS = {
 
 
 async def _post_initialize(headers: dict[str, str]):
-    # Свежий session manager на каждый тест: .run() допускается один раз на инстанс.
     mcp._session_manager = None
     app = mcp.streamable_http_app()
     async with app.router.lifespan_context(app):
@@ -39,6 +38,8 @@ async def _post_initialize(headers: dict[str, str]):
     [
         "auditor.aimeton.ru",
         "auditor.aimeton.ru:443",
+        "stage-auditor.aimeton.ru",
+        "stage-auditor.aimeton.ru:443",
         "git-hub-site-auditor.replit.app",
         "git-hub-site-auditor.replit.app:443",
     ],
@@ -60,6 +61,7 @@ async def test_evil_host_rejected():
     ("host", "origin"),
     [
         ("auditor.aimeton.ru", "https://auditor.aimeton.ru"),
+        ("stage-auditor.aimeton.ru", "https://stage-auditor.aimeton.ru"),
         ("git-hub-site-auditor.replit.app", "https://git-hub-site-auditor.replit.app"),
     ],
 )
@@ -103,7 +105,7 @@ async def test_mcp_redirect_is_relative_and_proxy_safe():
         response = await client.get(
             "/mcp",
             headers={
-                "Host": "auditor.aimeton.ru",
+                "Host": "stage-auditor.aimeton.ru",
                 "X-Forwarded-Proto": "https",
             },
         )
