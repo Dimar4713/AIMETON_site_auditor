@@ -18,9 +18,9 @@ class NoCacheStaticFiles(StaticFiles):
         return resp
 
 
-from app.company_intelligence import run_enriched_site_analysis
 from app.company_intelligence_runtime import run_company_intelligence
 from app.discovery import run_hunt
+from app.external_sources import run_enriched_site_analysis
 from app.hunter_handbook import handbook
 from app.hunter_sources import get_hunter_sources
 from app.llm import chat_with_routerai
