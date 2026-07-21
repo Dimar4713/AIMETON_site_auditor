@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import httpx
 
-from app.external_sources import collect_external_sources, source_type, to_llm_sources
+from app.external_sources import (
+    collect_external_sources,
+    source_type,
+    to_llm_sources,
+    verified_evidence_level,
+)
 from app.heuristics import heuristic_analysis
 from app.llm import analyze_with_routerai
 from app.models import (
@@ -15,13 +22,40 @@ from app.models import (
 from app.scraper import FetchError, fetch_site
 
 
+def _quote_from_document(text: str, limit: int = 500) -> str:
+    normalized = " ".join(text.split())
+    return normalized[:limit]
+
+
 async def _analyze_site_with_sources(
     url: str,
     external_sources: list[IntelligenceSource],
     search_notes: list[str],
 ) -> SiteAnalysis:
-    """Deep-analyze the official site without launching the external search a second time."""
+    """Fetch the official document once and promote only that fetched document to evidence."""
     page = await fetch_site(url)
+    document_accessed_at = datetime.now(timezone.utc).isoformat()
+    quote = _quote_from_document(page["text"])
+
+    official_candidate = next(
+        (
+            source
+            for source in external_sources
+            if source.url == url
+            or source.url.rstrip("/") == page["final_url"].rstrip("/")
+            or source.source_class == "official"
+        ),
+        None,
+    )
+    if official_candidate is not None:
+        official_candidate.lifecycle_state = "evidence"
+        official_candidate.document_url = page["final_url"]
+        official_candidate.document_title = page["title"]
+        official_candidate.document_accessed_at = document_accessed_at
+        official_candidate.evidence_quote = quote
+        official_candidate.evidence_level = verified_evidence_level("official")
+        official_candidate.verification_note = "Первичный документ загружен и проверен."
+
     try:
         analysis = await analyze_with_routerai(
             page["final_url"],
@@ -35,33 +69,34 @@ async def _analyze_site_with_sources(
             f"Использован резервный локальный анализ: {type(exc).__name__}."
         )
 
-    known = {source.id for source in analysis.sources}
-    for item in external_sources:
-        if item.id in known:
-            continue
-        analysis.sources.append(
-            EvidenceSource(
-                id=item.id,
-                title=item.title,
-                url=item.url,
-                accessed_at=item.accessed_at,
-                evidence_quote=item.snippet
-                or "Поисковый результат без сниппета; требуется ручная проверка.",
-                source_type=source_type(item.source_class),
-                evidence_level=item.evidence_level,
+    if quote:
+        evidence_id = official_candidate.id if official_candidate else "DOC1"
+        known = {source.id for source in analysis.sources}
+        if evidence_id not in known:
+            analysis.sources.append(
+                EvidenceSource(
+                    id=evidence_id,
+                    title=page["title"],
+                    url=page["final_url"],
+                    accessed_at=document_accessed_at,
+                    evidence_quote=quote,
+                    source_type="official_page",
+                    evidence_level="confirmed_fact",
+                    document_url=page["final_url"],
+                    document_title=page["title"],
+                    document_accessed_at=document_accessed_at,
+                )
             )
-        )
-        known.add(item.id)
 
-    counts: dict[str, int] = {}
-    for source in external_sources:
-        counts[source.source_class] = counts.get(source.source_class, 0) + 1
-    if counts:
-        analysis.risks_and_assumptions.append(
-            "Внешний OSINT-контур: "
-            + ", ".join(f"{kind}={count}" for kind, count in sorted(counts.items()))
-            + ". Сниппеты требуют перехода к первоисточнику."
-        )
+    hint_count = sum(1 for source in external_sources if source.lifecycle_state == "discovery_hint")
+    candidate_count = sum(1 for source in external_sources if source.lifecycle_state == "source_candidate")
+    evidence_count = sum(1 for source in external_sources if source.lifecycle_state == "evidence")
+    analysis.risks_and_assumptions.append(
+        f"Контур источников: discovery_hint={hint_count}, source_candidate={candidate_count}, evidence={evidence_count}."
+    )
+    analysis.risks_and_assumptions.append(
+        "Поисковые сниппеты не являются доказательствами; evidence создаётся только после загрузки документа с URL, датой и цитатой."
+    )
     ambiguous = sum(1 for source in external_sources if source.classification_state == "ambiguous")
     unknown = sum(1 for source in external_sources if source.classification_state == "unknown")
     if ambiguous or unknown:
@@ -76,7 +111,6 @@ async def _analyze_site_with_sources(
 
 
 async def run_company_intelligence(req: CompanyIntelligenceRequest) -> CompanyIntelligenceResult:
-    """Collect external sources once and reuse them for the official-site deep analysis."""
     notes: list[str] = []
     official_url = str(req.url) if req.url else None
     sources, search_notes = await collect_external_sources(
@@ -100,7 +134,10 @@ async def run_company_intelligence(req: CompanyIntelligenceRequest) -> CompanyIn
             ),
             None,
         )
-        official_url = official.url if official else None
+        if official:
+            official.lifecycle_state = "source_candidate"
+            official.verification_note = "Кандидат на официальный источник; ожидает загрузки документа."
+            official_url = official.url
 
     site_analysis = None
     if official_url:
@@ -115,22 +152,23 @@ async def run_company_intelligence(req: CompanyIntelligenceRequest) -> CompanyIn
             notes.append(f"Официальный сайт не удалось глубоко проанализировать: {exc}")
 
     counts = {
-        kind: sum(1 for source in sources if source.source_class == kind)
-        for kind in {source.source_class for source in sources}
+        state: sum(1 for source in sources if source.lifecycle_state == state)
+        for state in ("discovery_hint", "source_candidate", "evidence")
     }
-    scent_summary = [f"{kind}: {count}" for kind, count in sorted(counts.items())]
+    scent_summary = [f"{state}: {count}" for state, count in counts.items()]
     if site_analysis:
         scent_summary.extend(signal.signal for signal in site_analysis.economic_signals[:5])
 
+    verified_count = counts["evidence"]
     score = (
         site_analysis.commercial_opportunity.score
         if site_analysis
-        else min(60, 20 + len(sources) * 2)
+        else min(45, 15 + verified_count * 10)
     )
     solution = (
         site_analysis.commercial_opportunity.recommended_solution
         if site_analysis
-        else "Требуется глубокий анализ официального сайта и перекрестная проверка источников."
+        else "Требуется загрузка и проверка первичных документов; поисковые сниппеты являются только discovery hints."
     )
     return CompanyIntelligenceResult(
         company_name=site_analysis.company_name if site_analysis else req.company_name,
@@ -142,5 +180,5 @@ async def run_company_intelligence(req: CompanyIntelligenceRequest) -> CompanyIn
         confidence_notes=notes,
         commercial_score=score,
         recommended_solution=solution,
-        status="complete" if site_analysis and sources else "partial",
+        status="complete" if site_analysis and verified_count > 0 else "partial",
     )
