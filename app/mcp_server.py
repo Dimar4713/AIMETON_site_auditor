@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -11,21 +13,41 @@ from app.models import CompanyIntelligenceRequest, HuntRequest
 from app.scraper import fetch_site
 
 
+def _additional_allowlist_values(variable_name: str) -> list[str]:
+    """Read a comma-separated operator allowlist without accepting wildcards."""
+    values: list[str] = []
+    for raw_value in os.getenv(variable_name, "").split(","):
+        value = raw_value.strip()
+        if value and "*" not in value:
+            values.append(value)
+    return values
+
+
+_DEFAULT_ALLOWED_HOSTS = [
+    "auditor.aimeton.ru",
+    "auditor.aimeton.ru:443",
+    "git-hub-site-auditor.replit.app",
+    "git-hub-site-auditor.replit.app:443",
+    "localhost",
+    "localhost:8000",
+    "127.0.0.1",
+    "127.0.0.1:8000",
+]
+
+_DEFAULT_ALLOWED_ORIGINS = [
+    "https://auditor.aimeton.ru",
+    "https://git-hub-site-auditor.replit.app",
+]
+
 MCP_TRANSPORT_SECURITY = TransportSecuritySettings(
     enable_dns_rebinding_protection=True,
     allowed_hosts=[
-        "auditor.aimeton.ru",
-        "auditor.aimeton.ru:443",
-        "git-hub-site-auditor.replit.app",
-        "git-hub-site-auditor.replit.app:443",
-        "localhost",
-        "localhost:8000",
-        "127.0.0.1",
-        "127.0.0.1:8000",
+        *_DEFAULT_ALLOWED_HOSTS,
+        *_additional_allowlist_values("AIMETON_MCP_ALLOWED_HOSTS"),
     ],
     allowed_origins=[
-        "https://auditor.aimeton.ru",
-        "https://git-hub-site-auditor.replit.app",
+        *_DEFAULT_ALLOWED_ORIGINS,
+        *_additional_allowlist_values("AIMETON_MCP_ALLOWED_ORIGINS"),
     ],
 )
 
