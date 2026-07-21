@@ -185,13 +185,14 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
 
     async def inspect(item: dict) -> HuntCandidate | None:
         url = str(item.get("url") or "")
-        title = str(item.get("title") or _domain(url))
+        raw_title = str(item.get("title") or "")
+        display_title = raw_title or _domain(url)
         snippet = str(item.get("content") or item.get("snippet") or "")
-        result = _pre_score(req, title, snippet, url)
+        result = _pre_score(req, raw_title, snippet, url)
 
         if result.status == "insufficient_data":
             return _shallow_candidate(
-                title,
+                display_title,
                 snippet,
                 url,
                 result,
@@ -206,7 +207,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
 
         if result.score < req.deep_audit_score:
             return _shallow_candidate(
-                title,
+                display_title,
                 snippet,
                 url,
                 result,
@@ -229,7 +230,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             return HuntCandidate(
                 company_name=analysis.company_name,
                 url=analysis.url,
-                source_title=title,
+                source_title=display_title,
                 source_snippet=snippet[:500],
                 region_confirmed=region_confirmed,
                 preliminary_score=result.score,
@@ -245,7 +246,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             )
         except (FetchError, httpx.HTTPError, ValueError) as exc:
             fallback = _shallow_candidate(
-                title,
+                display_title,
                 snippet,
                 url,
                 result,
