@@ -133,9 +133,12 @@ class HuntCandidate(BaseModel):
     url: str
     source_title: str
     source_snippet: str = ""
-    region_confirmed: bool
-    preliminary_score: int = Field(ge=0, le=100)
-    final_score: int = Field(ge=0, le=100)
+    region_confirmed: bool | None = None
+    preliminary_score: int | None = Field(default=None, ge=0, le=100)
+    pre_score_status: Literal["calculated", "insufficient_data"] = "calculated"
+    pre_score_factors: dict[str, int | None] = Field(default_factory=dict)
+    deep_analysis_performed: bool = False
+    final_score: int | None = Field(default=None, ge=0, le=100)
     qualification: str
     business_summary: str
     recommended_solution: str
