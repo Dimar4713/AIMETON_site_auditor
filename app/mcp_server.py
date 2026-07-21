@@ -26,6 +26,8 @@ def _additional_allowlist_values(variable_name: str) -> list[str]:
 _DEFAULT_ALLOWED_HOSTS = [
     "auditor.aimeton.ru",
     "auditor.aimeton.ru:443",
+    "stage-auditor.aimeton.ru",
+    "stage-auditor.aimeton.ru:443",
     "git-hub-site-auditor.replit.app",
     "git-hub-site-auditor.replit.app:443",
     "localhost",
@@ -36,6 +38,7 @@ _DEFAULT_ALLOWED_HOSTS = [
 
 _DEFAULT_ALLOWED_ORIGINS = [
     "https://auditor.aimeton.ru",
+    "https://stage-auditor.aimeton.ru",
     "https://git-hub-site-auditor.replit.app",
 ]
 
