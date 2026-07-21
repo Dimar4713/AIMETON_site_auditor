@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "classification_cases": [
+    {
+      "id": "KIMI-CLASS-NEWS-JOBS",
+      "url": "https://www.vedomosti.ru/business/articles/2026/01/01/company-jobs",
+      "official_host": null,
+      "title": "Компания открыла новые вакансии",
+      "snippet": "Работодатель расширяет команду",
+      "expected_source_class": "news",
+      "expected_result_kind": "jobs",
+      "expected_state": "ambiguous"
+    },
+    {
+      "id": "KIMI-CLASS-COURT",
+      "url": "https://sudact.ru/arbitral/doc/example",
+      "official_host": null,
+      "title": "Решение суда по иску",
+      "snippet": "Истец и ответчик указаны в документе",
+      "expected_source_class": "court",
+      "expected_result_kind": "court",
+      "expected_state": "classified"
+    },
+    {
+      "id": "KIMI-CLASS-OFFICIAL",
+      "url": "https://example-company.ru/about",
+      "official_host": "example-company.ru",
+      "title": "О компании",
+      "snippet": "Официальная информация",
+      "expected_source_class": "official",
+      "expected_result_kind": "official",
+      "expected_state": "classified"
+    },
+    {
+      "id": "KIMI-CLASS-UNKNOWN",
+      "url": "https://unknown-example.net/page",
+      "official_host": null,
+      "title": "Страница компании",
+      "snippet": "Общее описание",
+      "expected_source_class": "unknown",
+      "expected_result_kind": "unknown",
+      "expected_state": "unknown"
+    }
+  ],
+  "pre_score_cases": [
+    {
+      "id": "KIMI-PRESCORE-HIGH",
+      "region": "Красноярск",
+      "focus": ["автоматизация"],
+      "title": "Производственная компания Красноярск — каталог оборудования",
+      "snippet": "Проектирование, подбор, монтаж и автоматизация",
+      "url": "https://factory.ru/catalog",
+      "expected_status": "calculated",
+      "expected_score": 95
+    },
+    {
+      "id": "KIMI-PRESCORE-UNKNOWN",
+      "region": "Красноярск",
+      "focus": [],
+      "title": "",
+      "snippet": "",
+      "url": "https://example.ru",
+      "expected_status": "insufficient_data",
+      "expected_score": null
+    }
+  ]
+}
