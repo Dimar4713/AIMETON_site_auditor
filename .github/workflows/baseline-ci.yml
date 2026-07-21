@@ -38,7 +38,9 @@ jobs:
           pip freeze | sort | tee baseline-dependencies.txt
 
       - name: Run tests
-        run: pytest -q
+        run: |
+          set -o pipefail
+          pytest -q --tb=short 2>&1 | tee pytest-output.txt
 
       - name: Verify application import
         run: python -c "from app.main import app; assert app.title == 'AIMETON Site Auditor'; print(app.version)"
@@ -62,10 +64,12 @@ jobs:
               print(payload)
           PY
 
-      - name: Upload baseline environment
+      - name: Upload baseline diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: baseline-environment-${{ github.sha }}
-          path: baseline-dependencies.txt
+          name: baseline-diagnostics-${{ github.sha }}
+          path: |
+            baseline-dependencies.txt
+            pytest-output.txt
           if-no-files-found: error
