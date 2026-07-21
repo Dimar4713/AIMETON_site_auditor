@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from app.company_intelligence import (
-    _source_type,
-    _to_llm_sources,
-    collect_external_sources,
-)
+from app.external_sources import collect_external_sources, source_type, to_llm_sources
 from app.heuristics import heuristic_analysis
 from app.llm import analyze_with_routerai
 from app.models import (
@@ -31,7 +27,7 @@ async def _analyze_site_with_sources(
             page["final_url"],
             page["title"],
             page["text"],
-            _to_llm_sources(external_sources),
+            to_llm_sources(external_sources),
         )
     except Exception as exc:
         analysis = heuristic_analysis(page["final_url"], page["title"], page["text"])
@@ -51,7 +47,7 @@ async def _analyze_site_with_sources(
                 accessed_at=item.accessed_at,
                 evidence_quote=item.snippet
                 or "Поисковый результат без сниппета; требуется ручная проверка.",
-                source_type=_source_type(item.source_class),
+                source_type=source_type(item.source_class),
                 evidence_level=item.evidence_level,
             )
         )
@@ -65,6 +61,12 @@ async def _analyze_site_with_sources(
             "Внешний OSINT-контур: "
             + ", ".join(f"{kind}={count}" for kind, count in sorted(counts.items()))
             + ". Сниппеты требуют перехода к первоисточнику."
+        )
+    ambiguous = sum(1 for source in external_sources if source.classification_state == "ambiguous")
+    unknown = sum(1 for source in external_sources if source.classification_state == "unknown")
+    if ambiguous or unknown:
+        analysis.risks_and_assumptions.append(
+            f"Классификация источников требует проверки: ambiguous={ambiguous}, unknown={unknown}."
         )
     analysis.risks_and_assumptions.extend(search_notes)
     analysis.risks_and_assumptions.append(
@@ -86,7 +88,18 @@ async def run_company_intelligence(req: CompanyIntelligenceRequest) -> CompanyIn
     notes.extend(search_notes)
 
     if not official_url:
-        official = next((source for source in sources if source.source_class == "official"), None)
+        official = next(
+            (
+                source
+                for source in sources
+                if source.source_class == "official"
+                or (
+                    source.result_kind == "official"
+                    and source.classification_state != "ambiguous"
+                )
+            ),
+            None,
+        )
         official_url = official.url if official else None
 
     site_analysis = None
