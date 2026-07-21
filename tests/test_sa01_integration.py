@@ -7,9 +7,9 @@ from app.models import IntelligenceSource
 
 
 def test_sa01_health_and_mcp_contracts_work_together():
-    with TestClient(app) as client:
-        health = client.get('/api/health')
-        redirect = client.get('/mcp', follow_redirects=False)
+    client = TestClient(app)
+    health = client.get('/api/health')
+    redirect = client.get('/mcp', follow_redirects=False)
 
     assert health.status_code == 200
     assert health.json()['status'] == 'ok'
