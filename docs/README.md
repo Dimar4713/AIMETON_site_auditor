@@ -9,17 +9,22 @@
 
 - [Полный план развития системы поиска, анализа и действий](roadmap/AIMETON_Site_Auditor_full_system_development_plan.md) — целевая архитектура Site Auditor как прикладного Runtime AIMETON: 12 РПТК, федеративный поиск, многоплоскостность, фрактальные ветви, усушение поиска, свойства мишеней, сценарии, Evidence/Entity Graph, Hunter, отчётность, Capability Management и очередность реализации.
 
+## Политики управления
+
+- [Политика и правила управления проектом](governance/AIMETON_Project_Management_Policy.md) — GitHub Projects как оперативный центр, источники истины, иерархия Initiative → Epic → Issue → Sub-issue, обязательные поля и представления, шаблоны Issue/PR, Definition of Ready/Done и трассировка Alpha → Omega.
+
 ## Архитектура памяти и RAG
 
 - [Детальный план реализации Evidence Memory](roadmap/AIMETON_Site_Auditor_Evidence_Memory_implementation_plan.md) — подсистемный трек главного плана: этапы M0–M10, простые действия, критерии приёмки, контрольные точки и первый спринт EM-01.
 
 ## Очерёдность старта
 
-1. `SA-01` — стабилизация текущего поискового и MCP-контура.
-2. Evidence и Entity contracts.
-3. Федеративный SearchProvider layer.
-4. `EM-01` — сохранение оригиналов и provenance за feature flag.
-5. Новый отчёт и дальнейшее развёртывание Раструба.
+1. Создать GitHub Project `AIMETON Development Control` по принятой политике.
+2. `SA-01` — стабилизация текущего поискового и MCP-контура.
+3. Evidence и Entity contracts.
+4. Федеративный SearchProvider layer.
+5. `EM-01` — сохранение оригиналов и provenance за feature flag.
+6. Новый отчёт и дальнейшее развёртывание Раструба.
 
 ## Принцип реализации
 
