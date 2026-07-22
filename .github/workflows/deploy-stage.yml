@@ -25,11 +25,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  deployment-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.decide.outputs.should_deploy }}
+    steps:
+      - name: Decide whether runtime changed
+        id: decide
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName === 'workflow_dispatch') {
+              core.setOutput('should_deploy', 'true');
+              return;
+            }
+            const run = context.payload.workflow_run;
+            if (!run || run.conclusion !== 'success' || run.head_branch !== 'main') {
+              core.setOutput('should_deploy', 'false');
+              return;
+            }
+            const {data: commit} = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: run.head_sha,
+              per_page: 100,
+            });
+            const runtime = (commit.files || []).some(({filename}) =>
+              filename.startsWith('app/') ||
+              filename.startsWith('static/') ||
+              filename === 'requirements.txt' ||
+              filename === 'requirements-openstack.txt' ||
+              filename === 'Dockerfile' ||
+              filename === 'docker-compose.yml'
+            );
+            core.info(`Runtime deployment required: ${runtime}`);
+            core.setOutput('should_deploy', runtime ? 'true' : 'false');
+
   deploy:
+    needs: deployment-gate
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main')
+       github.event.workflow_run.head_branch == 'main' &&
+       needs.deployment-gate.outputs.should_deploy == 'true')
     runs-on:
       - self-hosted
       - Linux
