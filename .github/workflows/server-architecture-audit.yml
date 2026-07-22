@@ -1,11 +1,8 @@
 name: Server Architecture Audit
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - scripts/server_architecture_audit.sh
-      - .github/workflows/server-architecture-audit.yml
+  issues:
+    types: [labeled]
   workflow_dispatch:
 
 permissions:
@@ -18,6 +15,7 @@ concurrency:
 
 jobs:
   audit:
+    if: github.event_name == 'workflow_dispatch' || (github.event.issue.number == 36 && github.event.label.name == 'server-audit')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
