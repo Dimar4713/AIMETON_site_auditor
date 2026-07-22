@@ -15,6 +15,11 @@ def _write_executable(path: Path, content: str) -> None:
 
 
 def test_deploy_failure_restores_previous_bundle(tmp_path: Path) -> None:
+    """Prove rollback without modifying the real stage stack.
+
+    The test creates an isolated stack, mocks Docker as healthy and forces the
+    first external smoke request to fail after the atomic source switch.
+    """
     stack_dir = tmp_path / "stack"
     source_dir = tmp_path / "source"
     fake_bin = tmp_path / "bin"
@@ -69,7 +74,7 @@ esac
     _write_executable(
         fake_bin / "curl",
         """#!/usr/bin/env bash
-# Force the first external smoke check to fail after the bundle switch.
+# Force the external smoke check to fail after the bundle switch.
 exit 22
 """,
     )
