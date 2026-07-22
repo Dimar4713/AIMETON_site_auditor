@@ -1,0 +1,135 @@
+name: OpenStack Recovery Plan Auto
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-openstack-recovery-plan-auto
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.event.issue.number == 35 && github.event.label.name == 'recovery-plan'
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 20
+    env:
+      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL || vars.OS_AUTH_URL || 'https://api.immers.cloud:5000/v3' }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID || vars.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      OS_AUTH_TYPE: v3applicationcredential
+      OPENSTACK_SERVER_ID: ${{ vars.OPENSTACK_SERVER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare OpenStack client
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in OS_AUTH_URL OS_APPLICATION_CREDENTIAL_ID OS_APPLICATION_CREDENTIAL_SECRET OPENSTACK_SERVER_ID; do
+            test -n "${!name:-}" || { echo "Missing required setting: $name"; exit 1; }
+          done
+          python3 -m venv .venv-openstack-recovery-plan
+          . .venv-openstack-recovery-plan/bin/activate
+          python -m pip install --disable-pip-version-check -q -r requirements-openstack.txt
+
+      - name: Resolve latest snapshot and canonical resources
+        id: resolve
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          . .venv-openstack-recovery-plan/bin/activate
+          mkdir -p recovery-plan-evidence
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          import openstack
+
+          conn = openstack.connect(
+              auth_url=os.environ['OS_AUTH_URL'],
+              application_credential_id=os.environ['OS_APPLICATION_CREDENTIAL_ID'],
+              application_credential_secret=os.environ['OS_APPLICATION_CREDENTIAL_SECRET'],
+              auth_type='v3applicationcredential',
+          )
+          server = conn.compute.get_server(os.environ['OPENSTACK_SERVER_ID'])
+          if not server:
+              raise SystemExit('Canonical server not found')
+          if server.status != 'ACTIVE':
+              raise SystemExit(f'Canonical server is not ACTIVE: {server.status}')
+          flavor = conn.compute.get_flavor(server.flavor['id'])
+          network_ids = []
+          for port in conn.network.ports(device_id=server.id):
+              if port.network_id and port.network_id not in network_ids:
+                  network_ids.append(port.network_id)
+          if not network_ids:
+              raise SystemExit('No canonical network found')
+          network = conn.network.get_network(network_ids[0])
+          images = [
+              image for image in conn.image.images(status='active')
+              if (image.name or '').startswith('aimeton-main-server-')
+          ]
+          if not images:
+              raise SystemExit('No active AIMETON snapshot found')
+          images.sort(key=lambda x: str(getattr(x, 'created_at', '')), reverse=True)
+          image = images[0]
+          payload = {
+              'canonical_server': {'id': server.id, 'name': server.name, 'status': server.status},
+              'source_image': {'id': image.id, 'name': image.name, 'status': image.status, 'created_at': str(getattr(image, 'created_at', ''))},
+              'flavor': {'id': flavor.id, 'name': flavor.name, 'vcpus': flavor.vcpus, 'ram_mb': flavor.ram, 'disk_gb': flavor.disk},
+              'network': {'id': network.id, 'name': network.name},
+          }
+          Path('recovery-plan-evidence/resolved.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write(f"image_id={image.id}\n")
+              out.write(f"flavor={flavor.id}\n")
+              out.write(f"network={network.id}\n")
+              out.write("validation_name=aimeton-validation-auto-plan\n")
+          print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Execute guarded plan
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          . .venv-openstack-recovery-plan/bin/activate
+          python scripts/openstack_recovery_validation.py \
+            --mode plan \
+            --validation-name '${{ steps.resolve.outputs.validation_name }}' \
+            --reason 'Automated read-only recovery preflight for Issue 35' \
+            --image-id '${{ steps.resolve.outputs.image_id }}' \
+            --flavor '${{ steps.resolve.outputs.flavor }}' \
+            --network '${{ steps.resolve.outputs.network }}' \
+            --output recovery-plan-evidence/plan.json
+
+      - name: Upload sanitized evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: openstack-recovery-auto-plan-${{ github.run_id }}
+          path: recovery-plan-evidence/
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Publish result to Issue 35
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            let body = `## Automated recovery plan\n\nWorkflow run: ${context.runId}\n\n`;
+            if (fs.existsSync('recovery-plan-evidence/plan.json')) {
+              const plan = JSON.parse(fs.readFileSync('recovery-plan-evidence/plan.json', 'utf8'));
+              body += `- result: ${plan.result}\n`;
+              body += `- snapshot: ${plan.source_image?.name || 'unknown'} (${plan.source_image?.status || 'unknown'})\n`;
+              body += `- flavor: ${plan.requested_resources?.flavor_name || 'unknown'}\n`;
+              body += `- network: ${plan.requested_resources?.network_name || 'unknown'}\n`;
+              body += `- changes performed: none\n`;
+            } else {
+              body += `Plan failed before sanitized evidence was produced. Inspect the workflow logs.\n`;
+            }
+            await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: 35, body});
