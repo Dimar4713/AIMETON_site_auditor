@@ -9,6 +9,7 @@ SERVICE="${SERVICE:-auditor}"
 CONTAINER="${CONTAINER:-aimeton-auditor}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 BACKUP_KEEP="${BACKUP_KEEP:-5}"
+FAILED_KEEP="${FAILED_KEEP:-2}"
 LOCK_FILE="${LOCK_FILE:-/tmp/aimeton-auditor-stage-deploy.lock}"
 
 log() {
@@ -22,6 +23,8 @@ fail() {
 
 [[ -n "$DEPLOY_SHA" ]] || fail "DEPLOY_SHA is required"
 [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "DEPLOY_SHA must be a full 40-character commit SHA"
+[[ "$BACKUP_KEEP" =~ ^[0-9]+$ ]] || fail "BACKUP_KEEP must be an integer"
+[[ "$FAILED_KEEP" =~ ^[0-9]+$ ]] || fail "FAILED_KEEP must be an integer"
 [[ -d "$STACK_DIR" ]] || fail "Stack directory not found: $STACK_DIR"
 [[ -f "$STACK_DIR/docker-compose.yml" ]] || fail "docker-compose.yml not found in $STACK_DIR"
 [[ -d "$SOURCE_DIR" ]] || fail "Source directory not found: $SOURCE_DIR"
@@ -137,6 +140,30 @@ rollback() {
   exit 1
 }
 
+cleanup_by_count() {
+  local pattern="$1"
+  local keep="$2"
+  local label="$3"
+  local entry path rank=0
+
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    path="${entry#* }"
+    rank=$((rank + 1))
+    if (( rank <= keep )); then
+      log "Retention protect $label #$rank: $path"
+      continue
+    fi
+    if [[ -f "$path/.retention-protected" ]]; then
+      log "Retention marker protects $label: $path"
+      continue
+    fi
+    [[ "$(readlink -f "$path")" == "$DEPLOY_ROOT"/* ]] || fail "Unsafe retention path: $path"
+    log "Auto-removing excess $label bundle: $path"
+    rm -rf -- "$path"
+  done < <(find "$DEPLOY_ROOT" -maxdepth 1 -type d -name "$pattern" -printf '%T@ %p\n' | sort -rn)
+}
+
 trap 'rollback "unexpected failure at line $LINENO"' ERR
 
 log "Preparing deployment SHA $DEPLOY_SHA from $SOURCE_DIR"
@@ -186,12 +213,10 @@ log "DEPLOYMENT PASS"
 log "Deployed SHA: $DEPLOYED_SHA"
 log "Previous SHA: $PREVIOUS_SHA"
 log "Backup: $BACKUP_DIR"
+log "Automatic retention thresholds: backups=$BACKUP_KEEP failed=$FAILED_KEEP"
 
 docker ps --filter "name=$CONTAINER" --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
 
-mapfile -t OLD_BACKUPS < <(find "$DEPLOY_ROOT" -maxdepth 1 -type d -name 'app-source.backup.*' -printf '%T@ %p\n' | sort -rn | awk -v keep="$BACKUP_KEEP" 'NR>keep {$1=""; sub(/^ /, ""); print}')
-for old_backup in "${OLD_BACKUPS[@]:-}"; do
-  [[ -n "$old_backup" ]] || continue
-  log "Removing expired backup: $old_backup"
-  rm -rf "$old_backup"
-done
+cleanup_by_count 'app-source.backup.*' "$BACKUP_KEEP" 'backup'
+cleanup_by_count 'app-source.failed.*' "$FAILED_KEEP" 'failed'
+cleanup_by_count 'app-source.manual-failed.*' "$FAILED_KEEP" 'manual-failed'
