@@ -1,0 +1,148 @@
+name: Stage Observability
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-observability
+  cancel-in-progress: true
+
+jobs:
+  observe:
+    if: >-
+      github.event_name != 'issues' ||
+      (github.event.issue.number == 38 && github.event.label.name == 'observability-check')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STAGE_URL: https://stage-auditor.aimeton.ru
+      OBS_DISK_WARNING: ${{ vars.OBS_DISK_WARNING || '70' }}
+      OBS_DISK_CRITICAL: ${{ vars.OBS_DISK_CRITICAL || '85' }}
+      OBS_MEMORY_WARNING: ${{ vars.OBS_MEMORY_WARNING || '85' }}
+      OBS_SWAP_WARNING: ${{ vars.OBS_SWAP_WARNING || '50' }}
+      OBS_LATENCY_WARNING_MS: ${{ vars.OBS_LATENCY_WARNING_MS || '3000' }}
+      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL || vars.OS_AUTH_URL || 'https://api.immers.cloud:5000/v3' }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID || vars.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      OS_AUTH_TYPE: v3applicationcredential
+      OPENSTACK_SERVER_ID: ${{ vars.OPENSTACK_SERVER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect sanitized stage signals
+        id: collect
+        shell: bash
+        run: |
+          set +e
+          mkdir -p observability-evidence
+          chmod +x scripts/stage_observability.py
+          python3 scripts/stage_observability.py \
+            --output observability-evidence/stage-observability.json \
+            --stage-url "$STAGE_URL"
+          rc=$?
+          echo "collector_rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Collect canonical OpenStack VM status
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${OS_APPLICATION_CREDENTIAL_ID:-}" && -n "${OS_APPLICATION_CREDENTIAL_SECRET:-}" && -n "${OPENSTACK_SERVER_ID:-}" ]]; then
+            python3 -m venv .venv-openstack-observability
+            . .venv-openstack-observability/bin/activate
+            python -m pip install --disable-pip-version-check -q -r requirements-openstack.txt
+            python scripts/openstack_inventory.py --compute-only --output observability-evidence/openstack.json >/dev/null
+            python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path('observability-evidence/openstack.json')
+          payload = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+          server = next((s for s in payload.get('servers', []) if s.get('id') == os.environ.get('OPENSTACK_SERVER_ID')), None)
+          summary = {'configured': True, 'found': bool(server), 'status': server.get('status') if server else None}
+          Path('observability-evidence/openstack-summary.json').write_text(json.dumps(summary, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          PY
+          else
+            printf '%s\n' '{"configured":false,"found":false,"status":null}' > observability-evidence/openstack-summary.json
+          fi
+
+      - name: Build sanitized summary
+        id: summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          data = json.loads(Path('observability-evidence/stage-observability.json').read_text(encoding='utf-8'))
+          os_data = json.loads(Path('observability-evidence/openstack-summary.json').read_text(encoding='utf-8'))
+          alerts = list(data.get('alerts', []))
+          if os_data.get('configured') and (not os_data.get('found') or os_data.get('status') != 'ACTIVE'):
+              alerts.append({'severity': 'critical', 'signal': 'openstack_vm', 'value': os_data.get('status') or 'not-found'})
+          severity = 'critical' if any(a.get('severity') == 'critical' for a in alerts) else 'warning' if alerts else 'ok'
+          data['severity'] = severity
+          data['alerts'] = alerts
+          data['openstack_vm'] = os_data
+          Path('observability-evidence/summary.json').write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write(f"severity={severity}\n")
+              out.write(f"alert_count={len(alerts)}\n")
+          print(json.dumps({'severity': severity, 'alerts': len(alerts)}, sort_keys=True))
+          PY
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-observability-${{ github.run_id }}
+          path: observability-evidence/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publish manual check or alert to Issue 38
+        if: >-
+          always() &&
+          (github.event_name == 'workflow_dispatch' || github.event_name == 'issues' || steps.summary.outputs.severity != 'ok')
+        uses: actions/github-script@v7
+        env:
+          SEVERITY: ${{ steps.summary.outputs.severity }}
+          ALERT_COUNT: ${{ steps.summary.outputs.alert_count }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            let body = `## Stage observability — ${process.env.SEVERITY || 'unknown'}\n\n`;
+            body += `Workflow run: ${context.runId}\n\n`;
+            if (fs.existsSync('observability-evidence/summary.json')) {
+              const d = JSON.parse(fs.readFileSync('observability-evidence/summary.json', 'utf8'));
+              body += `- alerts: ${d.alerts?.length ?? 0}\n`;
+              body += `- disk: ${d.host?.disk_used_pct ?? 'unknown'}%\n`;
+              body += `- memory: ${d.host?.memory_used_pct ?? 'unknown'}%\n`;
+              body += `- swap: ${d.host?.swap_used_pct ?? 'unknown'}%\n`;
+              body += `- API health: ${d.probes?.api_health?.status ?? 'unavailable'} (${d.probes?.api_health?.latency_ms ?? 'unknown'} ms)\n`;
+              body += `- MCP initialize: ${d.probes?.mcp_initialize?.status ?? 'unavailable'} (${d.probes?.mcp_initialize?.latency_ms ?? 'unknown'} ms)\n`;
+              body += `- OpenStack VM: ${d.openstack_vm?.status ?? 'not checked'}\n`;
+              body += `- collector duration: ${d.collector_duration_ms ?? 'unknown'} ms\n`;
+              if (d.alerts?.length) {
+                body += `\n### Signals\n`;
+                for (const a of d.alerts.slice(0, 20)) body += `- **${a.severity}** ${a.signal}: ${a.value ?? a.name ?? 'check'}\n`;
+              }
+            } else {
+              body += `Sanitized summary was not produced. Inspect workflow logs.\n`;
+            }
+            await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: 38, body});
+
+      - name: Fail on critical state
+        if: steps.summary.outputs.severity == 'critical'
+        shell: bash
+        run: |
+          echo 'Critical stage observability signal detected.' >&2
+          exit 1
