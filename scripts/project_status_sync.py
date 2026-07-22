@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -208,9 +209,10 @@ def add_label(ctx: Context, name: str) -> None:
 
 def remove_label(ctx: Context, name: str) -> None:
     owner, repo = ctx.repository.split("/", 1)
+    encoded = urllib.parse.quote(name, safe="")
     try:
         request_json(
-            f"{API}/repos/{owner}/{repo}/issues/{ctx.item_number}/labels/{urllib.parse.quote(name, safe='')}",
+            f"{API}/repos/{owner}/{repo}/issues/{ctx.item_number}/labels/{encoded}",
             ctx.token,
             method="DELETE",
         )
