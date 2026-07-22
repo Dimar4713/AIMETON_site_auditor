@@ -16,6 +16,11 @@ from typing import Any
 import openstack
 
 
+DEFAULT_COMPUTE_ENDPOINT = "https://api.immers.cloud:8774/v2.1"
+DEFAULT_NETWORK_ENDPOINT = "https://api.immers.cloud:9696/v2.0"
+DEFAULT_BLOCK_STORAGE_ENDPOINT = "https://api.immers.cloud:8776/v3"
+
+
 @dataclass
 class Inventory:
     project_id: str | None
@@ -61,10 +66,23 @@ def collect_inventory(*, compute_only: bool = False) -> Inventory:
         "application_credential_id": os.environ["OS_APPLICATION_CREDENTIAL_ID"],
         "application_credential_secret": os.environ["OS_APPLICATION_CREDENTIAL_SECRET"],
         "verify": True,
+        # immers.cloud CLI access is known to work with these native endpoints.
+        # Explicit overrides avoid provider catalog inconsistencies on SDK discovery.
+        "compute_endpoint_override": os.getenv(
+            "OS_COMPUTE_ENDPOINT", DEFAULT_COMPUTE_ENDPOINT
+        ),
     }
     region_name = os.getenv("OS_REGION_NAME")
     if region_name:
         connect_kwargs["region_name"] = region_name
+
+    if not compute_only:
+        connect_kwargs["network_endpoint_override"] = os.getenv(
+            "OS_NETWORK_ENDPOINT", DEFAULT_NETWORK_ENDPOINT
+        )
+        connect_kwargs["block_storage_endpoint_override"] = os.getenv(
+            "OS_BLOCK_STORAGE_ENDPOINT", DEFAULT_BLOCK_STORAGE_ENDPOINT
+        )
 
     conn = openstack.connect(**connect_kwargs)
 
@@ -72,7 +90,6 @@ def collect_inventory(*, compute_only: bool = False) -> Inventory:
     project_id = getattr(auth, "get_project_id", lambda _session: None)(conn.session)
     user_id = getattr(auth, "get_user_id", lambda _session: None)(conn.session)
 
-    # Compute is the mandatory service for deployment preflight/postflight.
     servers = [_server_record(server) for server in conn.compute.servers(details=True)]
 
     if compute_only:
