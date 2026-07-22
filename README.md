@@ -92,17 +92,24 @@ Content-Type: application/json
 
 ## MCP
 
-MCP Streamable HTTP публикуется по адресу:
+MCP Streamable HTTP разделён на два профиля:
 
 ```text
-/mcp
+/mcp/        — public read-only profile
+/mcp-admin/  — administrative profile с Bearer token
 ```
 
-Инструменты:
+Публичные инструменты:
 
 - `analyze_site` — анализ конкретного сайта;
 - `hunt_companies` — отраслевая охота;
 - `company_intelligence` — полный рабочий профиль компании.
+
+Административные инструменты не публикуются в public profile. Admin endpoint работает fail-closed и требует секрет `AIMETON_MCP_ADMIN_TOKEN`.
+
+Для обоих профилей действуют rate limiting, ограничение конкурентности, `X-Request-ID`, DNS rebinding protection и санитарно очищенный audit trail.
+
+Полное описание архитектуры, подключения клиентов, правил использования, ротации токена и эксплуатационной проверки: [`docs/MCP-SECURITY.md`](docs/MCP-SECURITY.md).
 
 Используется стабильная линия официального MCP Python SDK:
 
@@ -116,9 +123,16 @@ mcp>=1.25,<2
 ROUTERAI_API_KEY=...
 ROUTERAI_MODEL=...
 SEARXNG_BASE_URL=https://your-searxng-instance.example
+AIMETON_MCP_ADMIN_TOKEN=...
+AIMETON_MCP_PUBLIC_RATE_LIMIT=30
+AIMETON_MCP_ADMIN_RATE_LIMIT=20
+AIMETON_MCP_RATE_WINDOW_SECONDS=60
+AIMETON_MCP_MAX_CONCURRENCY=4
 ```
 
 Без ключа RouterAI используется резервный эвристический анализ. Без SearXNG анализ официального сайта работает, но внешний OSINT-контур возвращает `partial`.
+
+Если `AIMETON_MCP_ADMIN_TOKEN` отсутствует, административный MCP endpoint остаётся заблокированным и возвращает `401`.
 
 ## Запуск
 
@@ -135,12 +149,18 @@ uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-5000}
 
 ## Безопасность
 
-- ключи хранятся только в переменных окружения;
+- ключи и административные токены хранятся только в secret storage и переменных окружения;
+- public и admin MCP tools разделены по разным endpoints;
+- admin MCP защищён Bearer token и работает fail-closed;
+- rate limiting и concurrency limits защищают MCP от неконтролируемой нагрузки;
 - SSRF-защита блокирует локальные и служебные IP;
+- DNS rebinding protection и явные host/origin allowlists сохраняются;
 - ограничены тип, размер и время загрузки страницы;
+- audit trail не содержит токенов, JSON-RPC parameters и пользовательских запросов;
 - неподтверждённые упоминания не выдаются за факты;
-- LLM не получает право самостоятельно выполнять внешние коммерческие действия;
-- перед широкой публичной публикацией MCP необходимо добавить авторизацию и rate limiting.
+- LLM не получает право самостоятельно выполнять внешние коммерческие действия.
+
+Подробные правила: [`docs/MCP-SECURITY.md`](docs/MCP-SECURITY.md).
 
 ## Тесты
 
@@ -148,4 +168,4 @@ uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-5000}
 pytest -q
 ```
 
-Изменения экспериментальной ветки требуют повторного прогона тестов и проверки на реальном Replit-домене перед публикацией.
+Изменения экспериментальной ветки требуют повторного прогона тестов и проверки на реальном stage-домене перед публикацией.
