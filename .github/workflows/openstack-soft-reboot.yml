@@ -1,0 +1,127 @@
+name: OpenStack Soft Reboot
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_server_id:
+        description: Exact canonical OpenStack server UUID
+        required: true
+        type: string
+      confirmation:
+        description: Type SOFT-REBOOT exactly
+        required: true
+        type: string
+      reason:
+        description: Operational reason, minimum 10 characters
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aimeton-openstack-soft-reboot-stage
+  cancel-in-progress: false
+
+jobs:
+  soft-reboot:
+    runs-on: ubuntu-latest
+    environment: stage
+    timeout-minutes: 20
+    env:
+      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL || vars.OS_AUTH_URL || 'https://api.immers.cloud:5000/v3' }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID || vars.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      OS_COMPUTE_ENDPOINT: ${{ vars.OS_COMPUTE_ENDPOINT || 'https://api.immers.cloud:8774/v2.1' }}
+      OPENSTACK_SERVER_ID: ${{ vars.OPENSTACK_SERVER_ID }}
+      OPENSTACK_SERVER_NAME: ${{ vars.OPENSTACK_SERVER_NAME }}
+      STAGE_URL: https://stage-auditor.aimeton.ru
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate protected inputs
+        shell: bash
+        env:
+          CONFIRM_SERVER_ID: ${{ inputs.confirm_server_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$CONFIRM_SERVER_ID" == "$OPENSTACK_SERVER_ID" ]]
+          [[ "$CONFIRMATION" == "SOFT-REBOOT" ]]
+          [[ ${#REASON} -ge 10 ]]
+          for name in OS_AUTH_URL OS_APPLICATION_CREDENTIAL_ID OS_APPLICATION_CREDENTIAL_SECRET OPENSTACK_SERVER_ID OPENSTACK_SERVER_NAME; do
+            test -n "${!name:-}" || { echo "Missing required stage setting: $name"; exit 1; }
+          done
+
+      - name: Prepare Python environment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m venv .venv-openstack-reboot
+          . .venv-openstack-reboot/bin/activate
+          python -m pip install --disable-pip-version-check -q requests
+
+      - name: Record external preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p reboot-evidence
+          {
+            echo "timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "health_before=$(curl -fsS --max-time 20 "$STAGE_URL/api/health")"
+            echo "mcp_before_status=$(curl -sS -o /dev/null -w '%{http_code}' --max-redirs 0 --max-time 20 "$STAGE_URL/mcp")"
+          } | tee reboot-evidence/external-preflight.txt
+
+      - name: Request guarded OpenStack soft reboot
+        shell: bash
+        env:
+          CONFIRM_SERVER_ID: ${{ inputs.confirm_server_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -Eeuo pipefail
+          . .venv-openstack-reboot/bin/activate
+          python scripts/openstack_soft_reboot.py \
+            --confirm-server-id "$CONFIRM_SERVER_ID" \
+            --confirmation "$CONFIRMATION" \
+            --reason "$REASON" \
+            --timeout-seconds 600 \
+            --output reboot-evidence/openstack-soft-reboot.json
+
+      - name: Wait for external application recovery
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deadline=$((SECONDS + 600))
+          health_ok=0
+          mcp_ok=0
+          while (( SECONDS < deadline )); do
+            health_code="$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 15 "$STAGE_URL/api/health" || true)"
+            mcp_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-redirs 0 --max-time 15 "$STAGE_URL/mcp" || true)"
+            [[ "$health_code" == "200" ]] && health_ok=1
+            [[ "$mcp_code" == "307" ]] && mcp_ok=1
+            if (( health_ok == 1 && mcp_ok == 1 )); then
+              break
+            fi
+            sleep 10
+          done
+          (( health_ok == 1 )) || { echo "Stage health did not recover"; exit 1; }
+          (( mcp_ok == 1 )) || { echo "Stage MCP redirect did not recover"; exit 1; }
+          {
+            echo "timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "health_status=200"
+            echo "mcp_status=307"
+            echo "health_body=$(cat /tmp/health.json)"
+          } | tee reboot-evidence/external-postflight.txt
+
+      - name: Upload reboot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openstack-soft-reboot-${{ github.run_id }}
+          path: reboot-evidence/
+          if-no-files-found: error
+          retention-days: 90
