@@ -33,29 +33,40 @@ class Inventory:
     scope: str
 
 
+def _clean_value(value: str | None) -> str:
+    """Trim whitespace and one matching layer of accidental shell-style quotes."""
+    cleaned = (value or "").strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
+def _env(name: str, default: str | None = None) -> str:
+    value = _clean_value(os.getenv(name, default))
+    if not value:
+        raise RuntimeError(f"Missing required OpenStack environment variable: {name}")
+    return value
+
+
 def _require_application_credential() -> None:
-    required = [
+    for name in (
         "OS_AUTH_URL",
         "OS_APPLICATION_CREDENTIAL_ID",
         "OS_APPLICATION_CREDENTIAL_SECRET",
-    ]
-    missing = [name for name in required if not os.getenv(name)]
-    if missing:
-        raise RuntimeError(
-            "Missing required OpenStack environment variables: " + ", ".join(missing)
-        )
+    ):
+        _env(name)
 
 
 def _authenticated_context() -> tuple[str, str | None, str | None]:
-    auth_url = os.environ["OS_AUTH_URL"].rstrip("/")
+    auth_url = _env("OS_AUTH_URL").rstrip("/")
     token_url = f"{auth_url}/auth/tokens"
     payload = {
         "auth": {
             "identity": {
                 "methods": ["application_credential"],
                 "application_credential": {
-                    "id": os.environ["OS_APPLICATION_CREDENTIAL_ID"],
-                    "secret": os.environ["OS_APPLICATION_CREDENTIAL_SECRET"],
+                    "id": _env("OS_APPLICATION_CREDENTIAL_ID"),
+                    "secret": _env("OS_APPLICATION_CREDENTIAL_SECRET"),
                 },
             }
         }
@@ -107,7 +118,7 @@ def collect_inventory(*, compute_only: bool = False) -> Inventory:
     _require_application_credential()
     token, project_id, user_id = _authenticated_context()
 
-    compute_endpoint = os.getenv("OS_COMPUTE_ENDPOINT", DEFAULT_COMPUTE_ENDPOINT).rstrip("/")
+    compute_endpoint = _env("OS_COMPUTE_ENDPOINT", DEFAULT_COMPUTE_ENDPOINT).rstrip("/")
     compute_payload = _get_json(f"{compute_endpoint}/servers/detail", token)
     servers = [_server_record(item) for item in compute_payload.get("servers", [])]
 
@@ -125,8 +136,8 @@ def collect_inventory(*, compute_only: bool = False) -> Inventory:
     if not project_id:
         raise RuntimeError("Application Credential token did not expose project_id")
 
-    network_endpoint = os.getenv("OS_NETWORK_ENDPOINT", DEFAULT_NETWORK_ENDPOINT).rstrip("/")
-    block_endpoint = os.getenv(
+    network_endpoint = _env("OS_NETWORK_ENDPOINT", DEFAULT_NETWORK_ENDPOINT).rstrip("/")
+    block_endpoint = _env(
         "OS_BLOCK_STORAGE_ENDPOINT", DEFAULT_BLOCK_STORAGE_ENDPOINT
     ).rstrip("/")
 
