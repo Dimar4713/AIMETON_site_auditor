@@ -18,26 +18,31 @@ Baseline SA-01.1 подтверждал импорт, pytest, health и нали
 
 ## Stage verification
 
-Целевые проверки:
+Проверено 2026-07-22 на VPS stage `stage-auditor.aimeton.ru`, Docker-контур `Caddy → aimeton-auditor:5000`.
+
+Подтверждено:
 
 ```text
-GET https://git-hub-site-auditor.replit.app/api/health
-GET https://git-hub-site-auditor.replit.app/mcp        (ожидается 307 Location: /mcp/)
-GET https://git-hub-site-auditor.replit.app/mcp/       (ожидается MCP endpoint без redirect loop)
+GET /api/health → 200 OK, version 0.6.1
+HEAD /mcp → 307 Temporary Redirect, Location: /mcp/
+HEAD /mcp/ → 405 Method Not Allowed, Allow: GET, POST, DELETE
+POST /mcp/ initialize → 200 OK, protocolVersion 2025-03-26
 ```
 
-Из текущей исполняющей среды stage-домен не разрешился по DNS. Web-safe-open также не смог открыть URL без индексируемого результата. Это внешний блокер наблюдения, а не подтверждённый дефект приложения.
+`405` на `HEAD /mcp/` допустим: MCP endpoint принимает `GET`, `POST`, `DELETE`. Критический прежний ответ `421 Misdirected Request` устранён.
+
+Stage bundle обновлён с `3257eaa7270897da0190309894500ac029e6d298` до merge commit `38d1d08f5ef88edc3e63aca0cf05bbb4dcea743c`, контейнер пересобран и перезапущен; healthcheck прошёл.
 
 ## Решение
 
-- локальная интеграция: PASS после зелёного CI;
-- stage integration: BLOCKED — требуется фактический запрос из доступной сети;
-- Issue #16 не закрывать до stage evidence;
-- PR держать draft до подтверждения stage `/api/health` и `/mcp`.
+- локальная интеграция: PASS;
+- CI: PASS;
+- stage integration: PASS;
+- SA-01.8 завершена;
+- Issue #16 может быть закрыта как completed.
 
 ## Остаточные риски
 
-1. Stage может ещё работать на старом commit до завершения deployment.
-2. Reverse proxy конкретного окружения может менять Host/Origin или redirect headers.
+1. Deployment bundle на VPS не обновлялся автоматически после merge; требуется отдельная задача автоматизации доставки `main → app-source → docker compose build/up`.
+2. Реальные SearXNG/RouterAI ответы остаются внешними нестабильными зависимостями и проверяются контрактами, а не побитовым golden output.
 3. Dynamic-rendering Chromium test ранее проявлял единичный timeout cleanup; повторные CI runs проходили.
-4. Реальные SearXNG/RouterAI ответы остаются внешними нестабильными зависимостями и проверяются контрактами, а не побитовым golden output.
