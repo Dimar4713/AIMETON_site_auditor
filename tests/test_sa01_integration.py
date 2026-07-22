@@ -13,7 +13,7 @@ def test_sa01_health_and_mcp_contracts_work_together():
 
     assert health.status_code == 200
     assert health.json()['status'] == 'ok'
-    assert health.json()['version'] == '0.6.1'
+    assert health.json()['version'] == app.version
     assert redirect.status_code == 307
     assert redirect.headers['location'] == '/mcp/'
 
