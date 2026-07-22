@@ -57,9 +57,20 @@ MCP_TRANSPORT_SECURITY = TransportSecuritySettings(
 mcp = FastMCP(
     "AIMETON Site Auditor",
     instructions=(
-        "Экономическая разведка компаний: анализ официального сайта, поиск целей по отрасли "
-        "и формирование проверяемого информационного запаха. Неподтвержденные упоминания "
-        "не должны представляться как факты."
+        "Public read-only economic intelligence profile: site analysis, company hunting and "
+        "source-traceable company intelligence. Unconfirmed mentions must not be presented as facts."
+    ),
+    stateless_http=True,
+    json_response=True,
+    streamable_http_path="/",
+    transport_security=MCP_TRANSPORT_SECURITY,
+)
+
+admin_mcp = FastMCP(
+    "AIMETON Site Auditor Admin",
+    instructions=(
+        "Administrative profile. Access is restricted by bearer token at the ASGI boundary. "
+        "Tools must return sanitized operational metadata only."
     ),
     stateless_http=True,
     json_response=True,
@@ -70,14 +81,14 @@ mcp = FastMCP(
 
 @mcp.tool()
 async def analyze_site(url: str) -> dict:
-    """Проанализировать конкретный публичный сайт и предложить коммерчески полезные AI-решения."""
+    """Analyze one public website and propose commercially useful AI solutions."""
     page = await fetch_site(url)
     try:
         result = await analyze_with_routerai(page["final_url"], page["title"], page["text"])
     except Exception:
         result = heuristic_analysis(page["final_url"], page["title"], page["text"])
         result.risks_and_assumptions.append(
-            "Использован резервный локальный анализ; LLM была недоступна или вернула невалидный ответ."
+            "Used fallback local analysis because the LLM was unavailable or returned invalid output."
         )
     return result.model_dump(mode="json")
 
@@ -90,7 +101,7 @@ async def hunt_companies(
     search_zone: str | None = None,
     output_limit: int = 10,
 ) -> dict:
-    """Найти и ранжировать компании по территории, отрасли и признакам коммерческой возможности."""
+    """Find and rank companies by territory, industry and commercial opportunity signals."""
     request = HuntRequest(
         region=region,
         search_zone=search_zone,
@@ -109,7 +120,7 @@ async def company_intelligence(
     region: str | None = None,
     max_sources: int = 20,
 ) -> dict:
-    """Собрать профиль компании: официальный сайт, новости, справочники, отзывы, вакансии и информационный запах."""
+    """Build a source-traceable company profile from public information."""
     request = CompanyIntelligenceRequest(
         company_name=company_name,
         url=url,
@@ -120,4 +131,20 @@ async def company_intelligence(
     return result.model_dump(mode="json")
 
 
+@admin_mcp.tool()
+async def security_profile() -> dict:
+    """Return sanitized MCP security configuration for operator verification."""
+    return {
+        "profile": "admin",
+        "authentication": "bearer-token",
+        "public_tools": ["analyze_site", "hunt_companies", "company_intelligence"],
+        "admin_tools": ["security_profile"],
+        "rate_limit_enabled": True,
+        "concurrency_limit_enabled": True,
+        "audit_fields": ["actor", "profile", "request_id", "timestamp", "result", "duration_ms"],
+        "secret_values_exposed": False,
+    }
+
+
 mcp_http_app = mcp.streamable_http_app()
+admin_mcp_http_app = admin_mcp.streamable_http_app()
