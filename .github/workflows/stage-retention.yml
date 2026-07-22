@@ -1,0 +1,116 @@
+name: Stage Retention
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: plan is read-only; apply deletes only approved expired local bundles
+        required: true
+        type: choice
+        options: [plan, apply]
+        default: plan
+      keep_backups:
+        description: Number of newest successful rollback bundles to protect
+        required: true
+        default: '3'
+        type: string
+      keep_failed:
+        description: Number of newest failed bundles to protect
+        required: true
+        default: '2'
+        type: string
+      confirm:
+        description: For apply, exact confirmation from the latest plan: CLEANUP <count> <digest>
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-auditor-stage
+  cancel-in-progress: false
+
+jobs:
+  retention:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.number == 37 && github.event.label.name == 'retention-plan')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'plan' }}
+      KEEP_BACKUPS: ${{ github.event_name == 'workflow_dispatch' && inputs.keep_backups || '3' }}
+      KEEP_FAILED: ${{ github.event_name == 'workflow_dispatch' && inputs.keep_failed || '2' }}
+      CONFIRM: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm || '' }}
+      OUTPUT: retention-evidence/retention.json
+      WARNING_PERCENT: '70'
+      CRITICAL_PERCENT: '85'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify stage health before retention
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          body="$(curl --fail --silent --show-error --max-time 30 https://stage-auditor.aimeton.ru/api/health)"
+          python3 - "$body" <<'PY'
+          import json, sys
+          payload = json.loads(sys.argv[1])
+          assert payload.get('status') == 'ok', payload
+          PY
+          status="$(curl --silent --show-error --max-time 30 --max-redirs 0 -o /dev/null -w '%{http_code}' https://stage-auditor.aimeton.ru/mcp || true)"
+          test "$status" = '307'
+
+      - name: Execute guarded retention
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/stage_retention.sh
+          scripts/stage_retention.sh
+
+      - name: Verify stage health after retention
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --max-time 30 https://stage-auditor.aimeton.ru/api/health >/dev/null
+          status="$(curl --silent --show-error --max-time 30 --max-redirs 0 -o /dev/null -w '%{http_code}' https://stage-auditor.aimeton.ru/mcp || true)"
+          test "$status" = '307'
+
+      - name: Upload sanitized retention evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-retention-${{ github.run_id }}
+          path: retention-evidence/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Publish result to Issue 37
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            let body = `## Stage retention result\n\nWorkflow run: ${context.runId}\n\n`;
+            if (fs.existsSync('retention-evidence/retention.json')) {
+              const p = JSON.parse(fs.readFileSync('retention-evidence/retention.json', 'utf8'));
+              body += `- mode: ${p.mode}\n`;
+              body += `- disk: ${p.disk.used_percent}% used (${p.disk.level})\n`;
+              body += `- protected bundles: ${p.protected.length}\n`;
+              body += `- cleanup candidates: ${p.candidate_count}\n`;
+              body += `- reclaimable bytes: ${p.candidate_bytes}\n`;
+              body += `- confirmation for controlled apply: \`${p.confirmation}\`\n`;
+              body += `- deleted: ${p.deleted.length}\n`;
+              body += `- OpenStack images deleted: no\n`;
+            } else {
+              body += 'Retention failed before evidence was produced. Inspect workflow logs.\n';
+            }
+            await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: 37, body});
