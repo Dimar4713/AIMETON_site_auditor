@@ -4,44 +4,44 @@ _Last updated: 2026-07-22_
 
 ## Текущее положение
 
-**Фаза:** SA-01 — финальная интеграционная проверка.
+**Фаза:** SA-01 — завершена.
 
-**Завершено:** SA-01.1–SA-01.7 / Issues #9–#15.
+**Завершено:** SA-01.1–SA-01.8 / Issues #9–#16.
 
-**Активно:** `SA-01.8 — Интеграционная проверка стабилизированного контура` / Issue #16.
+**Статус SA-01.8:** локальная интеграция, CI и внешний stage-контур подтверждены.
 
-**Статус SA-01.8:** локальная интеграция и CI подготовлены; внешняя stage-проверка заблокирована недоступностью DNS из текущей исполняющей среды.
-
-**Текущий main до интеграционного PR:** `b6055acac9515da71107c581bf810a9c3a67bbd3`.
+**Стабилизированный main:** `38d1d08f5ef88edc3e63aca0cf05bbb4dcea743c` плюс итоговые status/validation updates.
 
 ## Подтверждено
 
 - полный pytest и KIMI regression pack;
 - импорт приложения;
-- локальный `/api/health`;
-- локальный относительный redirect `/mcp → /mcp/`;
+- `/api/health` на stage: `200 OK`, версия `0.6.1`;
+- `/mcp`: `307 Temporary Redirect`, `Location: /mcp/`;
+- `/mcp/`: больше не возвращает `421`; `HEAD` корректно отвечает `405` с `Allow: GET, POST, DELETE`;
+- MCP initialize через `POST /mcp/`: `200 OK`, protocol `2025-03-26`;
 - один provider call;
 - независимая классификация;
 - lifecycle `discovery_hint → source_candidate → evidence`;
 - обязательный pre-score до deep processing;
 - Hunter threshold pipeline.
 
-## Не подтверждено внешним наблюдением
+## Stage deployment
+
+Рабочий контур:
 
 ```text
-https://git-hub-site-auditor.replit.app/api/health
-https://git-hub-site-auditor.replit.app/mcp
-https://git-hub-site-auditor.replit.app/mcp/
+stage-auditor.aimeton.ru
+  → Caddy
+  → Docker network aimeton-search
+  → aimeton-auditor:5000
 ```
 
-Из текущей среды домен не разрешается по DNS. Issue #16 и интеграционный PR не закрываются до stage evidence.
+Stage bundle обновлён вручную с commit `3257eaa7270897da0190309894500ac029e6d298` до `38d1d08f5ef88edc3e63aca0cf05bbb4dcea743c`; образ пересобран, контейнер пересоздан и прошёл healthcheck.
 
-## Решение продолжения
+## Следующий системный риск
 
-1. Дождаться зелёного CI интеграционной ветки.
-2. Проверить stage из доступной сети.
-3. Зафиксировать HTTP status, Location и отсутствие redirect loop.
-4. После подтверждения перевести PR из draft, слить и закрыть SA-01.
+Merge в GitHub пока не приводит к автоматическому обновлению deployment bundle `/opt/aimeton/auditor-stack/app-source` и перезапуску Docker-сервиса. Это отдельная инфраструктурная задача следующей фазы.
 
 ## Оперативное управление
 
