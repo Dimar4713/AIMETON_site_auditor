@@ -24,6 +24,7 @@ class Inventory:
     volumes: list[dict[str, Any]]
     ports: list[dict[str, Any]]
     security_groups: list[dict[str, Any]]
+    scope: str
 
 
 def _require_application_credential() -> None:
@@ -52,22 +53,39 @@ def _server_record(server: Any) -> dict[str, Any]:
     }
 
 
-def collect_inventory() -> Inventory:
+def collect_inventory(*, compute_only: bool = False) -> Inventory:
     _require_application_credential()
-    conn = openstack.connect(
-        auth_type="v3applicationcredential",
-        auth_url=os.environ["OS_AUTH_URL"],
-        application_credential_id=os.environ["OS_APPLICATION_CREDENTIAL_ID"],
-        application_credential_secret=os.environ["OS_APPLICATION_CREDENTIAL_SECRET"],
-        region_name=os.getenv("OS_REGION_NAME"),
-        verify=True,
-    )
+    connect_kwargs: dict[str, Any] = {
+        "auth_type": "v3applicationcredential",
+        "auth_url": os.environ["OS_AUTH_URL"],
+        "application_credential_id": os.environ["OS_APPLICATION_CREDENTIAL_ID"],
+        "application_credential_secret": os.environ["OS_APPLICATION_CREDENTIAL_SECRET"],
+        "verify": True,
+    }
+    region_name = os.getenv("OS_REGION_NAME")
+    if region_name:
+        connect_kwargs["region_name"] = region_name
+
+    conn = openstack.connect(**connect_kwargs)
 
     auth = conn.session.auth
     project_id = getattr(auth, "get_project_id", lambda _session: None)(conn.session)
     user_id = getattr(auth, "get_user_id", lambda _session: None)(conn.session)
 
+    # Compute is the mandatory service for deployment preflight/postflight.
     servers = [_server_record(server) for server in conn.compute.servers(details=True)]
+
+    if compute_only:
+        return Inventory(
+            project_id=project_id,
+            user_id=user_id,
+            servers=servers,
+            volumes=[],
+            ports=[],
+            security_groups=[],
+            scope="compute-only",
+        )
+
     volumes = [
         {
             "id": volume.id,
@@ -107,16 +125,22 @@ def collect_inventory() -> Inventory:
         volumes=volumes,
         ports=ports,
         security_groups=security_groups,
+        scope="full",
     )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read-only OpenStack inventory")
     parser.add_argument("--output", help="Optional JSON output file")
+    parser.add_argument(
+        "--compute-only",
+        action="store_true",
+        help="Query only Keystone and Nova; suitable for deployment preflight/postflight",
+    )
     args = parser.parse_args()
 
     try:
-        payload = asdict(collect_inventory())
+        payload = asdict(collect_inventory(compute_only=args.compute_only))
     except Exception as exc:  # noqa: BLE001
         print(f"OpenStack inventory failed: {exc}", file=sys.stderr)
         return 1
