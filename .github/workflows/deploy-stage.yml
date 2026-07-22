@@ -1,0 +1,115 @@
+name: Deploy Stage
+
+on:
+  workflow_run:
+    workflows:
+      - Baseline CI
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full 40-character commit SHA to deploy; leave empty to deploy selected ref
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  STACK_DIR: /opt/aimeton/auditor-stack
+  STAGE_URL: https://stage-auditor.aimeton.ru
+
+concurrency:
+  group: aimeton-auditor-stage
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+    timeout-minutes: 30
+
+    steps:
+      - name: Resolve exact deployment SHA
+        id: target
+        shell: bash
+        env:
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_SHA: ${{ inputs.commit_sha }}
+          FALLBACK_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          sha="${WORKFLOW_RUN_SHA:-}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            sha="${MANUAL_SHA:-$FALLBACK_SHA}"
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "Invalid deployment SHA: $sha" >&2
+            exit 1
+          }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Deploy target: $sha"
+
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          fetch-depth: 1
+
+      - name: Verify checkout identity
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "Expected: $DEPLOY_SHA"
+          echo "Actual:   $actual"
+          [[ "$actual" == "$DEPLOY_SHA" ]]
+
+      - name: Deploy transactionally to stage
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.target.outputs.sha }}
+          SOURCE_DIR: ${{ github.workspace }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p deployment-evidence
+          chmod +x scripts/deploy_stage.sh
+          scripts/deploy_stage.sh 2>&1 | tee "deployment-evidence/deploy-${DEPLOY_SHA}.log"
+
+      - name: Record final stage evidence
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set +e
+          mkdir -p deployment-evidence
+          {
+            echo "requested_sha=$DEPLOY_SHA"
+            echo "workflow_run_id=$GITHUB_RUN_ID"
+            echo "workflow_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "actor=$GITHUB_ACTOR"
+            echo "timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "bundle_sha=$(cat "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
+            docker ps --filter name=aimeton-auditor --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
+            curl -sS -D - -o /dev/null --max-redirs 0 "$STAGE_URL/mcp" || true
+            curl -sS "$STAGE_URL/api/health" || true
+          } | tee "deployment-evidence/final-state-${DEPLOY_SHA}.txt"
+
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-deployment-${{ steps.target.outputs.sha }}-${{ github.run_id }}
+          path: deployment-evidence/
+          if-no-files-found: error
+          retention-days: 30
