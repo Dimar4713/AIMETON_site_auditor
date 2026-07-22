@@ -101,7 +101,7 @@ jobs:
           set -Eeuo pipefail
           . .venv-openstack-deploy/bin/activate
           mkdir -p deployment-evidence
-          python scripts/openstack_inventory.py --output deployment-evidence/openstack-preflight.json >/dev/null
+          python scripts/openstack_inventory.py --compute-only --output deployment-evidence/openstack-preflight.json >/dev/null
           python3 - <<'PY'
           import json
           import os
@@ -133,7 +133,7 @@ jobs:
           set +e
           if [[ -x .venv-openstack-deploy/bin/python ]]; then
             . .venv-openstack-deploy/bin/activate
-            python scripts/openstack_inventory.py --output deployment-evidence/openstack-postflight.json >/dev/null
+            python scripts/openstack_inventory.py --compute-only --output deployment-evidence/openstack-postflight.json >/dev/null
             python3 - <<'PY'
           import json
           import os
