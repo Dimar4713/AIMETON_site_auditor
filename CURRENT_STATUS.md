@@ -8,28 +8,27 @@ _Last updated: 2026-07-22_
 
 **Завершено:** SA-01.1–SA-01.8 / Issues #9–#16; Epic #7 закрыт.
 
-**Активная фаза:** SA-02 — замыкание эксплуатационного контура.
+**Завершённый эксплуатационный шаг:** SA-02.1 / Issue #27 — автоматизация deployment `main → VPS stage`.
 
-**Текущий шаг:** SA-02.1 / Issue #27 — автоматизация deployment `main → VPS stage`.
+**Активный следующий шаг:** SA-02.2 / Issue #28 — OpenStack-контур управления инфраструктурой immers.cloud.
 
-**Следующий отложенный шаг:** SA-02.2 / Issue #28 — OpenStack-контур управления инфраструктурой immers.cloud после завершения SA-02.1.
+## Подтверждённый stage
 
-## Подтверждённый baseline stage
-
-- `/api/health` на stage: `200 OK`, версия `0.6.1`;
+- `/api/health`: `200 OK`, версия `0.6.1`;
 - `/mcp`: `307 Temporary Redirect`, `Location: /mcp/`;
-- `/mcp/`: `HEAD 405`, `Allow: GET, POST, DELETE`, без `421`;
-- MCP initialize: `200 OK`, protocol `2025-03-26`;
-- стабилизированный bundle вручную обновлён до commit `38d1d08f5ef88edc3e63aca0cf05bbb4dcea743c`.
+- `/mcp/`: без `421`, MCP initialize отвечает `200 OK`;
+- первый автоматический deployment выполнен для merge SHA `cf55c5c808a92524a1e85846b13b07b202dfe8af`;
+- self-hosted runner `aimeton-site-auditor-stage` зарегистрирован в `Dimar4713/AIMETON_site_auditor` и работает как systemd service;
+- GitHub Actions `Deploy Stage` завершён успешно.
 
-## SA-02.1 — текущее состояние реализации
+## SA-02.1 — завершено
 
-Подготовлен автоматизированный контур:
+Рабочий контур:
 
 ```text
 Baseline CI success on main
   → Deploy Stage workflow
-  → self-hosted runner /home/ubuntu/actions-runner
+  → self-hosted runner /home/ubuntu/actions-runner-site-auditor
   → exact commit checkout
   → transactional app-source switch
   → docker compose build/up
@@ -38,41 +37,31 @@ Baseline CI success on main
   → deployment evidence artifact
 ```
 
-В реализации предусмотрены:
+Подтверждено:
 
-- полный целевой commit SHA;
-- блокировка параллельных deployment через `flock`;
-- временный валидируемый bundle;
-- атомарное переключение `app-source`;
-- резервная копия предыдущего bundle;
-- Docker health wait;
-- внешние smoke-проверки health, redirect и MCP initialize;
-- автоматический rollback;
-- фиксация SHA, состояния контейнера и HTTP evidence;
-- ручная инструкция восстановления.
+- deployment запускается после успешного CI для `main`;
+- разворачивается полный commit SHA;
+- bundle формируется во временном каталоге и валидируется;
+- предыдущий `app-source` сохраняется;
+- переключение выполняется атомарно;
+- Docker service пересобирается и пересоздаётся;
+- ожидается состояние `healthy`;
+- smoke проверяет `/api/health`, относительный `/mcp → /mcp/` и MCP initialize;
+- при ошибке выполняется rollback;
+- SHA и evidence сохраняются;
+- ручное восстановление задокументировано;
+- rollback-транзакция проверена воспроизводимым тестом с искусственно сорванным smoke: предыдущий bundle и SHA восстанавливаются, неуспешный bundle сохраняется в `app-source.failed.*`.
 
-SA-02.1 нельзя закрывать до фактического успешного workflow run на `main` и отдельного контролируемого rollback test.
-
-## Разделение контуров управления
-
-### Внутренний эксплуатационный контур — SA-02.1
-
-```text
-GitHub Actions
-  → self-hosted Runner внутри Ubuntu
-  → Docker Compose
-  → приложение
-```
-
-### Внешний инфраструктурный контур — SA-02.2
+## SA-02.2 — активный следующий слой
 
 ```text
 AIMETON control
   → OpenStack API immers.cloud
+  → Keystone / Nova / Neutron / Cinder / Glance
   → VM, network, volumes, snapshots, recovery
 ```
 
-OpenStack API не заменяет выполнение команд внутри Ubuntu.
+OpenStack API не заменяет выполнение команд внутри Ubuntu. Внутренний deployment-контур SA-02.1 остаётся отдельным и завершённым.
 
 ## Оперативное управление
 
