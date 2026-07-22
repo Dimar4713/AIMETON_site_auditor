@@ -2,27 +2,30 @@ name: Stage Retention
 
 on:
   issues:
-    types: [labeled]
+    types:
+      - labeled
   workflow_dispatch:
     inputs:
       mode:
         description: plan is read-only; apply deletes only approved expired local bundles
         required: true
         type: choice
-        options: [plan, apply]
+        options:
+          - plan
+          - apply
         default: plan
       keep_backups:
         description: Number of newest successful rollback bundles to protect
         required: true
-        default: '3'
+        default: "3"
         type: string
       keep_failed:
         description: Number of newest failed bundles to protect
         required: true
-        default: '2'
+        default: "2"
         type: string
       confirm:
-        description: For apply, exact confirmation from the latest plan: CLEANUP <count> <digest>
+        description: "For apply, exact confirmation from the latest plan: CLEANUP <count> <digest>"
         required: false
         type: string
 
@@ -36,24 +39,51 @@ concurrency:
 
 jobs:
   retention:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.issue.number == 37 && github.event.label.name == 'retention-plan')
-    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.issue.number == 37 && github.event.label.name == 'retention-plan') }}
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
     environment: stage
     timeout-minutes: 15
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
-      MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'plan' }}
-      KEEP_BACKUPS: ${{ github.event_name == 'workflow_dispatch' && inputs.keep_backups || '3' }}
-      KEEP_FAILED: ${{ github.event_name == 'workflow_dispatch' && inputs.keep_failed || '2' }}
-      CONFIRM: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm || '' }}
       OUTPUT: retention-evidence/retention.json
-      WARNING_PERCENT: '70'
-      CRITICAL_PERCENT: '85'
+      WARNING_PERCENT: "70"
+      CRITICAL_PERCENT: "85"
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve retention parameters
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+          INPUT_KEEP_BACKUPS: ${{ github.event.inputs.keep_backups }}
+          INPUT_KEEP_FAILED: ${{ github.event.inputs.keep_failed }}
+          INPUT_CONFIRM: ${{ github.event.inputs.confirm }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            mode="${INPUT_MODE:-plan}"
+            keep_backups="${INPUT_KEEP_BACKUPS:-3}"
+            keep_failed="${INPUT_KEEP_FAILED:-2}"
+            confirm="${INPUT_CONFIRM:-}"
+          else
+            mode="plan"
+            keep_backups="3"
+            keep_failed="2"
+            confirm=""
+          fi
+          {
+            echo "MODE=$mode"
+            echo "KEEP_BACKUPS=$keep_backups"
+            echo "KEEP_FAILED=$keep_failed"
+            echo "CONFIRM=$confirm"
+          } >> "$GITHUB_ENV"
 
       - name: Verify stage health before retention
         shell: bash
