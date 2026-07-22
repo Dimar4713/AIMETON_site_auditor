@@ -1,81 +1,242 @@
-# MCP security boundary
+# MCP AIMETON Site Auditor: устройство и правила использования
 
-## Profiles
+## Назначение
 
-- `/mcp/` — public read-only profile;
-- `/mcp-admin/` — administrative profile protected by `Authorization: Bearer <token>`;
-- `/api/health` remains public for external monitoring.
+MCP-контур AIMETON Site Auditor предоставляет AI-клиентам и агентам стандартизированный доступ к функциям анализа сайтов, поиска компаний и формирования профиля компании через MCP Streamable HTTP.
 
-Public tools:
+MCP является программной границей приложения. Он не отменяет проверку источников, ограничения SSRF, лимиты загрузки и требования к доказательности результатов.
 
-- `analyze_site`;
-- `hunt_companies`;
-- `company_intelligence`.
+## Архитектура MCP-контура
 
-Administrative tools:
+Контур разделён на два независимых профиля:
 
-- `security_profile` — returns sanitized configuration metadata only.
+| Профиль | Endpoint | Назначение | Авторизация |
+|---|---|---|---|
+| Public | `/mcp/` | Публичные аналитические сценарии | Не требуется |
+| Admin | `/mcp-admin/` | Служебные и административные операции | Bearer token |
 
-## Authentication
+Дополнительно `/api/health` остаётся публичным для внешнего мониторинга.
 
-The admin profile requires the stage secret:
+Запросы к `/mcp` и `/mcp-admin` без завершающего `/` получают относительный redirect `307` на канонический endpoint. Это сохраняет корректную работу за reverse proxy.
+
+## Публичный профиль
+
+Публичный MCP-профиль предназначен для аналитических read-only сценариев. Он не изменяет конфигурацию сервера, не управляет секретами и не выполняет внешние коммерческие действия.
+
+Доступные инструменты:
+
+- `analyze_site` — анализ публичного сайта и поиск коммерчески полезных AI-решений;
+- `hunt_companies` — поиск и ранжирование компаний по территории, отрасли и экономическим признакам;
+- `company_intelligence` — построение проверяемого профиля компании по официальному сайту и внешним источникам.
+
+### Правила применения public profile
+
+1. Передавать только публичные сайты, названия компаний и допустимые параметры поиска.
+2. Не передавать персональные данные, внутренние документы, API keys, пароли и коммерческие тайны.
+3. Не считать результат доказанным фактом без проверки поля источников и уровня доказательности.
+4. Учитывать статус полноты результата `complete` или `partial`.
+5. Не использовать MCP как механизм массового неконтролируемого сканирования.
+6. Соблюдать ограничения сайтов, применимое законодательство и правила обработки данных.
+7. Не использовать результаты для автоматического принятия юридически значимых решений без человека.
+
+## Административный профиль
+
+Административный профиль публикуется отдельно по адресу `/mcp-admin/` и не входит в public tool list.
+
+Текущий административный инструмент:
+
+- `security_profile` — возвращает только санитарно очищенные сведения о конфигурации MCP-защиты.
+
+Административный профиль не должен использоваться публичными клиентами, браузерным интерфейсом или внешними агентами без доверенной операторской роли.
+
+## Авторизация административного профиля
+
+Секрет задаётся только в окружении stage/prod:
 
 ```text
-AIMETON_MCP_ADMIN_TOKEN
+AIMETON_MCP_ADMIN_TOKEN=<strong-random-secret>
 ```
 
-If the secret is absent, the admin endpoint remains locked and returns `401`. Token rotation is controlled by replacing the environment secret and recreating the application container. The old value is revoked immediately after restart.
+Клиент передаёт его в HTTP-заголовке:
 
-Tokens are compared with `hmac.compare_digest`. Raw token values are never written to logs. Audit identifies credentials only by a truncated SHA-256 fingerprint.
+```http
+Authorization: Bearer <token>
+```
 
-## Rate and concurrency limits
+Поведение fail-closed:
 
-Stage variables:
+- секрет отсутствует на сервере — admin endpoint возвращает `401`;
+- заголовок отсутствует — `401`;
+- токен неверный — `401`;
+- корректный токен — запрос передаётся admin MCP-приложению.
 
-- `AIMETON_MCP_PUBLIC_RATE_LIMIT` — public requests per actor/window, default `30`;
-- `AIMETON_MCP_ADMIN_RATE_LIMIT` — admin requests per actor/window, default `20`;
-- `AIMETON_MCP_RATE_WINDOW_SECONDS` — window length, default `60`;
-- `AIMETON_MCP_MAX_CONCURRENCY` — concurrent requests per profile/process, default `4`.
+Токены сравниваются через `hmac.compare_digest`. Исходное значение токена не записывается в логи.
 
-Exceeding the rate returns `429`. Exhausting the short concurrency admission window returns `503`.
+## Подключение MCP-клиента
 
-The baseline limiter is intentionally in-memory and lightweight for one stage application process. A shared external limiter is required before horizontal scaling to multiple replicas.
+Для public profile клиенту указывается URL:
 
-## Sanitized audit fields
+```text
+https://<host>/mcp/
+```
 
-Each MCP request emits:
+Для admin profile:
 
+```text
+https://<host>/mcp-admin/
+```
+
+и Bearer token в защищённой конфигурации клиента.
+
+Точные поля конфигурации зависят от MCP-клиента. Общие требования:
+
+- transport: Streamable HTTP;
+- URL должен содержать `https`;
+- для admin token хранится только в secret storage клиента;
+- token запрещено помещать в URL, query string, commit, issue, screenshot или пользовательский prompt;
+- клиент должен принимать ответы `429`, `503` и повторять запрос с задержкой.
+
+## Rate limiting и ограничение конкурентности
+
+Stage-параметры:
+
+| Переменная | Назначение | Значение по умолчанию |
+|---|---|---:|
+| `AIMETON_MCP_PUBLIC_RATE_LIMIT` | public-запросов на actor за окно | `30` |
+| `AIMETON_MCP_ADMIN_RATE_LIMIT` | admin-запросов на actor за окно | `20` |
+| `AIMETON_MCP_RATE_WINDOW_SECONDS` | длительность окна, секунд | `60` |
+| `AIMETON_MCP_MAX_CONCURRENCY` | параллельных запросов на профиль/процесс | `4` |
+
+Коды ограничения:
+
+- `429 Too Many Requests` — превышен rate limit;
+- `503 Service Unavailable` — исчерпан лимит конкурентных запросов или короткое окно допуска.
+
+Клиент должен использовать exponential backoff и не создавать немедленный цикл повторов.
+
+Текущий limiter хранится в памяти одного процесса. Он подходит для single-replica stage. Перед горизонтальным масштабированием необходим общий limiter, например на базе Valkey.
+
+## Идентификация запросов
+
+Каждый MCP-ответ получает заголовок:
+
+```text
+X-Request-ID
+```
+
+Клиент может передать собственный безопасный request ID. Не следует включать в него название компании, URL, email, токены или другие чувствительные сведения.
+
+Request ID используется для диагностики и сопоставления с security audit trail.
+
+## Санитарно очищенный audit trail
+
+Для каждого MCP-запроса фиксируются:
+
+- timestamp;
+- profile: `public` или `admin`;
 - actor fingerprint;
-- profile (`public` or `admin`);
-- request id;
-- result status;
-- duration in milliseconds;
-- Unix timestamp.
+- request ID;
+- итоговый HTTP/result status;
+- длительность обработки в миллисекундах.
 
-The audit trail does not include:
+Не журналируются:
 
-- bearer tokens or API keys;
-- JSON-RPC parameters;
-- company names, URLs or user prompts;
+- bearer tokens и API keys;
+- JSON-RPC параметры;
+- пользовательские prompts;
+- названия компаний и URL запросов;
 - process environment;
-- internal network addresses.
+- внутренние IP-адреса и сетевые маршруты.
 
-## Existing protections retained
+Actor fingerprint является сокращённым SHA-256 идентификатором и предназначен только для корреляции событий, а не для восстановления секрета.
+
+## Ротация и отзыв административного токена
+
+Ротация выполняется контролируемо:
+
+1. Сгенерировать новый криптографически стойкий токен.
+2. Заменить `AIMETON_MCP_ADMIN_TOKEN` в secret storage stage/prod.
+3. Пересоздать или перезапустить контейнер приложения.
+4. Проверить `/api/health` и admin MCP initialize с новым токеном.
+5. Проверить, что старый токен получает `401`.
+6. Обновить secret storage доверенных MCP-клиентов.
+7. Не публиковать значение токена в evidence и Issue.
+
+После перезапуска старое значение отзывается немедленно. Поддержка одновременно двух активных токенов в baseline не предусмотрена.
+
+## Сохранённые защитные механизмы
+
+MCP-контур сохраняет следующие уровни защиты:
 
 - DNS rebinding protection;
-- explicit host/origin allowlists without wildcards;
+- явные host/origin allowlists без wildcard;
 - scraper SSRF protection;
-- application input and source limits;
-- relative proxy-safe MCP redirects.
+- лимиты размера, типа и времени загрузки страниц;
+- относительные proxy-safe redirects;
+- разделение public/admin tool profiles;
+- fail-closed admin authentication;
+- rate и concurrency limits;
+- санитарно очищенный security audit.
 
-## Acceptance checks
+## Эксплуатационные запреты
 
-Automated tests verify:
+Запрещено:
 
-- public profile availability without credentials;
-- admin rejection for missing/wrong credentials;
-- admin acceptance for the configured credential;
-- `429` after the configured request limit;
-- relative redirects for public and admin endpoints;
-- health endpoint availability;
-- DNS rebinding and origin protections.
+- использовать admin endpoint без необходимости;
+- передавать admin token сторонним AI-сервисам с неизвестной политикой хранения;
+- хранить token в GitHub repository, `.env.example`, документации или логах;
+- отключать rate limit для устранения симптомов нагрузки;
+- добавлять изменяющие состояние инструменты в public profile;
+- журналировать JSON-RPC body целиком;
+- использовать wildcard в allowed hosts/origins;
+- обходить SSRF-защиту для доступа к localhost, metadata endpoints или внутренней сети;
+- автоматически выполнять внешние коммерческие, финансовые или юридические действия по результату MCP.
+
+## Правила добавления новых MCP tools
+
+Перед добавлением инструмента необходимо определить:
+
+1. Является ли операция read-only или изменяет состояние.
+2. Какие данные принимает и возвращает инструмент.
+3. Может ли запрос привести к сетевому доступу, расходу средств или внешнему действию.
+4. Какой профиль требуется: public или admin.
+5. Какие лимиты размера, времени и количества нужны.
+6. Какие audit fields допустимы без раскрытия содержимого.
+7. Какие тесты подтверждают отказ без авторизации и при превышении лимита.
+
+Любой инструмент, который изменяет конфигурацию, секреты, состояние инфраструктуры или выполняет внешнее действие, должен находиться только в admin profile либо в отдельном более строгом контуре.
+
+## Проверка после deployment
+
+Минимальная проверка stage:
+
+1. `GET /api/health` возвращает `200` и `status=ok`.
+2. `GET /mcp` возвращает `307` на `/mcp/`.
+3. Public MCP initialize без токена проходит успешно.
+4. `GET/POST /mcp-admin/` без токена возвращает `401`.
+5. Неверный Bearer token возвращает `401`.
+6. Корректный token допускает admin initialize.
+7. Превышение тестового лимита возвращает `429`.
+8. В логах отсутствуют исходные токены и JSON-RPC параметры.
+9. Ответы содержат `X-Request-ID`.
+
+## Автоматические тесты
+
+Тестовый набор проверяет:
+
+- доступность public profile без credentials;
+- отказ admin profile при отсутствующем или неверном token;
+- допуск корректного token;
+- `429` после установленного лимита;
+- корректные redirects public/admin endpoints;
+- публичную доступность health endpoint;
+- DNS rebinding и origin protection;
+- отсутствие секрета в audit output.
+
+## Связанные файлы
+
+- `app/mcp_server.py` — определение public/admin MCP tools;
+- `app/mcp_security.py` — auth, rate limit, concurrency и audit middleware;
+- `app/main.py` — mounting endpoints и lifecycle;
+- `tests/test_mcp_security.py` — автоматические security checks;
+- `docs/STAGE-OBSERVABILITY.md` — эксплуатационный мониторинг stage.
