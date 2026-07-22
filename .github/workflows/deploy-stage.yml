@@ -45,6 +45,8 @@ jobs:
       OS_AUTH_TYPE: v3applicationcredential
       OPENSTACK_SERVER_ID: ${{ vars.OPENSTACK_SERVER_ID }}
       OPENSTACK_SERVER_NAME: ${{ vars.OPENSTACK_SERVER_NAME }}
+      BACKUP_KEEP: ${{ vars.STAGE_BACKUP_KEEP || '5' }}
+      FAILED_KEEP: ${{ vars.STAGE_FAILED_KEEP || '2' }}
 
     steps:
       - name: Resolve exact deployment SHA
@@ -173,6 +175,8 @@ jobs:
             echo "actor=$GITHUB_ACTOR"
             echo "timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             echo "bundle_sha=$(cat "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
+            echo "backup_keep=$BACKUP_KEEP"
+            echo "failed_keep=$FAILED_KEEP"
             docker ps --filter name=aimeton-auditor --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
             curl -sS -D - -o /dev/null --max-redirs 0 "$STAGE_URL/mcp" || true
             curl -sS "$STAGE_URL/api/health" || true
