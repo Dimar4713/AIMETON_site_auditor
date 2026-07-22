@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -24,29 +25,39 @@ from app.external_sources import run_enriched_site_analysis
 from app.hunter_handbook import handbook
 from app.hunter_sources import get_hunter_sources
 from app.llm import chat_with_routerai
-from app.mcp_server import mcp, mcp_http_app
+from app.mcp_security import McpSecurityMiddleware
+from app.mcp_server import admin_mcp, admin_mcp_http_app, mcp, mcp_http_app
 from app.models import AnalyzeRequest, ChatRequest, CompanyIntelligenceRequest, HuntRequest
 from app.osint_tools import get_osint_tools
 from app.scraper import FetchError, fetch_site
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with mcp.session_manager.run(), admin_mcp.session_manager.run():
+        yield
+
+
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.6.1",
-    lifespan=lambda _app: mcp.session_manager.run(),
+    version="0.7.0",
+    lifespan=lifespan,
 )
 
 
 @app.middleware("http")
 async def canonical_mcp_path(request: Request, call_next):
-    """Return an explicit relative Location header independent of proxy scheme rewriting."""
+    """Return explicit relative Location headers independent of proxy scheme rewriting."""
     if request.url.path == "/mcp":
         return Response(status_code=307, headers={"Location": "/mcp/"})
+    if request.url.path == "/mcp-admin":
+        return Response(status_code=307, headers={"Location": "/mcp-admin/"})
     return await call_next(request)
 
 
 app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
-app.mount("/mcp", mcp_http_app, name="mcp")
+app.mount("/mcp", McpSecurityMiddleware(mcp_http_app, admin=False), name="mcp")
+app.mount("/mcp-admin", McpSecurityMiddleware(admin_mcp_http_app, admin=True), name="mcp-admin")
 
 
 @app.get("/")
@@ -65,11 +76,13 @@ def index():
 def health():
     return {
         "status": "ok",
-        "version": "0.6.1",
+        "version": "0.7.0",
         "analysis_mode": "ai-sales-with-canonical-km-company-profile",
         "osint": "contacts-finance-workforce-legal-ownership",
         "api": "/docs",
         "mcp": "/mcp",
+        "mcp_admin": "/mcp-admin",
+        "mcp_security": "public-rate-limited-admin-authenticated",
     }
 
 
@@ -90,7 +103,7 @@ def osint_tools():
 
 @app.post("/api/analyze")
 async def analyze(req: AnalyzeRequest):
-    """Finds an AI sales opportunity and enriches it with a source-traceable company and canonical KM profile."""
+    """Find an AI sales opportunity and enrich it with a source-traceable company and canonical KM profile."""
     try:
         page = await fetch_site(str(req.url))
         return await run_enriched_site_analysis(page["final_url"], page["title"], page["text"])
