@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Read-only OpenStack inventory for immers.cloud.
 
-Authentication uses an Application Credential. Provider APIs are queried through
-known HTTPS endpoints, so inventory does not depend on a complete Keystone
-service catalog. The script performs no mutating operation.
+Authentication uses an Application Credential through Keystone's token API.
+Provider APIs are queried through known HTTPS endpoints, so inventory does not
+depend on the Keystone service catalog. The script performs no mutating operation.
 """
 from __future__ import annotations
 
@@ -15,8 +15,6 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 import requests
-from keystoneauth1 import session
-from keystoneauth1.identity import v3
 
 DEFAULT_COMPUTE_ENDPOINT = "https://api.immers.cloud:8774/v2.1"
 DEFAULT_NETWORK_ENDPOINT = "https://api.immers.cloud:9696/v2.0"
@@ -49,15 +47,34 @@ def _require_application_credential() -> None:
 
 
 def _authenticated_context() -> tuple[str, str | None, str | None]:
-    auth = v3.ApplicationCredential(
-        auth_url=os.environ["OS_AUTH_URL"],
-        application_credential_id=os.environ["OS_APPLICATION_CREDENTIAL_ID"],
-        application_credential_secret=os.environ["OS_APPLICATION_CREDENTIAL_SECRET"],
+    auth_url = os.environ["OS_AUTH_URL"].rstrip("/")
+    token_url = f"{auth_url}/auth/tokens"
+    payload = {
+        "auth": {
+            "identity": {
+                "methods": ["application_credential"],
+                "application_credential": {
+                    "id": os.environ["OS_APPLICATION_CREDENTIAL_ID"],
+                    "secret": os.environ["OS_APPLICATION_CREDENTIAL_SECRET"],
+                },
+            }
+        }
+    }
+    response = requests.post(
+        token_url,
+        json=payload,
+        headers={"Accept": "application/json"},
+        timeout=REQUEST_TIMEOUT_SECONDS,
     )
-    auth_session = session.Session(auth=auth, verify=True)
-    token = auth_session.get_token()
-    access = auth.get_access(auth_session)
-    return token, getattr(access, "project_id", None), getattr(access, "user_id", None)
+    response.raise_for_status()
+    token = response.headers.get("X-Subject-Token")
+    if not token:
+        raise RuntimeError("Keystone response did not include X-Subject-Token")
+    body = response.json()
+    token_body = body.get("token") or {}
+    project_id = (token_body.get("project") or {}).get("id")
+    user_id = (token_body.get("user") or {}).get("id")
+    return token, project_id, user_id
 
 
 def _get_json(url: str, token: str) -> dict[str, Any]:
@@ -102,7 +119,7 @@ def collect_inventory(*, compute_only: bool = False) -> Inventory:
             volumes=[],
             ports=[],
             security_groups=[],
-            scope="compute-only",
+            scope="compute-only-direct-endpoints",
         )
 
     if not project_id:
