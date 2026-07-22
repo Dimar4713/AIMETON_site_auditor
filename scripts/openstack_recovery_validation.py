@@ -67,9 +67,7 @@ def base_evidence(args: argparse.Namespace) -> dict[str, Any]:
 
 def require_validation_name(name: str) -> None:
     if not NAME_RE.fullmatch(name):
-        raise RuntimeError(
-            "Validation server name must match aimeton-validation-[a-z0-9-] and contain 22-67 characters"
-        )
+        raise RuntimeError("Validation server name must match aimeton-validation-[a-z0-9-]")
 
 
 def resolve_create_inputs(conn: openstack.connection.Connection, args: argparse.Namespace) -> tuple[Any, Any, Any]:
@@ -135,19 +133,24 @@ def main() -> int:
                 return 0
             if args.confirm != f"CREATE {args.validation_name}":
                 raise RuntimeError(f"Create confirmation must equal: CREATE {args.validation_name}")
-            server = conn.compute.create_server(
-                name=args.validation_name,
-                image_id=image.id,
-                flavor_id=flavor.id,
-                networks=[{"uuid": network.id}],
-                security_groups=[{"name": name} for name in args.security_group] or None,
-                key_name=args.key_name or None,
-                metadata={
+
+            create_args: dict[str, Any] = {
+                "name": args.validation_name,
+                "image_id": image.id,
+                "flavor_id": flavor.id,
+                "networks": [{"uuid": network.id}],
+                "metadata": {
                     "aimeton_purpose": "snapshot-recovery-validation",
                     "aimeton_source_image": image.id,
                     "aimeton_actor": clean(os.getenv("GITHUB_ACTOR"))[:255],
                 },
-            )
+            }
+            if args.security_group:
+                create_args["security_groups"] = [{"name": name} for name in args.security_group]
+            if args.key_name:
+                create_args["key_name"] = args.key_name
+
+            server = conn.compute.create_server(**create_args)
             server = conn.compute.wait_for_server(server, status="ACTIVE", failures=["ERROR"], wait=args.wait_seconds)
             if server.id == canonical_id:
                 raise RuntimeError("Invariant violation: validation server equals canonical server")
