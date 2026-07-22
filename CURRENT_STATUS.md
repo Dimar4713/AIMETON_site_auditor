@@ -50,7 +50,8 @@ Baseline CI success on main
 - при ошибке выполняется rollback;
 - SHA и evidence сохраняются;
 - ручное восстановление задокументировано;
-- rollback-транзакция проверена воспроизводимым тестом с искусственно сорванным smoke: предыдущий bundle и SHA восстанавливаются, неуспешный bundle сохраняется в `app-source.failed.*`.
+- rollback-транзакция проверена воспроизводимым тестом с искусственно сорванным smoke: предыдущий bundle и SHA восстанавливаются, неуспешный bundle сохраняется в `app-source.failed.*`;
+- rollback evidence закреплён тестом `tests/test_deploy_stage_rollback.py`, итоговый commit `233e39bf0b4aa6266526d847e7fcbbd832505792`.
 
 ## SA-02.2 — активный следующий слой
 
