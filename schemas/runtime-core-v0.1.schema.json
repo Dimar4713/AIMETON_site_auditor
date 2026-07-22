@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aimeton.ru/schemas/runtime-core-v0.1.schema.json",
+  "title": "AIMETON Runtime Core v0.1",
+  "type": "object",
+  "required": ["task", "records"],
+  "properties": {
+    "task": {"$ref": "#/$defs/task"},
+    "records": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/recordEnvelope"}
+    }
+  },
+  "$defs": {
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "taskState": {
+      "type": "string",
+      "enum": ["created", "planned", "in_progress", "validation", "completed", "blocked", "failed", "cancelled"]
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "state", "actor_ref", "mandate_ref", "commitment", "completion_criteria", "external_refs", "correlation_id", "created_at", "updated_at"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^task_[0-9a-f]+$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 300},
+        "state": {"$ref": "#/$defs/taskState"},
+        "actor_ref": {"$ref": "#/$defs/reference"},
+        "mandate_ref": {"$ref": "#/$defs/reference"},
+        "commitment": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "completion_criteria": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "external_refs": {"type": "object", "additionalProperties": {"type": "string"}},
+        "correlation_id": {"$ref": "#/$defs/reference"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "runtimeRecord": {
+      "type": "object",
+      "required": ["id", "task_id", "actor_ref", "mandate_ref", "correlation_id", "reason", "created_at"],
+      "properties": {
+        "id": {"type": "string"},
+        "task_id": {"type": "string", "pattern": "^task_[0-9a-f]+$"},
+        "actor_ref": {"$ref": "#/$defs/reference"},
+        "mandate_ref": {"$ref": "#/$defs/reference"},
+        "correlation_id": {"$ref": "#/$defs/reference"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "created_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "recordEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "record"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["event", "evidence", "tool_execution", "plan_step"]},
+        "record": {"allOf": [{"$ref": "#/$defs/runtimeRecord"}], "type": "object"}
+      }
+    }
+  }
+}

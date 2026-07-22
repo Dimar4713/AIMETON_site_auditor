@@ -29,6 +29,7 @@ from app.mcp_security import McpSecurityMiddleware
 from app.mcp_server import admin_mcp, admin_mcp_http_app, mcp, mcp_http_app
 from app.models import AnalyzeRequest, ChatRequest, CompanyIntelligenceRequest, HuntRequest
 from app.osint_tools import get_osint_tools
+from app.runtime_core.api import router as runtime_router
 from app.scraper import FetchError, fetch_site
 
 
@@ -40,9 +41,10 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.7.0",
+    version="0.8.0",
     lifespan=lifespan,
 )
+app.include_router(runtime_router)
 
 
 @app.middleware("http")
@@ -83,6 +85,7 @@ def health():
         "mcp": "/mcp",
         "mcp_admin": "/mcp-admin",
         "mcp_security": "public-rate-limited-admin-authenticated",
+        "runtime_core": "/api/runtime",
     }
 
 
