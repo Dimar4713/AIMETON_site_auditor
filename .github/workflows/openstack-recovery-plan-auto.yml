@@ -61,7 +61,8 @@ jobs:
               raise SystemExit('Canonical server not found')
           if server.status != 'ACTIVE':
               raise SystemExit(f'Canonical server is not ACTIVE: {server.status}')
-          flavor = conn.compute.get_flavor(server.flavor['id'])
+          flavor_ref = server.flavor['id']
+          flavor = conn.compute.find_flavor(flavor_ref, ignore_missing=False)
           network_ids = []
           for port in conn.network.ports(device_id=server.id):
               if port.network_id and port.network_id not in network_ids:
