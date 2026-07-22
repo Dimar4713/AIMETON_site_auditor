@@ -1,0 +1,121 @@
+name: OpenStack Snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_server_id:
+        description: Re-enter the exact canonical server UUID
+        required: true
+        type: string
+      reason:
+        description: Why this snapshot is required
+        required: true
+        type: string
+      snapshot_suffix:
+        description: Short lowercase suffix, for example before-network-change
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aimeton-openstack-snapshot-stage
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Guarded OpenStack snapshot
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 40
+    env:
+      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL || vars.OS_AUTH_URL || 'https://api.immers.cloud:5000/v3' }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID || vars.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      OS_COMPUTE_ENDPOINT: ${{ vars.OS_COMPUTE_ENDPOINT || 'https://api.immers.cloud:8774/v2.1' }}
+      OS_IMAGE_ENDPOINT: ${{ vars.OS_IMAGE_ENDPOINT || 'https://api.immers.cloud:9292/v2' }}
+      OPENSTACK_SERVER_ID: ${{ vars.OPENSTACK_SERVER_ID }}
+      OPENSTACK_SERVER_NAME: ${{ vars.OPENSTACK_SERVER_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate guardrails
+        shell: bash
+        env:
+          CONFIRM_SERVER_ID: ${{ inputs.confirm_server_id }}
+          SNAPSHOT_REASON: ${{ inputs.reason }}
+          SNAPSHOT_SUFFIX: ${{ inputs.snapshot_suffix }}
+        run: |
+          set -Eeuo pipefail
+          for name in OS_AUTH_URL OS_APPLICATION_CREDENTIAL_ID OS_APPLICATION_CREDENTIAL_SECRET OPENSTACK_SERVER_ID OPENSTACK_SERVER_NAME; do
+            test -n "${!name:-}" || { echo "Missing required stage setting: $name"; exit 1; }
+          done
+          [[ "$CONFIRM_SERVER_ID" == "$OPENSTACK_SERVER_ID" ]] || {
+            echo "Confirmation UUID does not match canonical server UUID" >&2
+            exit 1
+          }
+          [[ ${#SNAPSHOT_REASON} -ge 8 ]] || {
+            echo "Reason must contain at least 8 characters" >&2
+            exit 1
+          }
+          [[ "$SNAPSHOT_SUFFIX" =~ ^[a-z0-9][a-z0-9-]{2,40}$ ]] || {
+            echo "Snapshot suffix must be 3-41 lowercase letters, digits or hyphens" >&2
+            exit 1
+          }
+          echo "Guardrails passed for server $OPENSTACK_SERVER_ID"
+
+      - name: Prepare Python environment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m venv .venv-openstack-snapshot
+          . .venv-openstack-snapshot/bin/activate
+          python -m pip install --disable-pip-version-check -q -r requirements-openstack.txt
+
+      - name: Create and verify snapshot
+        shell: bash
+        env:
+          CONFIRM_SERVER_ID: ${{ inputs.confirm_server_id }}
+          SNAPSHOT_REASON: ${{ inputs.reason }}
+          SNAPSHOT_SUFFIX: ${{ inputs.snapshot_suffix }}
+        run: |
+          set -Eeuo pipefail
+          . .venv-openstack-snapshot/bin/activate
+          mkdir -p snapshot-evidence
+          timestamp="$(date -u +'%Y%m%dT%H%M%SZ')"
+          snapshot_name="aimeton-main-server-${timestamp}-${SNAPSHOT_SUFFIX}"
+          python scripts/openstack_snapshot.py \
+            --server-id "$OPENSTACK_SERVER_ID" \
+            --expected-name "$OPENSTACK_SERVER_NAME" \
+            --confirm-server-id "$CONFIRM_SERVER_ID" \
+            --reason "$SNAPSHOT_REASON" \
+            --snapshot-name "$snapshot_name" \
+            --output snapshot-evidence/snapshot.json
+
+      - name: Record workflow context
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p snapshot-evidence
+          {
+            echo "workflow_run_id=$GITHUB_RUN_ID"
+            echo "workflow_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "actor=$GITHUB_ACTOR"
+            echo "repository=$GITHUB_REPOSITORY"
+            echo "ref=$GITHUB_REF"
+            echo "sha=$GITHUB_SHA"
+            echo "timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > snapshot-evidence/workflow-context.txt
+
+      - name: Upload snapshot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openstack-snapshot-${{ github.run_id }}
+          path: snapshot-evidence/
+          retention-days: 90
+          if-no-files-found: error
