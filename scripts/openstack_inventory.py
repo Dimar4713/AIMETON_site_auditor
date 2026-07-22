@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Read-only OpenStack inventory for immers.cloud.
 
-Authentication uses standard OpenStack environment variables, preferably an
-Application Credential. The script performs no mutating operation.
+Authentication uses an Application Credential. Provider APIs are queried through
+known HTTPS endpoints, so inventory does not depend on a complete Keystone
+service catalog. The script performs no mutating operation.
 """
 from __future__ import annotations
 
@@ -13,12 +14,14 @@ import sys
 from dataclasses import asdict, dataclass
 from typing import Any
 
-import openstack
-
+import requests
+from keystoneauth1 import session
+from keystoneauth1.identity import v3
 
 DEFAULT_COMPUTE_ENDPOINT = "https://api.immers.cloud:8774/v2.1"
 DEFAULT_NETWORK_ENDPOINT = "https://api.immers.cloud:9696/v2.0"
 DEFAULT_BLOCK_STORAGE_ENDPOINT = "https://api.immers.cloud:8776/v3"
+REQUEST_TIMEOUT_SECONDS = 30
 
 
 @dataclass
@@ -45,52 +48,51 @@ def _require_application_credential() -> None:
         )
 
 
-def _server_record(server: Any) -> dict[str, Any]:
+def _authenticated_context() -> tuple[str, str | None, str | None]:
+    auth = v3.ApplicationCredential(
+        auth_url=os.environ["OS_AUTH_URL"],
+        application_credential_id=os.environ["OS_APPLICATION_CREDENTIAL_ID"],
+        application_credential_secret=os.environ["OS_APPLICATION_CREDENTIAL_SECRET"],
+    )
+    auth_session = session.Session(auth=auth, verify=True)
+    token = auth_session.get_token()
+    access = auth.get_access(auth_session)
+    return token, getattr(access, "project_id", None), getattr(access, "user_id", None)
+
+
+def _get_json(url: str, token: str) -> dict[str, Any]:
+    response = requests.get(
+        url,
+        headers={"X-Auth-Token": token, "Accept": "application/json"},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Unexpected JSON payload from {url}")
+    return payload
+
+
+def _server_record(server: dict[str, Any]) -> dict[str, Any]:
     return {
-        "id": server.id,
-        "name": server.name,
-        "status": server.status,
-        "addresses": server.addresses,
-        "flavor": getattr(server, "flavor", None),
-        "metadata": getattr(server, "metadata", None) or {},
-        "created_at": str(getattr(server, "created_at", "") or ""),
-        "updated_at": str(getattr(server, "updated_at", "") or ""),
+        "id": server.get("id"),
+        "name": server.get("name"),
+        "status": server.get("status"),
+        "addresses": server.get("addresses") or {},
+        "flavor": server.get("flavor"),
+        "metadata": server.get("metadata") or {},
+        "created_at": server.get("created") or "",
+        "updated_at": server.get("updated") or "",
     }
 
 
 def collect_inventory(*, compute_only: bool = False) -> Inventory:
     _require_application_credential()
-    connect_kwargs: dict[str, Any] = {
-        "auth_type": "v3applicationcredential",
-        "auth_url": os.environ["OS_AUTH_URL"],
-        "application_credential_id": os.environ["OS_APPLICATION_CREDENTIAL_ID"],
-        "application_credential_secret": os.environ["OS_APPLICATION_CREDENTIAL_SECRET"],
-        "verify": True,
-        # immers.cloud CLI access is known to work with these native endpoints.
-        # Explicit overrides avoid provider catalog inconsistencies on SDK discovery.
-        "compute_endpoint_override": os.getenv(
-            "OS_COMPUTE_ENDPOINT", DEFAULT_COMPUTE_ENDPOINT
-        ),
-    }
-    region_name = os.getenv("OS_REGION_NAME")
-    if region_name:
-        connect_kwargs["region_name"] = region_name
+    token, project_id, user_id = _authenticated_context()
 
-    if not compute_only:
-        connect_kwargs["network_endpoint_override"] = os.getenv(
-            "OS_NETWORK_ENDPOINT", DEFAULT_NETWORK_ENDPOINT
-        )
-        connect_kwargs["block_storage_endpoint_override"] = os.getenv(
-            "OS_BLOCK_STORAGE_ENDPOINT", DEFAULT_BLOCK_STORAGE_ENDPOINT
-        )
-
-    conn = openstack.connect(**connect_kwargs)
-
-    auth = conn.session.auth
-    project_id = getattr(auth, "get_project_id", lambda _session: None)(conn.session)
-    user_id = getattr(auth, "get_user_id", lambda _session: None)(conn.session)
-
-    servers = [_server_record(server) for server in conn.compute.servers(details=True)]
+    compute_endpoint = os.getenv("OS_COMPUTE_ENDPOINT", DEFAULT_COMPUTE_ENDPOINT).rstrip("/")
+    compute_payload = _get_json(f"{compute_endpoint}/servers/detail", token)
+    servers = [_server_record(item) for item in compute_payload.get("servers", [])]
 
     if compute_only:
         return Inventory(
@@ -103,36 +105,51 @@ def collect_inventory(*, compute_only: bool = False) -> Inventory:
             scope="compute-only",
         )
 
+    if not project_id:
+        raise RuntimeError("Application Credential token did not expose project_id")
+
+    network_endpoint = os.getenv("OS_NETWORK_ENDPOINT", DEFAULT_NETWORK_ENDPOINT).rstrip("/")
+    block_endpoint = os.getenv(
+        "OS_BLOCK_STORAGE_ENDPOINT", DEFAULT_BLOCK_STORAGE_ENDPOINT
+    ).rstrip("/")
+
+    volume_payload = _get_json(
+        f"{block_endpoint}/{project_id}/volumes/detail", token
+    )
     volumes = [
         {
-            "id": volume.id,
-            "name": volume.name,
-            "status": volume.status,
-            "size_gb": volume.size,
-            "attachments": getattr(volume, "attachments", None) or [],
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "status": item.get("status"),
+            "size_gb": item.get("size"),
+            "attachments": item.get("attachments") or [],
         }
-        for volume in conn.block_storage.volumes(details=True)
+        for item in volume_payload.get("volumes", [])
     ]
+
+    port_payload = _get_json(f"{network_endpoint}/ports", token)
     ports = [
         {
-            "id": port.id,
-            "name": port.name,
-            "status": port.status,
-            "network_id": port.network_id,
-            "device_id": port.device_id,
-            "fixed_ips": port.fixed_ips,
-            "security_group_ids": port.security_group_ids,
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "status": item.get("status"),
+            "network_id": item.get("network_id"),
+            "device_id": item.get("device_id"),
+            "fixed_ips": item.get("fixed_ips") or [],
+            "security_group_ids": item.get("security_groups") or [],
         }
-        for port in conn.network.ports()
+        for item in port_payload.get("ports", [])
     ]
+
+    group_payload = _get_json(f"{network_endpoint}/security-groups", token)
     security_groups = [
         {
-            "id": group.id,
-            "name": group.name,
-            "description": group.description,
-            "project_id": group.project_id,
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "description": item.get("description"),
+            "project_id": item.get("project_id") or item.get("tenant_id"),
         }
-        for group in conn.network.security_groups()
+        for item in group_payload.get("security_groups", [])
     ]
 
     return Inventory(
@@ -142,7 +159,7 @@ def collect_inventory(*, compute_only: bool = False) -> Inventory:
         volumes=volumes,
         ports=ports,
         security_groups=security_groups,
-        scope="full",
+        scope="full-direct-endpoints",
     )
 
 
