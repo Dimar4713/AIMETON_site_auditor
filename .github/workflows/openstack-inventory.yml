@@ -22,7 +22,7 @@ jobs:
     environment: stage
     timeout-minutes: 15
     env:
-      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL || vars.OS_AUTH_URL || 'https://api.immers.cloud:5000/v3' }}
       OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
       OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
       OS_AUTH_TYPE: v3applicationcredential
