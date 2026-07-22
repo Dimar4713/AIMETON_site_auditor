@@ -36,7 +36,49 @@ def get_project(ctx: sync.Context):
     return project
 
 
+def update_status_case_insensitive(
+    ctx: sync.Context,
+    project: dict,
+    item_id: str,
+    target: str,
+) -> None:
+    """Resolve Project status options case-insensitively while preserving the real option ID."""
+    status_field = next(
+        (field for field in project["fields"]["nodes"] if field and field.get("name") == "Status"),
+        None,
+    )
+    if not status_field:
+        raise RuntimeError("Project has no single-select field named Status")
+
+    option = next(
+        (item for item in status_field["options"] if item["name"].casefold() == target.casefold()),
+        None,
+    )
+    if not option:
+        available = ", ".join(item["name"] for item in status_field["options"])
+        raise RuntimeError(f"Status option {target!r} not found. Available: {available}")
+
+    mutation = """
+    mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) {
+      updateProjectV2ItemFieldValue(input:{projectId:$project, itemId:$item, fieldId:$field, value:{singleSelectOptionId:$option}}) { projectV2Item { id } }
+    }
+    """
+    sync.graphql(
+        ctx,
+        mutation,
+        {
+            "project": project["id"],
+            "item": item_id,
+            "field": status_field["id"],
+            "option": option["id"],
+        },
+    )
+
+
+sync.STATUSES.add("Ready")
+sync.STATUS_LABELS["status:ready"] = "Ready"
 sync.get_project = get_project
+sync.update_status = update_status_case_insensitive
 
 if __name__ == "__main__":
     try:
