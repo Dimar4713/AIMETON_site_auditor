@@ -34,7 +34,17 @@ jobs:
       - self-hosted
       - Linux
       - X64
+      - stage
+      - auditor
+    environment: stage
     timeout-minutes: 30
+    env:
+      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL || vars.OS_AUTH_URL || 'https://api.immers.cloud:5000/v3' }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID || vars.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      OS_AUTH_TYPE: v3applicationcredential
+      OPENSTACK_SERVER_ID: ${{ vars.OPENSTACK_SERVER_ID }}
+      OPENSTACK_SERVER_NAME: ${{ vars.OPENSTACK_SERVER_NAME }}
 
     steps:
       - name: Resolve exact deployment SHA
@@ -74,6 +84,37 @@ jobs:
           echo "Actual:   $actual"
           [[ "$actual" == "$DEPLOY_SHA" ]]
 
+      - name: Prepare OpenStack preflight environment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in OS_AUTH_URL OS_APPLICATION_CREDENTIAL_ID OS_APPLICATION_CREDENTIAL_SECRET OPENSTACK_SERVER_ID OPENSTACK_SERVER_NAME; do
+            test -n "${!name:-}" || { echo "Missing required stage OpenStack setting: $name"; exit 1; }
+          done
+          python3 -m venv .venv-openstack-deploy
+          . .venv-openstack-deploy/bin/activate
+          python -m pip install --disable-pip-version-check -q -r requirements-openstack.txt
+
+      - name: OpenStack preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          . .venv-openstack-deploy/bin/activate
+          mkdir -p deployment-evidence
+          python scripts/openstack_inventory.py --output deployment-evidence/openstack-preflight.json >/dev/null
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path('deployment-evidence/openstack-preflight.json').read_text(encoding='utf-8'))
+          server = next((item for item in payload.get('servers', []) if item.get('id') == os.environ['OPENSTACK_SERVER_ID']), None)
+          assert server, 'Configured OpenStack server was not found'
+          assert server.get('name') == os.environ['OPENSTACK_SERVER_NAME'], server
+          assert server.get('status') == 'ACTIVE', server
+          print(f"OpenStack preflight OK: {server['name']} {server['id']} status={server['status']}")
+          PY
+
       - name: Deploy transactionally to stage
         shell: bash
         env:
@@ -84,6 +125,38 @@ jobs:
           mkdir -p deployment-evidence
           chmod +x scripts/deploy_stage.sh
           scripts/deploy_stage.sh 2>&1 | tee "deployment-evidence/deploy-${DEPLOY_SHA}.log"
+
+      - name: OpenStack postflight
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -x .venv-openstack-deploy/bin/python ]]; then
+            . .venv-openstack-deploy/bin/activate
+            python scripts/openstack_inventory.py --output deployment-evidence/openstack-postflight.json >/dev/null
+            python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path('deployment-evidence/openstack-postflight.json')
+          if not path.exists():
+              raise SystemExit(0)
+          payload = json.loads(path.read_text(encoding='utf-8'))
+          server = next((item for item in payload.get('servers', []) if item.get('id') == os.environ.get('OPENSTACK_SERVER_ID')), None)
+          summary = {
+              'project_id': payload.get('project_id'),
+              'server_id': server.get('id') if server else None,
+              'server_name': server.get('name') if server else None,
+              'server_status': server.get('status') if server else None,
+          }
+          Path('deployment-evidence/openstack-postflight-summary.json').write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+          PY
+          fi
 
       - name: Record final stage evidence
         if: always()
