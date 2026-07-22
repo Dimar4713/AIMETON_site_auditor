@@ -1,0 +1,87 @@
+name: Project Status Sync
+
+on:
+  issues:
+    types: [opened, edited, reopened, closed, labeled, unlabeled, assigned]
+  pull_request:
+    types: [opened, reopened, closed, ready_for_review, converted_to_draft, labeled, unlabeled, review_requested]
+  workflow_dispatch:
+    inputs:
+      item_kind:
+        description: Issue or pull_request
+        required: true
+        type: choice
+        options: [issue, pull_request]
+        default: issue
+      item_number:
+        description: Issue or PR number
+        required: true
+        type: number
+      target_status:
+        description: Explicit Project status
+        required: true
+        type: choice
+        options: [Backlog, In Progress, In Review, Validation, Blocked, Done]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: project-status-${{ github.event.issue.number || github.event.pull_request.number || inputs.item_number }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+      REPOSITORY: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
+      EVENT_ACTION: ${{ github.event.action }}
+      MANUAL_STATUS: ${{ inputs.target_status }}
+    steps:
+      - name: Validate Project automation configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${GH_TOKEN:-}" || { echo "Missing secret PROJECTS_TOKEN"; exit 1; }
+          test -n "${PROJECT_OWNER:-}" || { echo "Missing variable PROJECT_OWNER"; exit 1; }
+          test -n "${PROJECT_NUMBER:-}" || { echo "Missing variable PROJECT_NUMBER"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Resolve event item
+        id: item
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECTS_TOKEN }}
+          script: |
+            const kind = context.eventName === 'workflow_dispatch'
+              ? '${{ inputs.item_kind }}'
+              : (context.payload.pull_request ? 'pull_request' : 'issue');
+            const number = context.eventName === 'workflow_dispatch'
+              ? Number('${{ inputs.item_number }}')
+              : (context.payload.issue?.number ?? context.payload.pull_request?.number);
+            const item = kind === 'pull_request'
+              ? (await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: number})).data
+              : (await github.rest.issues.get({owner: context.repo.owner, repo: context.repo.repo, issue_number: number})).data;
+            core.setOutput('kind', kind);
+            core.setOutput('number', String(number));
+            core.setOutput('node_id', item.node_id);
+            core.setOutput('state', item.state);
+            core.setOutput('title', item.title || '');
+            core.setOutput('labels', (item.labels || []).map(x => typeof x === 'string' ? x : x.name).filter(Boolean).join(','));
+
+      - name: Synchronize Project V2 status
+        env:
+          CONTENT_NODE_ID: ${{ steps.item.outputs.node_id }}
+          ITEM_NUMBER: ${{ steps.item.outputs.number }}
+          ITEM_KIND: ${{ steps.item.outputs.kind }}
+          ITEM_STATE: ${{ steps.item.outputs.state }}
+          ITEM_TITLE: ${{ steps.item.outputs.title }}
+          ITEM_LABELS: ${{ steps.item.outputs.labels }}
+        run: python scripts/project_status_sync.py
