@@ -1,0 +1,59 @@
+name: Server Architecture Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/server_architecture_audit.sh
+      - .github/workflows/server-architecture-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-server-architecture-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect sanitized read-only evidence
+        shell: bash
+        env:
+          STACK_DIR: /opt/aimeton/auditor-stack
+          STAGE_URL: https://stage-auditor.aimeton.ru
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/server_architecture_audit.sh
+          scripts/server_architecture_audit.sh server-audit.md
+          test -s server-audit.md
+
+      - name: Upload sanitized evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitized-server-architecture-audit-${{ github.run_id }}
+          path: server-audit.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish sanitized summary to SA-03
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('server-audit.md', 'utf8');
+            const header = `## Automated server evidence\n\nWorkflow run: ${context.runId}\n\n`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 36,
+              body: header + report.slice(0, 60000),
+            });
