@@ -1,0 +1,119 @@
+name: OpenStack Inventory
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  inventory:
+    name: Read-only OpenStack inventory
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      OS_AUTH_TYPE: v3applicationcredential
+      OPENSTACK_SERVER_ID: ${{ vars.OPENSTACK_SERVER_ID }}
+      OPENSTACK_SERVER_NAME: ${{ vars.OPENSTACK_SERVER_NAME }}
+      OPENSTACK_VOLUME_ID: ${{ vars.OPENSTACK_VOLUME_ID }}
+      OPENSTACK_PORT_ID: ${{ vars.OPENSTACK_PORT_ID }}
+      OPENSTACK_SECURITY_GROUP_ID: ${{ vars.OPENSTACK_SECURITY_GROUP_ID }}
+      OPENSTACK_PROJECT_ID: ${{ vars.OPENSTACK_PROJECT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in \
+            OS_AUTH_URL \
+            OS_APPLICATION_CREDENTIAL_ID \
+            OS_APPLICATION_CREDENTIAL_SECRET \
+            OPENSTACK_SERVER_ID \
+            OPENSTACK_SERVER_NAME \
+            OPENSTACK_VOLUME_ID \
+            OPENSTACK_PORT_ID \
+            OPENSTACK_SECURITY_GROUP_ID \
+            OPENSTACK_PROJECT_ID
+          do
+            test -n "${!name:-}" || { echo "Missing required stage secret/variable: $name"; exit 1; }
+          done
+          echo "Stage OpenStack configuration is present."
+
+      - name: Prepare Python environment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m venv .venv-openstack
+          . .venv-openstack/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-openstack.txt
+
+      - name: Collect inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          . .venv-openstack/bin/activate
+          mkdir -p openstack-evidence
+          python scripts/openstack_inventory.py --output openstack-evidence/inventory.json > openstack-evidence/inventory.stdout.json
+
+      - name: Validate expected infrastructure identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path("openstack-evidence/inventory.json").read_text(encoding="utf-8"))
+          servers = payload.get("servers") or []
+          volumes = payload.get("volumes") or []
+          ports = payload.get("ports") or []
+          groups = payload.get("security_groups") or []
+
+          server = next((item for item in servers if item.get("id") == os.environ["OPENSTACK_SERVER_ID"]), None)
+          assert server, "Configured server UUID was not found"
+          assert server.get("name") == os.environ["OPENSTACK_SERVER_NAME"], server
+          assert server.get("status") == "ACTIVE", server
+          assert any(item.get("id") == os.environ["OPENSTACK_VOLUME_ID"] for item in volumes), "Configured volume UUID was not found"
+          assert any(item.get("id") == os.environ["OPENSTACK_PORT_ID"] for item in ports), "Configured port UUID was not found"
+          assert any(item.get("id") == os.environ["OPENSTACK_SECURITY_GROUP_ID"] for item in groups), "Configured security group UUID was not found"
+          assert payload.get("project_id") == os.environ["OPENSTACK_PROJECT_ID"], payload.get("project_id")
+
+          summary = {
+              "project_id": payload.get("project_id"),
+              "server": {
+                  "id": server.get("id"),
+                  "name": server.get("name"),
+                  "status": server.get("status"),
+                  "addresses": server.get("addresses"),
+              },
+              "volume_count": len(volumes),
+              "port_count": len(ports),
+              "security_group_count": len(groups),
+          }
+          Path("openstack-evidence/validation-summary.json").write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Upload inventory evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: openstack-inventory-${{ github.run_id }}
+          path: openstack-evidence/
+          retention-days: 30
+          if-no-files-found: error
