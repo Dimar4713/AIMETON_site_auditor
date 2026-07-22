@@ -84,4 +84,4 @@ jobs:
           ITEM_STATE: ${{ steps.item.outputs.state }}
           ITEM_TITLE: ${{ steps.item.outputs.title }}
           ITEM_LABELS: ${{ steps.item.outputs.labels }}
-        run: python scripts/project_status_sync.py
+        run: python scripts/project_status_sync_entry.py
