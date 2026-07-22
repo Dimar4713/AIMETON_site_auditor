@@ -37,6 +37,9 @@ jobs:
           python --version
           pip freeze | sort | tee baseline-dependencies.txt
 
+      - name: Validate deployment script syntax
+        run: bash -n scripts/deploy_stage.sh
+
       - name: Run tests
         run: |
           set -o pipefail
