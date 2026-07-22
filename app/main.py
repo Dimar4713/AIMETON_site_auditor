@@ -76,7 +76,7 @@ def index():
 def health():
     return {
         "status": "ok",
-        "version": "0.7.0",
+        "version": app.version,
         "analysis_mode": "ai-sales-with-canonical-km-company-profile",
         "osint": "contacts-finance-workforce-legal-ownership",
         "api": "/docs",
