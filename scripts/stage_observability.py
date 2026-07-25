@@ -10,6 +10,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any
 
@@ -22,16 +23,30 @@ def run(cmd: list[str], timeout: int = 15) -> tuple[int, str]:
         return 127, type(exc).__name__
 
 
-def http_probe(url: str, method: str = "GET", data: bytes | None = None, headers: dict[str, str] | None = None) -> dict[str, Any]:
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Return redirect responses without following them."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+def http_probe(url: str, method: str = "GET", data: bytes | None = None, headers: dict[str, str] | None = None, follow_redirects: bool = True) -> dict[str, Any]:
     start = time.monotonic()
     request = urllib.request.Request(url, method=method, data=data, headers=headers or {})
+    opener = urllib.request.build_opener() if follow_redirects else urllib.request.build_opener(NoRedirect)
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with opener.open(request, timeout=20) as response:
             body = response.read(65536)
-            return {"ok": True, "status": response.status, "latency_ms": round((time.monotonic() - start) * 1000), "bytes": len(body)}
+            result = {"ok": True, "status": response.status, "latency_ms": round((time.monotonic() - start) * 1000), "bytes": len(body)}
+            if response.headers.get("Location"):
+                result["location"] = response.headers["Location"]
+            return result
     except urllib.error.HTTPError as exc:
         # Redirects can be intentionally disabled by the caller; status remains useful.
-        return {"ok": 200 <= exc.code < 400, "status": exc.code, "latency_ms": round((time.monotonic() - start) * 1000), "bytes": 0}
+        result = {"ok": 200 <= exc.code < 400, "status": exc.code, "latency_ms": round((time.monotonic() - start) * 1000), "bytes": 0}
+        if exc.headers.get("Location"):
+            result["location"] = exc.headers["Location"]
+        return result
     except Exception as exc:
         return {"ok": False, "status": None, "latency_ms": round((time.monotonic() - start) * 1000), "error": type(exc).__name__}
 
@@ -110,11 +125,24 @@ def main() -> int:
         alerts.append({"severity": "critical", "signal": "docker", "value": "unavailable"})
 
     health = http_probe(args.stage_url.rstrip("/") + "/api/health")
-    mcp_redirect = http_probe(args.stage_url.rstrip("/") + "/mcp")
+    mcp_redirect = http_probe(args.stage_url.rstrip("/") + "/mcp", follow_redirects=False)
     mcp_payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "stage-observability", "version": "1.0"}}}).encode()
     mcp_initialize = http_probe(args.stage_url.rstrip("/") + "/mcp/", method="POST", data=mcp_payload, headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+    redirect_location = mcp_redirect.get("location")
+    redirect_target = urlparse(redirect_location) if redirect_location else None
+    stage_target = urlparse(args.stage_url)
+    redirect_safe = (
+        mcp_redirect.get("status") == 200
+        or (
+            mcp_redirect.get("status") in {307, 308}
+            and redirect_target is not None
+            and redirect_target.scheme == "https"
+            and redirect_target.netloc == stage_target.netloc
+            and redirect_target.path == "/mcp/"
+        )
+    )
     for name, probe in (("api_health", health), ("mcp_redirect", mcp_redirect), ("mcp_initialize", mcp_initialize)):
-        expected = probe.get("status") in ({200} if name != "mcp_redirect" else {200, 307})
+        expected = redirect_safe if name == "mcp_redirect" else probe.get("status") == 200
         if not probe.get("ok") or not expected:
             alerts.append({"severity": "critical", "signal": name, "value": probe.get("status")})
         elif (probe.get("latency_ms") or 0) >= args.latency_warning_ms:
