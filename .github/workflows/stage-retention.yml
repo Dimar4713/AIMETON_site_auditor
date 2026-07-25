@@ -38,8 +38,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  route:
+    runs-on: ubuntu-latest
+    outputs:
+      run_retention: ${{ steps.decision.outputs.run_retention }}
+    steps:
+      - name: Record route decision
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          run_retention=false
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] ||              [[ "$EVENT_NAME" == "issues" && "$EVENT_ACTION" == "labeled" && "$ISSUE_NUMBER" == "37" && "$LABEL_NAME" == "retention-plan" ]]; then
+            run_retention=true
+          fi
+          echo "run_retention=$run_retention" >> "$GITHUB_OUTPUT"
+          printf 'event=%s action=%s ref=%s sha=%s decision=%s\n'             "$EVENT_NAME" "${EVENT_ACTION:-none}" "$GITHUB_REF" "$GITHUB_SHA" "$run_retention"
+
   retention:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.issue.number == 37 && github.event.label.name == 'retention-plan') }}
+    needs: route
+    if: needs.route.outputs.run_retention == 'true'
     runs-on:
       - self-hosted
       - Linux
