@@ -10,7 +10,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 from pathlib import Path
 from typing import Any
 
@@ -129,16 +129,20 @@ def main() -> int:
     mcp_payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "stage-observability", "version": "1.0"}}}).encode()
     mcp_initialize = http_probe(args.stage_url.rstrip("/") + "/mcp/", method="POST", data=mcp_payload, headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
     redirect_location = mcp_redirect.get("location")
-    redirect_target = urlparse(redirect_location) if redirect_location else None
     stage_target = urlparse(args.stage_url)
+    redirect_target = urlparse(urljoin(args.stage_url.rstrip("/") + "/", redirect_location)) if redirect_location else None
     redirect_safe = (
         mcp_redirect.get("status") == 200
         or (
             mcp_redirect.get("status") in {307, 308}
             and redirect_target is not None
             and redirect_target.scheme == "https"
-            and redirect_target.netloc == stage_target.netloc
+            and redirect_target.hostname == stage_target.hostname
+            and redirect_target.port == stage_target.port
             and redirect_target.path == "/mcp/"
+            and not redirect_target.params
+            and not redirect_target.query
+            and not redirect_target.fragment
         )
     )
     for name, probe in (("api_health", health), ("mcp_redirect", mcp_redirect), ("mcp_initialize", mcp_initialize)):
