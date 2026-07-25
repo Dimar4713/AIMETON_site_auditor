@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run_observe: ${{ steps.decision.outputs.run_observe }}
+      controlled_failure: ${{ steps.decision.outputs.controlled_failure }}
     steps:
       - name: Record route decision
         id: decision
@@ -29,11 +30,20 @@ jobs:
           LABEL_NAME: ${{ github.event.label.name }}
         run: |
           run_observe=true
-          if [[ "$EVENT_NAME" == "issues" && ! ( "$ISSUE_NUMBER" == "38" && "$LABEL_NAME" == "observability-check" ) ]]; then
-            run_observe=false
+          controlled_failure=false
+          if [[ "$EVENT_NAME" == "issues" ]]; then
+            if [[ "$ISSUE_NUMBER" != "38" ]]; then
+              run_observe=false
+            elif [[ "$LABEL_NAME" == "observability-controlled-failure" ]]; then
+              controlled_failure=true
+            elif [[ "$LABEL_NAME" != "observability-check" ]]; then
+              run_observe=false
+            fi
           fi
           echo "run_observe=$run_observe" >> "$GITHUB_OUTPUT"
-          printf 'event=%s ref=%s sha=%s decision=%s\n'             "$EVENT_NAME" "$GITHUB_REF" "$GITHUB_SHA" "$run_observe"
+          echo "controlled_failure=$controlled_failure" >> "$GITHUB_OUTPUT"
+          printf 'event=%s ref=%s sha=%s decision=%s controlled_failure=%s\n' \
+            "$EVENT_NAME" "$GITHUB_REF" "$GITHUB_SHA" "$run_observe" "$controlled_failure"
 
   observe:
     needs: route
@@ -53,6 +63,7 @@ jobs:
       OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
       OS_AUTH_TYPE: v3applicationcredential
       OPENSTACK_SERVER_ID: ${{ vars.OPENSTACK_SERVER_ID }}
+      OBS_CONTROLLED_FAILURE: ${{ needs.route.outputs.controlled_failure }}
     steps:
       - uses: actions/checkout@v4
 
@@ -103,6 +114,9 @@ jobs:
           data = json.loads(Path('observability-evidence/stage-observability.json').read_text(encoding='utf-8'))
           os_data = json.loads(Path('observability-evidence/openstack-summary.json').read_text(encoding='utf-8'))
           alerts = list(data.get('alerts', []))
+          if os.environ.get('OBS_CONTROLLED_FAILURE', '').lower() == 'true':
+              alerts.append({'severity': 'critical', 'signal': 'controlled_failure', 'value': 'issue-38-label'})
+              data['controlled_failure'] = True
           if os_data.get('configured') and (not os_data.get('found') or os_data.get('status') != 'ACTIVE'):
               alerts.append({'severity': 'critical', 'signal': 'openstack_vm', 'value': os_data.get('status') or 'not-found'})
           severity = 'critical' if any(a.get('severity') == 'critical' for a in alerts) else 'warning' if alerts else 'ok'
