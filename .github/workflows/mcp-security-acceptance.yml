@@ -1,0 +1,155 @@
+name: MCP Security Acceptance
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-mcp-security-acceptance
+  cancel-in-progress: false
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    outputs:
+      run_acceptance: ${{ steps.route.outputs.run_acceptance }}
+    steps:
+      - id: route
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          run_acceptance=true
+          if [[ "$EVENT_NAME" == "issues" && ( "$ISSUE_NUMBER" != "39" || "$LABEL_NAME" != "mcp-security-check" ) ]]; then
+            run_acceptance=false
+          fi
+          echo "run_acceptance=$run_acceptance" >> "$GITHUB_OUTPUT"
+          printf 'event=%s ref=%s sha=%s decision=%s\n' "$EVENT_NAME" "$GITHUB_REF" "$GITHUB_SHA" "$run_acceptance"
+
+  accept:
+    needs: route
+    if: needs.route.outputs.run_acceptance == 'true'
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      STAGE_URL: https://stage-auditor.aimeton.ru
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify exact deployed SHA
+        id: deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p security-evidence
+          deployed_sha="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt")"
+          [[ "$deployed_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$deployed_sha" >> "$GITHUB_OUTPUT"
+          printf '{"deployed_sha":"%s","workflow_sha":"%s"}\n' "$deployed_sha" "$GITHUB_SHA" > security-evidence/identity.json
+
+      - name: Run security regression suite at deployed SHA
+        shell: bash
+        env:
+          DEPLOYED_SHA: ${{ steps.deploy.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          git fetch --depth=1 origin "$DEPLOYED_SHA"
+          git worktree add --detach /tmp/aimeton-security-"$GITHUB_RUN_ID" "$DEPLOYED_SHA"
+          cd /tmp/aimeton-security-"$GITHUB_RUN_ID"
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install -q -r requirements.txt
+          pytest -q tests/test_mcp_security.py | tee "$GITHUB_WORKSPACE/security-evidence/security-tests.txt"
+
+      - name: Live public and admin boundary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"sa-03-3-acceptance","version":"1"}}}'
+          public_status="$(curl -sS -o /tmp/mcp-public.out -w '%{http_code}' --max-time 30 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data "$init" "$STAGE_URL/mcp/")"
+          missing_status="$(curl -sS -o /tmp/mcp-admin-missing.out -w '%{http_code}' --max-time 30 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data "$init" "$STAGE_URL/mcp-admin/")"
+          wrong_status="$(curl -sS -o /tmp/mcp-admin-wrong.out -w '%{http_code}' --max-time 30 -H 'Authorization: Bearer deliberately-invalid-acceptance-token' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data "$init" "$STAGE_URL/mcp-admin/")"
+          [[ "$public_status" == "200" ]]
+          [[ "$missing_status" == "401" ]]
+          [[ "$wrong_status" == "401" ]]
+
+          correct_status="$(docker exec "$CONTAINER" sh -c '
+            token="$AIMETON_MCP_ADMIN_TOKEN"
+            test -n "$token"
+            python - "$token" <<'"'"'PY'"'"'
+import json, sys, urllib.request
+token=sys.argv[1]
+payload={"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"sa-03-3-internal","version":"1"}}}
+req=urllib.request.Request("http://127.0.0.1:5000/mcp-admin/",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+token,"Content-Type":"application/json","Accept":"application/json, text/event-stream"})
+try:
+    with urllib.request.urlopen(req,timeout=30) as response:
+        print(response.status)
+except urllib.error.HTTPError as exc:
+    print(exc.code)
+PY
+          ')"
+          [[ "$correct_status" == "200" ]]
+          python3 - "$public_status" "$missing_status" "$wrong_status" "$correct_status" <<'PY'
+import json, sys
+keys=("public_without_credentials","admin_missing_token","admin_wrong_token","admin_correct_token")
+print(json.dumps(dict(zip(keys,sys.argv[1:])),indent=2,sort_keys=True))
+open("security-evidence/live-boundary.json","w",encoding="utf-8").write(json.dumps(dict(zip(keys,sys.argv[1:])),indent=2,sort_keys=True)+"\n")
+PY
+
+      - name: Verify sanitized audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker logs --since 10m "$CONTAINER" > /tmp/mcp-security-audit.log 2>&1
+          token="$(docker exec "$CONTAINER" printenv AIMETON_MCP_ADMIN_TOKEN)"
+          test -n "$token"
+          if grep -Fq -- "$token" /tmp/mcp-security-audit.log; then
+            echo "Admin token leaked into audit output" >&2
+            exit 1
+          fi
+          if grep -Eqi 'deliberately-invalid-acceptance-token|jsonrpc|clientInfo|protocolVersion|Authorization:|127\.0\.0\.1|172\.[0-9]+\.' /tmp/mcp-security-audit.log; then
+            echo "Request content or internal address leaked into audit output" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+import json
+from pathlib import Path
+lines=[line for line in Path("/tmp/mcp-security-audit.log").read_text(errors="replace").splitlines() if "mcp_security " in line]
+Path("security-evidence/audit-summary.json").write_text(json.dumps({"security_events":len(lines),"sanitized":True},indent=2,sort_keys=True)+"\n",encoding="utf-8")
+PY
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-security-acceptance-${{ github.run_id }}
+          path: security-evidence/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publish result to Issue 39
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_SHA: ${{ steps.deploy.outputs.sha }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const body = [
+              '## SA-03.3 MCP security acceptance',
+              '',
+              `- workflow run: ${context.runId}`,
+              `- deploy SHA: ${process.env.DEPLOY_SHA || 'unavailable'}`,
+              `- result: ${job.status}`,
+              '- evidence: sanitized artifact; no tokens or request payloads',
+            ].join('\n');
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:39,body});
