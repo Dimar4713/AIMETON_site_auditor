@@ -51,6 +51,26 @@ def http_probe(url: str, method: str = "GET", data: bytes | None = None, headers
         return {"ok": False, "status": None, "latency_ms": round((time.monotonic() - start) * 1000), "error": type(exc).__name__}
 
 
+def is_safe_mcp_redirect(stage_url: str, probe: dict[str, Any]) -> bool:
+    """Accept only a direct MCP response or a same-origin HTTPS redirect to /mcp/."""
+    if probe.get("status") == 200:
+        return True
+    location = probe.get("location")
+    if probe.get("status") not in {307, 308} or not location:
+        return False
+    stage_target = urlparse(stage_url)
+    redirect_target = urlparse(urljoin(stage_url.rstrip("/") + "/", location))
+    return (
+        redirect_target.scheme == "https"
+        and redirect_target.hostname == stage_target.hostname
+        and redirect_target.port == stage_target.port
+        and redirect_target.path == "/mcp/"
+        and not redirect_target.params
+        and not redirect_target.query
+        and not redirect_target.fragment
+    )
+
+
 def meminfo() -> dict[str, int]:
     values: dict[str, int] = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
@@ -128,23 +148,7 @@ def main() -> int:
     mcp_redirect = http_probe(args.stage_url.rstrip("/") + "/mcp", follow_redirects=False)
     mcp_payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "stage-observability", "version": "1.0"}}}).encode()
     mcp_initialize = http_probe(args.stage_url.rstrip("/") + "/mcp/", method="POST", data=mcp_payload, headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
-    redirect_location = mcp_redirect.get("location")
-    stage_target = urlparse(args.stage_url)
-    redirect_target = urlparse(urljoin(args.stage_url.rstrip("/") + "/", redirect_location)) if redirect_location else None
-    redirect_safe = (
-        mcp_redirect.get("status") == 200
-        or (
-            mcp_redirect.get("status") in {307, 308}
-            and redirect_target is not None
-            and redirect_target.scheme == "https"
-            and redirect_target.hostname == stage_target.hostname
-            and redirect_target.port == stage_target.port
-            and redirect_target.path == "/mcp/"
-            and not redirect_target.params
-            and not redirect_target.query
-            and not redirect_target.fragment
-        )
-    )
+    redirect_safe = is_safe_mcp_redirect(args.stage_url, mcp_redirect)
     for name, probe in (("api_health", health), ("mcp_redirect", mcp_redirect), ("mcp_initialize", mcp_initialize)):
         expected = redirect_safe if name == "mcp_redirect" else probe.get("status") == 200
         if not probe.get("ok") or not expected:
