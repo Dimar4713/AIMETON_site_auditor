@@ -16,10 +16,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  route:
+    runs-on: ubuntu-latest
+    outputs:
+      run_observe: ${{ steps.decision.outputs.run_observe }}
+    steps:
+      - name: Record route decision
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          run_observe=true
+          if [[ "$EVENT_NAME" == "issues" && ! ( "$ISSUE_NUMBER" == "38" && "$LABEL_NAME" == "observability-check" ) ]]; then
+            run_observe=false
+          fi
+          echo "run_observe=$run_observe" >> "$GITHUB_OUTPUT"
+          printf 'event=%s ref=%s sha=%s decision=%s\n'             "$EVENT_NAME" "$GITHUB_REF" "$GITHUB_SHA" "$run_observe"
+
   observe:
-    if: >-
-      github.event_name != 'issues' ||
-      (github.event.issue.number == 38 && github.event.label.name == 'observability-check')
+    needs: route
+    if: needs.route.outputs.run_observe == 'true'
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
