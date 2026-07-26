@@ -86,24 +86,24 @@ jobs:
             token="$AIMETON_MCP_ADMIN_TOKEN"
             test -n "$token"
             python - "$token" <<'"'"'PY'"'"'
-import json, sys, urllib.request
-token=sys.argv[1]
-payload={"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"sa-03-3-internal","version":"1"}}}
-req=urllib.request.Request("http://127.0.0.1:5000/mcp-admin/",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+token,"Content-Type":"application/json","Accept":"application/json, text/event-stream"})
-try:
-    with urllib.request.urlopen(req,timeout=30) as response:
-        print(response.status)
-except urllib.error.HTTPError as exc:
-    print(exc.code)
-PY
+          import json, sys, urllib.request
+          token=sys.argv[1]
+          payload={"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"sa-03-3-internal","version":"1"}}}
+          req=urllib.request.Request("http://127.0.0.1:5000/mcp-admin/",data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+token,"Content-Type":"application/json","Accept":"application/json, text/event-stream"})
+          try:
+              with urllib.request.urlopen(req,timeout=30) as response:
+                  print(response.status)
+          except urllib.error.HTTPError as exc:
+              print(exc.code)
+          PY
           ')"
           [[ "$correct_status" == "200" ]]
           python3 - "$public_status" "$missing_status" "$wrong_status" "$correct_status" <<'PY'
-import json, sys
-keys=("public_without_credentials","admin_missing_token","admin_wrong_token","admin_correct_token")
-print(json.dumps(dict(zip(keys,sys.argv[1:])),indent=2,sort_keys=True))
-open("security-evidence/live-boundary.json","w",encoding="utf-8").write(json.dumps(dict(zip(keys,sys.argv[1:])),indent=2,sort_keys=True)+"\n")
-PY
+          import json, sys
+          keys=("public_without_credentials","admin_missing_token","admin_wrong_token","admin_correct_token")
+          print(json.dumps(dict(zip(keys,sys.argv[1:])),indent=2,sort_keys=True))
+          open("security-evidence/live-boundary.json","w",encoding="utf-8").write(json.dumps(dict(zip(keys,sys.argv[1:])),indent=2,sort_keys=True)+"\n")
+          PY
 
       - name: Verify sanitized audit
         shell: bash
@@ -121,11 +121,11 @@ PY
             exit 1
           fi
           python3 - <<'PY'
-import json
-from pathlib import Path
-lines=[line for line in Path("/tmp/mcp-security-audit.log").read_text(errors="replace").splitlines() if "mcp_security " in line]
-Path("security-evidence/audit-summary.json").write_text(json.dumps({"security_events":len(lines),"sanitized":True},indent=2,sort_keys=True)+"\n",encoding="utf-8")
-PY
+          import json
+          from pathlib import Path
+          lines=[line for line in Path("/tmp/mcp-security-audit.log").read_text(errors="replace").splitlines() if "mcp_security " in line]
+          Path("security-evidence/audit-summary.json").write_text(json.dumps({"security_events":len(lines),"sanitized":True},indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          PY
 
       - name: Upload sanitized evidence
         if: always()
