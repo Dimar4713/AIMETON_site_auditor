@@ -183,21 +183,24 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker logs --since 10m "$CONTAINER" > /tmp/mcp-security-audit.log 2>&1
+          docker logs --since 10m "$CONTAINER" > /tmp/container.log 2>&1
+          grep -F 'mcp_security ' /tmp/container.log > /tmp/mcp-security-audit.log
           token="$(docker exec "$CONTAINER" printenv AIMETON_MCP_ADMIN_TOKEN)"
           test -n "$token"
           if grep -Fq -- "$token" /tmp/mcp-security-audit.log; then
-            echo "Admin token leaked into audit output" >&2
+            echo "Admin token leaked into MCP security audit output" >&2
             exit 1
           fi
           if grep -Eqi 'deliberately-invalid-acceptance-token|jsonrpc|clientInfo|protocolVersion|Authorization:|127\.0\.0\.1|172\.[0-9]+\.' /tmp/mcp-security-audit.log; then
-            echo "Request content or internal address leaked into audit output" >&2
+            echo "Request content or internal address leaked into MCP security audit output" >&2
             exit 1
           fi
           python3 - <<'PY'
           import json
           from pathlib import Path
-          lines=[line for line in Path("/tmp/mcp-security-audit.log").read_text(errors="replace").splitlines() if "mcp_security " in line]
+          lines=Path("/tmp/mcp-security-audit.log").read_text(errors="replace").splitlines()
+          if not lines:
+              raise SystemExit("No MCP security audit events captured")
           Path("security-evidence/audit-summary.json").write_text(json.dumps({"security_events":len(lines),"sanitized":True},indent=2,sort_keys=True)+"\n",encoding="utf-8")
           PY
 
