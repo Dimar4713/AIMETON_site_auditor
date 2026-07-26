@@ -79,6 +79,8 @@ import json
 import sys
 payload = json.loads(sys.argv[1])
 assert payload.get("status") == "ok", payload
+deployment_sha = payload.get("deployment_sha")
+assert deployment_sha and len(deployment_sha) == 40, payload
 print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 PY
 
@@ -182,6 +184,9 @@ tar \
 [[ -f "$STAGING_DIR/app/main.py" ]] || fail "Staged app/main.py missing"
 [[ -f "$STAGING_DIR/app/mcp_server.py" ]] || fail "Staged app/mcp_server.py missing"
 [[ -f "$STAGING_DIR/requirements.txt" ]] || fail "Staged requirements.txt missing"
+
+printf '%s\n' "$DEPLOY_SHA" > "$STAGING_DIR/.aimeton-deploy-sha"
+[[ "$(tr -d '[:space:]' < "$STAGING_DIR/.aimeton-deploy-sha")" == "$DEPLOY_SHA" ]] || fail "Staged deployment identity mismatch"
 
 grep -q 'stage-auditor.aimeton.ru' "$STAGING_DIR/app/mcp_server.py" || fail "Stage MCP host allowlist missing"
 grep -q 'Location.*\/mcp\/' "$STAGING_DIR/app/main.py" || fail "Relative MCP redirect implementation missing"

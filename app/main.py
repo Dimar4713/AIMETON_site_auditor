@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
+import os
 from pathlib import Path
+import re
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -74,9 +76,19 @@ def index():
     )
 
 
+def deployment_sha() -> str | None:
+    value = os.getenv("AIMETON_DEPLOY_SHA", "").strip()
+    if not value:
+        path = Path(".aimeton-deploy-sha")
+        if path.is_file():
+            value = path.read_text(encoding="utf-8").strip()
+    return value if re.fullmatch(r"[0-9a-f]{40}", value) else None
+
+
 @app.get("/api/health")
 def health():
-    return {
+    identity = deployment_sha()
+    payload = {
         "status": "ok",
         "version": app.version,
         "analysis_mode": "ai-sales-with-canonical-km-company-profile",
@@ -87,6 +99,9 @@ def health():
         "mcp_security": "public-rate-limited-admin-authenticated",
         "runtime_core": "/api/runtime",
     }
+    if identity:
+        payload["deployment_sha"] = identity
+    return payload
 
 
 @app.get("/api/hunter-handbook")
