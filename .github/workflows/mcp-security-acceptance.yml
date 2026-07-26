@@ -76,7 +76,7 @@ jobs:
           set -Eeuo pipefail
           mkdir -p security-evidence
           diag_key="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
-          docker exec -e DIAG_KEY="$diag_key" "$CONTAINER" python - <<'PY' > /tmp/token-process-meta.json
+          docker exec -i -e DIAG_KEY="$diag_key" "$CONTAINER" python - <<'PY' > /tmp/token-process-meta.json
           import hashlib, hmac, json, os
           name="AIMETON_MCP_ADMIN_TOKEN"
           key=bytes.fromhex(os.environ["DIAG_KEY"])
