@@ -94,7 +94,7 @@ jobs:
           done
           [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == "healthy" ]]
 
-          docker exec "$CONTAINER" python - <<'PY'
+          docker exec -i "$CONTAINER" python - <<'PY'
           import os
           value=os.environ.get("AIMETON_MCP_ADMIN_TOKEN")
           assert value and value == value.strip() and len(value) >= 48
