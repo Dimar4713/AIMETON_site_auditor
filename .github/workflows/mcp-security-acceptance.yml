@@ -70,6 +70,77 @@ jobs:
           pip install -q -r requirements.txt
           pytest -q tests/test_mcp_security.py | tee "$GITHUB_WORKSPACE/security-evidence/security-tests.txt"
 
+      - name: Diagnose admin token chain without disclosure
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p security-evidence
+          diag_key="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          docker exec -e DIAG_KEY="$diag_key" "$CONTAINER" python - <<'PY' > /tmp/token-process-meta.json
+          import hashlib, hmac, json, os
+          name="AIMETON_MCP_ADMIN_TOKEN"
+          key=bytes.fromhex(os.environ["DIAG_KEY"])
+          shell_value=os.environ.get(name)
+          pid_value=None
+          try:
+              prefix=(name+"=").encode()
+              item=next((x for x in open("/proc/1/environ","rb").read().split(b"\0") if x.startswith(prefix)),None)
+              if item is not None:
+                  pid_value=item[len(prefix):].decode("utf-8","surrogateescape")
+          except OSError:
+              pass
+          def meta(value):
+              if value is None:
+                  return {"present":False,"hmac":None}
+              trimmed=value.strip()
+              return {
+                  "present":True,"nonempty":bool(value),"length":len(value),
+                  "trimmed_length":len(trimmed),"raw_eq_trimmed":value==trimmed,
+                  "leading_whitespace":bool(value[:1].isspace()),
+                  "trailing_whitespace":bool(value[-1:].isspace()),
+                  "contains_cr":"\r" in value,"contains_lf":"\n" in value,
+                  "hmac":hmac.new(key,value.encode("utf-8","surrogateescape"),hashlib.sha256).hexdigest(),
+              }
+          print(json.dumps({"exec_shell":meta(shell_value),"pid1_process":meta(pid_value)}))
+          PY
+          DIAG_KEY="$diag_key" STACK_DIR="$STACK_DIR" CONTAINER="$CONTAINER" python3 - <<'PY'
+          import hashlib, hmac, json, os, re, subprocess
+          from pathlib import Path
+          name="AIMETON_MCP_ADMIN_TOKEN"
+          key=bytes.fromhex(os.environ["DIAG_KEY"])
+          inspect=json.loads(subprocess.check_output(["docker","inspect",os.environ["CONTAINER"]],text=True))[0]
+          values={}
+          for item in inspect.get("Config",{}).get("Env",[]):
+              key_name,sep,value=item.partition("=")
+              if sep:
+                  values[key_name]=value
+          configured=values.get(name)
+          inner=json.loads(Path("/tmp/token-process-meta.json").read_text())
+          def digest(value):
+              return hmac.new(key,value.encode("utf-8","surrogateescape"),hashlib.sha256).hexdigest() if value is not None else None
+          configured_hmac=digest(configured)
+          shell_hmac=inner["exec_shell"].pop("hmac",None)
+          pid_hmac=inner["pid1_process"].pop("hmac",None)
+          stack=Path(os.environ["STACK_DIR"])
+          compose=stack/"docker-compose.yml"
+          compose_text=compose.read_text(encoding="utf-8",errors="replace") if compose.is_file() else ""
+          env_candidates=0
+          for candidate in stack.glob(".env*"):
+              if candidate.is_file() and re.search(r"(?m)^\s*(?:export\s+)?"+re.escape(name)+r"\s*=",candidate.read_text(encoding="utf-8",errors="replace")):
+                  env_candidates+=1
+          trimmed=configured.strip() if configured is not None else None
+          result={
+              "source":{"compose_file_present":compose.is_file(),"compose_mentions_key":name in compose_text,"env_file_candidates":env_candidates},
+              "docker_config":{"present":configured is not None,"nonempty":bool(configured),"length":len(configured) if configured is not None else None,"trimmed_length":len(trimmed) if trimmed is not None else None,"raw_eq_trimmed":configured==trimmed if configured is not None else None},
+              "exec_shell":inner["exec_shell"],
+              "pid1_process":inner["pid1_process"],
+              "comparisons":{"docker_config_eq_exec_shell":configured_hmac is not None and configured_hmac==shell_hmac,"exec_shell_eq_pid1":shell_hmac is not None and shell_hmac==pid_hmac},
+              "secret_disclosed":False,
+          }
+          Path("security-evidence/token-chain.json").write_text(json.dumps(result,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          print(json.dumps(result,indent=2,sort_keys=True))
+          PY
+          unset diag_key
       - name: Live public and admin boundary
         shell: bash
         run: |
