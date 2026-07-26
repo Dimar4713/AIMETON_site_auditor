@@ -1,0 +1,131 @@
+name: Provision Stage MCP Admin Token
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-auditor-stage
+  cancel-in-progress: false
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    outputs:
+      run_provision: ${{ steps.route.outputs.run_provision }}
+    steps:
+      - id: route
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          run_provision=false
+          if [[ "$ISSUE_NUMBER" == "39" && "$LABEL_NAME" == "mcp-token-provision" ]]; then
+            run_provision=true
+          fi
+          echo "run_provision=$run_provision" >> "$GITHUB_OUTPUT"
+
+  provision:
+    needs: route
+    if: needs.route.outputs.run_provision == 'true'
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      SERVICE: auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+    steps:
+      - name: Provision persistent server-side token
+        id: provision
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          test -f docker-compose.yml
+          test -f app-source-sha.txt
+          install -m 600 /dev/null .env.mcp-admin.new
+          token="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          printf 'AIMETON_MCP_ADMIN_TOKEN=%s\n' "$token" > .env.mcp-admin.new
+          unset token
+
+          cp -a docker-compose.override.yml docker-compose.override.yml.pre-mcp-token 2>/dev/null || true
+          cp -a .env.mcp-admin .env.mcp-admin.pre-mcp-token 2>/dev/null || true
+
+          cat > docker-compose.override.yml.new <<'YAML'
+          services:
+            auditor:
+              env_file:
+                - .env.mcp-admin
+          YAML
+          chmod 600 docker-compose.override.yml.new
+          mv .env.mcp-admin.new .env.mcp-admin
+          mv docker-compose.override.yml.new docker-compose.override.yml
+
+          rollback() {
+            if [[ -f docker-compose.override.yml.pre-mcp-token ]]; then
+              mv docker-compose.override.yml.pre-mcp-token docker-compose.override.yml
+            else
+              rm -f docker-compose.override.yml
+            fi
+            if [[ -f .env.mcp-admin.pre-mcp-token ]]; then
+              mv .env.mcp-admin.pre-mcp-token .env.mcp-admin
+            else
+              rm -f .env.mcp-admin
+            fi
+            docker compose up -d --force-recreate "$SERVICE" >/dev/null
+          }
+          trap 'rollback' ERR
+
+          docker compose config --quiet
+          docker compose up -d --force-recreate "$SERVICE" >/dev/null
+
+          deadline=$((SECONDS + 180))
+          while (( SECONDS < deadline )); do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+            [[ "$status" == "healthy" ]] && break
+            [[ "$status" == "unhealthy" || "$status" == "exited" || "$status" == "dead" ]] && exit 1
+            sleep 5
+          done
+          [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == "healthy" ]]
+
+          docker exec "$CONTAINER" python - <<'PY'
+          import os
+          value=os.environ.get("AIMETON_MCP_ADMIN_TOKEN")
+          assert value and value == value.strip() and len(value) >= 48
+          PY
+
+          curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/health" >/dev/null
+          rm -f docker-compose.override.yml.pre-mcp-token .env.mcp-admin.pre-mcp-token
+          trap - ERR
+          echo "result=success" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized result
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          RESULT: ${{ steps.provision.outputs.result }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const result = process.env.RESULT === 'success' ? 'success' : 'failure';
+            const body = [
+              '## SA-03.3 stage token provisioning',
+              '',
+              `- workflow run: ${context.runId}`,
+              `- result: ${result}`,
+              '- storage: protected server-side env file + Compose override',
+              '- container: recreated and health-checked',
+              '- secret value and fingerprints: not disclosed',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 39,
+              body,
+            });
