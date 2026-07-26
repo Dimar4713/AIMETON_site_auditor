@@ -35,3 +35,12 @@ def test_sa01_search_hint_contract_cannot_claim_evidence():
     assert source.evidence_level == 'unverified_mention'
     assert source.document_url is None
     assert source.evidence_quote is None
+
+
+def test_health_exposes_only_valid_deployment_identity(monkeypatch):
+    client = TestClient(app)
+    monkeypatch.setenv("AIMETON_DEPLOY_SHA", "a" * 40)
+    assert client.get("/api/health").json()["deployment_sha"] == "a" * 40
+
+    monkeypatch.setenv("AIMETON_DEPLOY_SHA", "not-a-sha")
+    assert "deployment_sha" not in client.get("/api/health").json()
