@@ -8,6 +8,7 @@ import pytest
 from app import company_intelligence_runtime, discovery
 from app.external_sources import classify_result, classify_source_domain, classification_state
 from app.models import CompanyIntelligenceRequest, IntelligenceSource
+from app.search_gateway.models import GatewayState, SearchDiagnostics
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "kimi_regression_cases.json"
@@ -84,7 +85,10 @@ async def test_company_intelligence_calls_external_provider_once_and_stays_parti
                 lifecycle_state="discovery_hint",
                 evidence_level="unverified_mention",
             )
-        ], []
+        ], [], SearchDiagnostics(
+            state=GatewayState.SUCCESS,
+            selected_provider="fake",
+        )
 
     monkeypatch.setattr(company_intelligence_runtime, "collect_external_sources", fake_collect)
 

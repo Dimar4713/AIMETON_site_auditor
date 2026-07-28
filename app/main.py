@@ -33,6 +33,7 @@ from app.models import AnalyzeRequest, ChatRequest, CompanyIntelligenceRequest, 
 from app.osint_tools import get_osint_tools
 from app.runtime_core.api import router as runtime_router
 from app.scraper import FetchError, fetch_site
+from app.search_gateway import get_search_gateway
 
 
 @asynccontextmanager
@@ -98,10 +99,25 @@ def health():
         "mcp_admin": "/mcp-admin",
         "mcp_security": "public-rate-limited-admin-authenticated",
         "runtime_core": "/api/runtime",
+        "search_gateway": "/api/search/health",
     }
     if identity:
         payload["deployment_sha"] = identity
     return payload
+
+
+@app.get("/api/search/health")
+def search_health():
+    providers = [
+        item.model_dump(mode="json")
+        for item in get_search_gateway().health()
+    ]
+    configured = [item for item in providers if item["configured"]]
+    return {
+        "status": "ok" if configured else "degraded",
+        "providers": providers,
+        "secrets_exposed": False,
+    }
 
 
 @app.get("/api/hunter-handbook")

@@ -1,0 +1,31 @@
+{
+  "schema_version": "0.1.0",
+  "purpose": "Deterministic contract benchmark for recall, latency telemetry and cost accounting.",
+  "cases": [
+    {
+      "id": "PG5-01",
+      "query": "ClimateOne официальный сайт",
+      "expected_host": "climateone.ru"
+    },
+    {
+      "id": "PG5-02",
+      "query": "Sib Dental Clinic реквизиты",
+      "expected_host": "sibdentalclinic.ru"
+    },
+    {
+      "id": "PG5-03",
+      "query": "CDEK контакты",
+      "expected_host": "cdek.ru"
+    },
+    {
+      "id": "PG5-04",
+      "query": "Timeweb контакты",
+      "expected_host": "timeweb.com"
+    },
+    {
+      "id": "PG5-05",
+      "query": "REG.RU реквизиты",
+      "expected_host": "reg.ru"
+    }
+  ]
+}

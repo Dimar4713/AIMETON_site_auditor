@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import httpx
 
 from app.heuristics import heuristic_analysis
 from app.llm import analyze_with_routerai
 from app.models import IntelligenceSource, SiteAnalysis, SourceKind
+from app.search_gateway import (
+    SearchDiagnostics,
+    SearchRequest,
+    get_search_gateway,
+    search_policy_from_env,
+)
 
 
 HOST_CLASSES: dict[str, set[str]] = {
@@ -96,17 +102,6 @@ def source_type(source_class: SourceKind) -> str:
     }.get(source_class, "external_source")
 
 
-async def _search(query: str, limit: int) -> list[dict]:
-    base_url = os.getenv("SEARXNG_BASE_URL")
-    if not base_url:
-        return []
-    params = {"q": query, "format": "json", "language": "ru-RU", "safesearch": 1}
-    async with httpx.AsyncClient(timeout=35, follow_redirects=True) as client:
-        response = await client.get(f"{base_url.rstrip('/')}/search", params=params)
-        response.raise_for_status()
-    return list(response.json().get("results", []))[:limit]
-
-
 def query_plan(company_name: str, region: str | None = None) -> list[tuple[SourceKind, str]]:
     suffix = f" {region}" if region else ""
     q = company_name
@@ -131,28 +126,45 @@ def query_plan(company_name: str, region: str | None = None) -> list[tuple[Sourc
     ]
 
 
-async def collect_external_sources(company_name: str, official_url: str | None, region: str | None = None, max_sources: int = 60) -> tuple[list[IntelligenceSource], list[str]]:
-    if not os.getenv("SEARXNG_BASE_URL"):
-        return [], ["SEARXNG_BASE_URL не задан: внешний OSINT-контур не выполнен."]
+async def collect_external_sources(
+    company_name: str,
+    official_url: str | None,
+    region: str | None = None,
+    max_sources: int = 60,
+) -> tuple[list[IntelligenceSource], list[str], SearchDiagnostics]:
     notes: list[str] = []
     plan = query_plan(company_name, region)
     per_query = max(2, min(5, max_sources // max(1, len(plan)) + 1))
     semaphore = asyncio.Semaphore(6)
+    mission_id = f"company-{uuid4()}"
+    correlation_id = f"corr-{uuid4()}"
+    gateway = get_search_gateway()
+    policy = search_policy_from_env()
 
     async def run(kind: SourceKind, query: str):
         async with semaphore:
-            try:
-                return kind, query, await _search(query, per_query), None
-            except httpx.HTTPError as exc:
-                return kind, query, [], str(exc)
+            response = await gateway.search(
+                SearchRequest(
+                    query=query,
+                    limit=per_query,
+                    mission_id=mission_id,
+                    correlation_id=correlation_id,
+                ),
+                policy,
+            )
+            return kind, query, response
 
     batches = await asyncio.gather(*(run(kind, query) for kind, query in plan))
     raw: list[dict] = []
-    for kind, query, items, error in batches:
-        if error:
-            notes.append(f"Часть поиска недоступна для запроса {query!r}: {error}")
-        for item in items:
-            copy = dict(item)
+    diagnostics: list[SearchDiagnostics] = []
+    for kind, query, response in batches:
+        diagnostics.append(response.diagnostics)
+        if response.diagnostics.state != "success":
+            notes.append(
+                f"Поиск для типа {kind} выполнен в состоянии {response.diagnostics.state}."
+            )
+        for item in response.results:
+            copy = item.as_legacy_dict()
             copy["_query_kind"] = kind
             copy["_query"] = query
             raw.append(copy)
@@ -182,7 +194,7 @@ async def collect_external_sources(company_name: str, official_url: str | None, 
         ))
         if len(sources) >= max_sources:
             break
-    return sources, notes
+    return sources, notes, SearchDiagnostics.aggregate(diagnostics)
 
 
 def to_llm_sources(sources: list[IntelligenceSource]) -> list[dict]:
@@ -199,7 +211,11 @@ def to_llm_sources(sources: list[IntelligenceSource]) -> list[dict]:
 
 async def run_enriched_site_analysis(url: str, title: str, text: str) -> SiteAnalysis:
     company_hint = title.split("—")[0].split("|")[0].strip() or _host(url)
-    external_sources, notes = await collect_external_sources(company_hint, url, max_sources=60)
+    external_sources, notes, _diagnostics = await collect_external_sources(
+        company_hint,
+        url,
+        max_sources=60,
+    )
     try:
         analysis = await analyze_with_routerai(url, title, text, to_llm_sources(external_sources))
     except Exception as exc:

@@ -5,6 +5,13 @@ import pytest
 from app import company_intelligence_runtime as runtime
 from app.heuristics import heuristic_analysis
 from app.models import CompanyIntelligenceRequest, IntelligenceSource
+from app.search_gateway.models import GatewayState, SearchDiagnostics
+
+
+DIAGNOSTICS = SearchDiagnostics(
+    state=GatewayState.SUCCESS,
+    selected_provider="fake",
+)
 
 
 @pytest.mark.asyncio
@@ -25,7 +32,7 @@ async def test_company_intelligence_collects_external_sources_once(monkeypatch):
     async def fake_collect(company_name, official_url, region, max_sources):
         nonlocal calls
         calls += 1
-        return sources, []
+        return sources, [], DIAGNOSTICS
 
     async def fake_analyze(url, external_sources, search_notes):
         assert external_sources is sources
@@ -60,7 +67,7 @@ async def test_company_intelligence_without_official_site_still_searches_once(mo
     async def fake_collect(company_name, official_url, region, max_sources):
         nonlocal calls
         calls += 1
-        return [], ["нет результатов"]
+        return [], ["нет результатов"], DIAGNOSTICS
 
     monkeypatch.setattr(runtime, "collect_external_sources", fake_collect)
 

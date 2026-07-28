@@ -1,6 +1,8 @@
 from typing import Literal
 from pydantic import BaseModel, Field, HttpUrl
 
+from app.search_gateway.models import SearchDiagnostics
+
 
 class AgentRecommendation(BaseModel):
     name: str
@@ -153,6 +155,7 @@ class HuntResult(BaseModel):
     discovered: int
     candidates: list[HuntCandidate] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    search: SearchDiagnostics | None = None
 
 
 SourceKind = Literal[
@@ -200,6 +203,7 @@ class CompanyIntelligenceResult(BaseModel):
     commercial_score: int = Field(ge=0, le=100)
     recommended_solution: str
     status: Literal["complete", "partial"] = "partial"
+    search: SearchDiagnostics | None = None
 
 
 class ChatMessage(BaseModel):
