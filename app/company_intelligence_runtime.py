@@ -41,7 +41,6 @@ async def _analyze_site_with_sources(
             source
             for source in external_sources
             if source.url == url
-            or source.url.rstrip("/") == page["final_url"].rstrip("/")
             or source.source_class == "official"
         ),
         None,

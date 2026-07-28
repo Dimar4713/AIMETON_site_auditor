@@ -124,6 +124,38 @@ async def test_fetched_document_promotes_candidate_to_evidence(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_official_candidate_selection_does_not_depend_on_unfetched_redirect(monkeypatch):
+    unrelated = hint()
+    unrelated.url = "https://catalog.example.org/example"
+    unrelated.source_class = "registry"
+    official = hint()
+    pipeline = FakePipeline(result=fetched_document())
+
+    monkeypatch.setattr(runtime, "get_document_pipeline", lambda: pipeline)
+    monkeypatch.setattr(
+        runtime,
+        "analyze_with_routerai",
+        AsyncMock(
+            return_value=heuristic_analysis(
+                "https://example.com/about",
+                "Example",
+                "Подтвержденная информация первичного документа.",
+            )
+        ),
+    )
+
+    analysis = await runtime._analyze_site_with_sources(
+        "https://example.com/about",
+        [unrelated, official],
+        [],
+    )
+
+    assert analysis.url == "https://example.com/about"
+    assert official.lifecycle_state == "evidence"
+    assert unrelated.lifecycle_state == "discovery_hint"
+
+
+@pytest.mark.asyncio
 async def test_failed_document_load_does_not_promote_hint(monkeypatch):
     source = hint()
     monkeypatch.setattr(
