@@ -1,0 +1,164 @@
+{
+  "schema_version": "0.1.0",
+  "missions": [
+    {
+      "id": "mission_golden_01",
+      "schema_version": "0.1.0",
+      "runtime_task_id": "task_runtime_01",
+      "correlation_id": "corr_golden_01",
+      "title": "Проверить юридическое имя компании",
+      "goal": "Получить проверяемый профиль с первичным источником",
+      "state": "review",
+      "search_plan": {
+        "id": "search_plan_golden_01",
+        "status": "completed",
+        "query_count": 1,
+        "required_source_kinds": ["first_party"],
+        "started_at": "2026-07-28T10:00:00Z",
+        "completed_at": "2026-07-28T10:00:10Z"
+      },
+      "created_at": "2026-07-28T10:00:00Z",
+      "updated_at": "2026-07-28T10:01:00Z"
+    }
+  ],
+  "entities": [
+    {
+      "id": "entity_golden_01",
+      "mission_id": "mission_golden_01",
+      "correlation_id": "corr_golden_01",
+      "entity_type": "company",
+      "canonical_name": "Первая Климатическая Компания"
+    }
+  ],
+  "entity_identifiers": [
+    {
+      "id": "entity_identifier_golden_01",
+      "mission_id": "mission_golden_01",
+      "entity_id": "entity_golden_01",
+      "correlation_id": "corr_golden_01",
+      "scheme": "domain",
+      "value": "climateone.ru",
+      "normalized_value": "climateone.ru"
+    }
+  ],
+  "sources": [
+    {
+      "id": "source_golden_01",
+      "mission_id": "mission_golden_01",
+      "correlation_id": "corr_golden_01",
+      "kind": "first_party",
+      "publisher": "Первая Климатическая Компания",
+      "homepage_url": "https://climateone.ru/",
+      "terms_ref": null
+    }
+  ],
+  "documents": [
+    {
+      "id": "document_golden_01",
+      "mission_id": "mission_golden_01",
+      "source_id": "source_golden_01",
+      "correlation_id": "corr_golden_01",
+      "url": "https://climateone.ru/contacts",
+      "title": "Контакты",
+      "accessed_at": "2026-07-28T10:00:20Z",
+      "fetch_status": "fetched",
+      "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "media_type": "text/html"
+    }
+  ],
+  "provider_calls": [
+    {
+      "id": "provider_call_golden_01",
+      "mission_id": "mission_golden_01",
+      "correlation_id": "corr_golden_01",
+      "provider_ref": "provider_gateway",
+      "operation": "search",
+      "request_fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "state": "succeeded",
+      "started_at": "2026-07-28T10:00:00Z",
+      "finished_at": "2026-07-28T10:00:10Z"
+    }
+  ],
+  "discovery_hints": [
+    {
+      "id": "hint_golden_01",
+      "mission_id": "mission_golden_01",
+      "provider_call_id": "provider_call_golden_01",
+      "correlation_id": "corr_golden_01",
+      "url": "https://climateone.ru/contacts",
+      "title": "Контакты",
+      "snippet": "Реквизиты компании доступны на странице.",
+      "discovered_at": "2026-07-28T10:00:10Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence_golden_01",
+      "mission_id": "mission_golden_01",
+      "source_id": "source_golden_01",
+      "document_id": "document_golden_01",
+      "correlation_id": "corr_golden_01",
+      "evidence_type": "document_quote",
+      "quote": "ООО «ПЕРВАЯ КЛИМАТИЧЕСКАЯ КОМПАНИЯ»",
+      "locator": "Контакты → Партнерам → реквизиты",
+      "observed_at": "2026-07-28T10:00:30Z",
+      "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  ],
+  "claims": [
+    {
+      "id": "claim_golden_01",
+      "mission_id": "mission_golden_01",
+      "entity_id": "entity_golden_01",
+      "correlation_id": "corr_golden_01",
+      "predicate": "legal_name",
+      "value": "ООО «ПЕРВАЯ КЛИМАТИЧЕСКАЯ КОМПАНИЯ»",
+      "state": "confirmed",
+      "critical": true,
+      "evidence_refs": [
+        {
+          "evidence_id": "evidence_golden_01",
+          "relation": "supports"
+        }
+      ],
+      "created_at": "2026-07-28T10:00:40Z"
+    }
+  ],
+  "cost_events": [
+    {
+      "id": "cost_golden_01",
+      "mission_id": "mission_golden_01",
+      "provider_call_id": "provider_call_golden_01",
+      "correlation_id": "corr_golden_01",
+      "currency": "RUB",
+      "amount": 0.0,
+      "units": 1.0,
+      "unit_name": "query",
+      "occurred_at": "2026-07-28T10:00:10Z"
+    }
+  ],
+  "review_decisions": [
+    {
+      "id": "review_golden_01",
+      "mission_id": "mission_golden_01",
+      "correlation_id": "corr_golden_01",
+      "target_type": "claim",
+      "target_id": "claim_golden_01",
+      "decision": "approved",
+      "reviewer_ref": "reviewer_human_01",
+      "reason": "Цитата и реквизиты проверены на сайте компании.",
+      "decided_at": "2026-07-28T10:01:00Z"
+    }
+  ],
+  "reports": [
+    {
+      "id": "report_golden_01",
+      "mission_id": "mission_golden_01",
+      "correlation_id": "corr_golden_01",
+      "title": "Доказательный профиль компании",
+      "claim_ids": ["claim_golden_01"],
+      "client_facing": true,
+      "generated_at": "2026-07-28T10:01:10Z"
+    }
+  ]
+}
