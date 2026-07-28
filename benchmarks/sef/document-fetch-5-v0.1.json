@@ -1,0 +1,37 @@
+{
+  "benchmark_id": "SEF-DOCUMENT-FETCH-5",
+  "version": "0.1.0",
+  "minimum_success_rate": 0.8,
+  "cases": [
+    {
+      "case_id": "DOC-01",
+      "url": "https://benchmark.example/timeweb",
+      "fixture": "tests/fixtures/timeweb.html",
+      "required_text": "Облачные серверы и сервисы"
+    },
+    {
+      "case_id": "DOC-02",
+      "url": "https://benchmark.example/cdek",
+      "fixture": "tests/fixtures/cdek.html",
+      "required_text": "Доставка для бизнеса"
+    },
+    {
+      "case_id": "DOC-03",
+      "url": "https://benchmark.example/dns",
+      "fixture": "tests/fixtures/dns.html",
+      "required_text": "Комплектующие для ПК"
+    },
+    {
+      "case_id": "DOC-04",
+      "url": "https://benchmark.example/contacts",
+      "fixture": "tests/fixtures/sef/contacts-table.html",
+      "required_text": "ООО «ПРИМЕР»"
+    },
+    {
+      "case_id": "DOC-05",
+      "url": "https://benchmark.example/about",
+      "fixture": "tests/fixtures/sef/about-links.html",
+      "required_text": "Команда объединяет инженеров"
+    }
+  ]
+}

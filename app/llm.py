@@ -147,9 +147,20 @@ JSON SCHEMA:
             title=str(item.get("title") or source.title),
             url=str(item.get("url") or source.url),
             accessed_at=str(item.get("accessed_at") or accessed_at),
-            evidence_quote=str(item.get("snippet") or source.evidence_quote)[:900],
+            evidence_quote=str(
+                item.get("evidence_quote")
+                or item.get("snippet")
+                or source.evidence_quote
+            )[:900],
             source_type=str(item.get("source_type") or "external_source"),
             evidence_level=str(item.get("evidence_level") or "unverified_mention"),
+            document_url=item.get("document_url"),
+            document_title=item.get("document_title"),
+            document_accessed_at=item.get("document_accessed_at"),
+            document_digest=item.get("document_digest"),
+            evidence_locator=item.get("evidence_locator"),
+            evidence_digest=item.get("evidence_digest"),
+            fetch_path=item.get("fetch_path"),
         ))
         seen_ids.add(source.id)
     result.sources = clean_sources

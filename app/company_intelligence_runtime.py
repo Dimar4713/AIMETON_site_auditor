@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 
 import httpx
@@ -10,6 +11,8 @@ from app.external_sources import (
     to_llm_sources,
     verified_evidence_level,
 )
+from app.document_pipeline import get_document_pipeline
+from app.document_pipeline.models import FetchPolicy
 from app.heuristics import heuristic_analysis
 from app.llm import analyze_with_routerai
 from app.models import (
@@ -19,12 +22,12 @@ from app.models import (
     IntelligenceSource,
     SiteAnalysis,
 )
-from app.scraper import FetchError, fetch_site
+from app.sef.models import DiscoveryHint, Source, SourceKind
+from app.scraper import FetchError
 
 
-def _quote_from_document(text: str, limit: int = 500) -> str:
-    normalized = " ".join(text.split())
-    return normalized[:limit]
+def _runtime_identifier(prefix: str, value: str) -> str:
+    return f"{prefix}_{hashlib.sha256(value.encode('utf-8')).hexdigest()[:24]}"
 
 
 async def _analyze_site_with_sources(
@@ -33,10 +36,6 @@ async def _analyze_site_with_sources(
     search_notes: list[str],
 ) -> SiteAnalysis:
     """Fetch the official document once and promote only that fetched document to evidence."""
-    page = await fetch_site(url)
-    document_accessed_at = datetime.now(timezone.utc).isoformat()
-    quote = _quote_from_document(page["text"])
-
     official_candidate = next(
         (
             source
@@ -47,14 +46,75 @@ async def _analyze_site_with_sources(
         ),
         None,
     )
+    source_identity = official_candidate.id if official_candidate else _runtime_identifier("src", url)
+    mission_id = _runtime_identifier("mission", url)
+    correlation_id = _runtime_identifier("corr", url)
+    source = Source(
+        id=source_identity,
+        mission_id=mission_id,
+        correlation_id=correlation_id,
+        kind=SourceKind.FIRST_PARTY,
+        publisher=(
+            official_candidate.title
+            if official_candidate is not None
+            else "Официальный сайт компании"
+        ),
+        homepage_url=url,
+    )
+    hint = DiscoveryHint(
+        id=_runtime_identifier("hint", url),
+        mission_id=mission_id,
+        provider_call_id=_runtime_identifier("provider_call", url),
+        correlation_id=correlation_id,
+        url=url,
+        title=official_candidate.title if official_candidate is not None else "Официальный сайт",
+        snippet=(
+            official_candidate.snippet
+            if official_candidate is not None and official_candidate.snippet.strip()
+            else "Кандидат на первичный документ; поисковый текст не используется как evidence."
+        ),
+        discovered_at=datetime.now(timezone.utc),
+    )
+    fetched = await get_document_pipeline().fetch_hint(
+        hint,
+        source,
+        FetchPolicy(),
+    )
+    quote_block = next(
+        (
+            block
+            for block in fetched.blocks
+            if len(block.text.strip()) >= 20 and block.locator != "head/title"
+        ),
+        fetched.blocks[0],
+    )
+    promoted = get_document_pipeline().promote_quote(
+        fetched,
+        locator=quote_block.locator,
+        quote=quote_block.text[:500],
+    )
+    page = {
+        "final_url": str(fetched.document.url),
+        "title": fetched.document.title,
+        "text": fetched.normalized_text,
+    }
+    document_accessed_at = fetched.document.accessed_at.isoformat()
+    quote = promoted.evidence.quote
+
     if official_candidate is not None:
         official_candidate.lifecycle_state = "evidence"
         official_candidate.document_url = page["final_url"]
         official_candidate.document_title = page["title"]
         official_candidate.document_accessed_at = document_accessed_at
         official_candidate.evidence_quote = quote
+        official_candidate.document_digest = fetched.normalized_content_digest
+        official_candidate.evidence_locator = promoted.evidence.locator
+        official_candidate.evidence_digest = promoted.evidence.digest
+        official_candidate.fetch_path = fetched.diagnostics.path.value
         official_candidate.evidence_level = verified_evidence_level("official")
-        official_candidate.verification_note = "Первичный документ загружен и проверен."
+        official_candidate.verification_note = (
+            "Первичный документ загружен; цитата проверена по стабильному locator и digest."
+        )
 
     try:
         analysis = await analyze_with_routerai(
@@ -85,6 +145,10 @@ async def _analyze_site_with_sources(
                     document_url=page["final_url"],
                     document_title=page["title"],
                     document_accessed_at=document_accessed_at,
+                    document_digest=fetched.normalized_content_digest,
+                    evidence_locator=promoted.evidence.locator,
+                    evidence_digest=promoted.evidence.digest,
+                    fetch_path=fetched.diagnostics.path.value,
                 )
             )
 
