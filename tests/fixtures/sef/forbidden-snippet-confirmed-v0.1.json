@@ -1,0 +1,79 @@
+{
+  "schema_version": "0.1.0",
+  "missions": [
+    {
+      "id": "mission_forbidden_01",
+      "schema_version": "0.1.0",
+      "runtime_task_id": "task_runtime_forbidden_01",
+      "correlation_id": "corr_forbidden_01",
+      "title": "Недопустимое повышение сниппета",
+      "goal": "Проверить fail-closed инвариант",
+      "state": "running",
+      "search_plan": {
+        "id": "search_plan_forbidden_01",
+        "status": "completed",
+        "query_count": 1,
+        "required_source_kinds": ["first_party"],
+        "started_at": "2026-07-28T10:00:00Z",
+        "completed_at": "2026-07-28T10:00:10Z"
+      },
+      "created_at": "2026-07-28T10:00:00Z",
+      "updated_at": "2026-07-28T10:00:10Z"
+    }
+  ],
+  "entities": [
+    {
+      "id": "entity_forbidden_01",
+      "mission_id": "mission_forbidden_01",
+      "correlation_id": "corr_forbidden_01",
+      "entity_type": "company",
+      "canonical_name": "Компания из сниппета"
+    }
+  ],
+  "entity_identifiers": [],
+  "sources": [],
+  "documents": [],
+  "provider_calls": [
+    {
+      "id": "provider_call_forbidden_01",
+      "mission_id": "mission_forbidden_01",
+      "correlation_id": "corr_forbidden_01",
+      "provider_ref": "provider_gateway",
+      "operation": "search",
+      "request_fingerprint": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "state": "succeeded",
+      "started_at": "2026-07-28T10:00:00Z",
+      "finished_at": "2026-07-28T10:00:10Z"
+    }
+  ],
+  "discovery_hints": [
+    {
+      "id": "hint_forbidden_01",
+      "mission_id": "mission_forbidden_01",
+      "provider_call_id": "provider_call_forbidden_01",
+      "correlation_id": "corr_forbidden_01",
+      "url": "https://example.org/company",
+      "title": "Результат поиска",
+      "snippet": "Поисковый сниппет утверждает юридическое имя.",
+      "discovered_at": "2026-07-28T10:00:10Z"
+    }
+  ],
+  "evidence": [],
+  "claims": [
+    {
+      "id": "claim_forbidden_01",
+      "mission_id": "mission_forbidden_01",
+      "entity_id": "entity_forbidden_01",
+      "correlation_id": "corr_forbidden_01",
+      "predicate": "legal_name",
+      "value": "ООО «Непроверенная компания»",
+      "state": "confirmed",
+      "critical": true,
+      "evidence_refs": [],
+      "created_at": "2026-07-28T10:00:20Z"
+    }
+  ],
+  "cost_events": [],
+  "review_decisions": [],
+  "reports": []
+}
