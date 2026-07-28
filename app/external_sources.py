@@ -199,13 +199,26 @@ async def collect_external_sources(
 
 def to_llm_sources(sources: list[IntelligenceSource]) -> list[dict]:
     return [{
-        "id": source.id, "title": source.title, "url": source.url, "snippet": source.snippet,
+        "id": source.id, "title": source.title, "url": source.url,
+        "snippet": (
+            source.evidence_quote
+            if source.lifecycle_state == "evidence"
+            else source.snippet
+        ),
         "accessed_at": source.accessed_at, "query_kind": source.query_kind,
         "result_kind": source.result_kind, "source_class": source.source_class,
         "classification_state": source.classification_state,
         "lifecycle_state": source.lifecycle_state,
         "verification_note": source.verification_note,
         "source_type": source_type(source.source_class), "evidence_level": source.evidence_level,
+        "document_url": source.document_url,
+        "document_title": source.document_title,
+        "document_accessed_at": source.document_accessed_at,
+        "document_digest": source.document_digest,
+        "evidence_quote": source.evidence_quote,
+        "evidence_locator": source.evidence_locator,
+        "evidence_digest": source.evidence_digest,
+        "fetch_path": source.fetch_path,
     } for source in sources]
 
 

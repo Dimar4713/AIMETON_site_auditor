@@ -143,6 +143,8 @@ SEARCH_MISSION_BUDGET_RUB=...
 TAVILY_API_KEY=...
 TAVILY_SEARCH_COST_USD=...
 SEARCH_MISSION_BUDGET_USD=...
+CRAWL4AI_BASE_URL=http://crawl4ai:11235
+CRAWL4AI_API_TOKEN=...
 AIMETON_MCP_ADMIN_TOKEN=...
 AIMETON_MCP_PUBLIC_RATE_LIMIT=30
 AIMETON_MCP_ADMIN_RATE_LIMIT=20
@@ -159,6 +161,12 @@ GET /api/search/health
 ```
 
 Подробный контракт и политика стоимости: [`docs/architecture/SEF-PROVIDER-GATEWAY-V0.1.md`](docs/architecture/SEF-PROVIDER-GATEWAY-V0.1.md).
+
+Контур документов сначала использует безопасный HTTP, затем при необходимости
+отдельный Crawl4AI worker и только после него ограниченный browser fallback.
+Поисковый snippet остаётся `discovery_hint`; evidence создаётся лишь из
+загруженного документа по проверенной цитате и locator. Контракт:
+[`docs/architecture/SEF-DOCUMENT-FETCH-EXTRACT-V0.1.md`](docs/architecture/SEF-DOCUMENT-FETCH-EXTRACT-V0.1.md).
 
 Если `AIMETON_MCP_ADMIN_TOKEN` отсутствует, административный MCP endpoint остаётся заблокированным и возвращает `401`.
 

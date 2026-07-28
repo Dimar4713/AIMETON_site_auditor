@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app import company_intelligence_runtime as runtime
+from app.document_pipeline import DocumentPipeline
+from app.document_pipeline.models import (
+    DocumentDiagnostics,
+    FetchPath,
+    FetchedDocument,
+)
 from app.external_sources import to_llm_sources
 from app.heuristics import heuristic_analysis
 from app.models import IntelligenceSource
+from app.sef.models import Document, DocumentFetchState
 
 
 def hint() -> IntelligenceSource:
@@ -22,6 +32,51 @@ def hint() -> IntelligenceSource:
     )
 
 
+def fetched_document() -> FetchedDocument:
+    from app.document_pipeline.extractor import extract_html
+
+    html = (
+        "<html><head><title>Example — официальный сайт</title></head><body>"
+        "<p>Example производит оборудование. "
+        "Подтвержденная информация первичного документа.</p></body></html>"
+    )
+    extraction = extract_html(html, base_url="https://example.com/about")
+    digest = "sha256:" + "1" * 64
+    return FetchedDocument(
+        document=Document(
+            id="doc_test",
+            mission_id="mission_test",
+            source_id="H1",
+            correlation_id="corr_test",
+            url="https://example.com/about",
+            title="Example — официальный сайт",
+            accessed_at=datetime.now(UTC),
+            fetch_status=DocumentFetchState.FETCHED,
+            content_digest=digest,
+            media_type="text/html",
+        ),
+        raw_content_digest="sha256:" + "2" * 64,
+        normalized_content_digest=digest,
+        normalized_text=extraction.text,
+        blocks=extraction.blocks,
+        links=extraction.links,
+        tables=extraction.tables,
+        diagnostics=DocumentDiagnostics(
+            request_fingerprint="sha256:" + "3" * 64,
+            path=FetchPath.STATIC,
+            raw_bytes=len(html),
+            latency_ms=1,
+        ),
+    )
+
+
+class FakePipeline:
+    def __init__(self, result=None, error=None):
+        self.fetch_hint = AsyncMock(return_value=result, side_effect=error)
+
+    promote_quote = staticmethod(DocumentPipeline.promote_quote)
+
+
 def test_search_snippet_is_not_evidence():
     source = hint()
     assert source.lifecycle_state == "discovery_hint"
@@ -35,20 +90,16 @@ def test_search_snippet_is_not_evidence():
 @pytest.mark.asyncio
 async def test_fetched_document_promotes_candidate_to_evidence(monkeypatch):
     source = hint()
-
-    async def fake_fetch(url):
-        return {
-            "final_url": "https://example.com/about",
-            "title": "Example — официальный сайт",
-            "text": "Example производит оборудование. Подтвержденная информация первичного документа.",
-        }
+    pipeline = FakePipeline(result=fetched_document())
 
     async def fake_llm(url, title, text, sources):
         assert sources[0]["lifecycle_state"] == "evidence"
         assert sources[0]["evidence_level"] == "confirmed_fact"
+        assert sources[0]["snippet"] == sources[0]["evidence_quote"]
+        assert "10 млрд" not in sources[0]["snippet"]
         return heuristic_analysis(url, title, text)
 
-    monkeypatch.setattr(runtime, "fetch_site", fake_fetch)
+    monkeypatch.setattr(runtime, "get_document_pipeline", lambda: pipeline)
     monkeypatch.setattr(runtime, "analyze_with_routerai", fake_llm)
 
     analysis = await runtime._analyze_site_with_sources(
@@ -61,6 +112,10 @@ async def test_fetched_document_promotes_candidate_to_evidence(monkeypatch):
     assert source.document_url == "https://example.com/about"
     assert source.document_accessed_at
     assert source.evidence_quote
+    assert source.document_digest
+    assert source.evidence_locator == "body/p[1]"
+    assert source.evidence_digest
+    assert source.fetch_path == "static"
     assert source.evidence_level == "confirmed_fact"
     assert analysis.sources
     evidence = analysis.sources[-1]
@@ -71,11 +126,11 @@ async def test_fetched_document_promotes_candidate_to_evidence(monkeypatch):
 @pytest.mark.asyncio
 async def test_failed_document_load_does_not_promote_hint(monkeypatch):
     source = hint()
-
-    async def fake_fetch(url):
-        raise ValueError("document unavailable")
-
-    monkeypatch.setattr(runtime, "fetch_site", fake_fetch)
+    monkeypatch.setattr(
+        runtime,
+        "get_document_pipeline",
+        lambda: FakePipeline(error=ValueError("document unavailable")),
+    )
 
     with pytest.raises(ValueError):
         await runtime._analyze_site_with_sources(

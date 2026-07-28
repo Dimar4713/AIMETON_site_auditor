@@ -12,6 +12,7 @@
 - [SEF Benchmark-20 v0.1](benchmarks/SEF-BENCHMARK-20-V0.1.md) — замороженная выборка из 20 компаний и ручной identity-эталон для первых пяти.
 - [SEF Mission и Evidence Contract v0.1](architecture/SEF-CONTRACT-V0.1.md) — provider-neutral модель данных, SQL-миграция и fail-closed инварианты доказательности.
 - [SEF Provider Gateway v0.1](architecture/SEF-PROVIDER-GATEWAY-V0.1.md) — единый контракт Yandex/SearXNG/Tavily, cache, fallback, бюджет, circuit breaker и безопасная телеметрия.
+- [SEF Document Fetch/Extract v0.1](architecture/SEF-DOCUMENT-FETCH-EXTRACT-V0.1.md) — HTTP-first загрузка, Crawl4AI/browser fallback, digest, locators и строгий переход `hint → document → evidence`.
 
 ## Политики управления
 

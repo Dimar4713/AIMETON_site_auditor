@@ -29,6 +29,16 @@ class EvidenceSource(BaseModel):
     document_url: str | None = None
     document_title: str | None = None
     document_accessed_at: str | None = None
+    document_digest: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    evidence_locator: str | None = None
+    evidence_digest: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    fetch_path: Literal["static", "crawl4ai", "browser", "cache"] | None = None
 
 
 class EconomicSignal(BaseModel):
@@ -182,6 +192,16 @@ class IntelligenceSource(BaseModel):
     document_title: str | None = None
     document_accessed_at: str | None = None
     evidence_quote: str | None = None
+    document_digest: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    evidence_locator: str | None = None
+    evidence_digest: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    fetch_path: Literal["static", "crawl4ai", "browser", "cache"] | None = None
     verification_note: str = "Поисковый сниппет; первичный документ не проверен."
 
 
