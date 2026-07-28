@@ -113,7 +113,7 @@ async def _analyze_site_with_sources(
 async def run_company_intelligence(req: CompanyIntelligenceRequest) -> CompanyIntelligenceResult:
     notes: list[str] = []
     official_url = str(req.url) if req.url else None
-    sources, search_notes = await collect_external_sources(
+    sources, search_notes, search_diagnostics = await collect_external_sources(
         req.company_name,
         official_url,
         req.region,
@@ -181,4 +181,5 @@ async def run_company_intelligence(req: CompanyIntelligenceRequest) -> CompanyIn
         commercial_score=score,
         recommended_solution=solution,
         status="complete" if site_analysis and verified_count > 0 else "partial",
+        search=search_diagnostics,
     )

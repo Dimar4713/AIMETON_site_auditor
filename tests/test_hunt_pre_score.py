@@ -4,6 +4,12 @@ import pytest
 
 from app import discovery
 from app.models import HuntRequest
+from app.search_gateway.models import (
+    GatewayState,
+    SearchDiagnostics,
+    SearchItem,
+    SearchResponse,
+)
 
 
 def _request(**overrides) -> HuntRequest:
@@ -18,6 +24,53 @@ def _request(**overrides) -> HuntRequest:
     }
     data.update(overrides)
     return HuntRequest(**data)
+
+
+def _gateway_for(fake_search):
+    class FakeGateway:
+        async def search(self, request, _policy):
+            raw = await fake_search(request.query, request.limit)
+            return SearchResponse(
+                results=[
+                    SearchItem(
+                        url=item["url"],
+                        title=item.get("title", ""),
+                        snippet=item.get("content", ""),
+                        provider="fake",
+                    )
+                    for item in raw
+                ],
+                diagnostics=SearchDiagnostics(
+                    state=GatewayState.SUCCESS,
+                    selected_provider="fake",
+                ),
+            )
+
+    return FakeGateway()
+
+
+def _degraded_gateway_for(fake_search):
+    class FakeGateway:
+        async def search(self, request, _policy):
+            raw = await fake_search(request.query, request.limit)
+            return SearchResponse(
+                results=[
+                    SearchItem(
+                        url=item["url"],
+                        title=item.get("title", ""),
+                        snippet=item.get("content", ""),
+                        provider="fallback",
+                    )
+                    for item in raw
+                ],
+                diagnostics=SearchDiagnostics(
+                    state=GatewayState.DEGRADED,
+                    selected_provider="fallback",
+                    fallback_used=True,
+                ),
+            )
+
+    return FakeGateway()
 
 
 def test_pre_score_is_explainable_and_independent_of_link_count():
@@ -69,7 +122,7 @@ async def test_deep_processing_is_not_called_below_threshold(monkeypatch):
     async def forbidden_fetch(_url: str):
         raise AssertionError("fetch_site must not run below deep_audit_score")
 
-    monkeypatch.setattr(discovery, "_search_searxng", fake_search)
+    monkeypatch.setattr(discovery, "get_search_gateway", lambda: _gateway_for(fake_search))
     monkeypatch.setattr(discovery, "fetch_site", forbidden_fetch)
 
     result = await discovery.run_hunt(req)
@@ -103,7 +156,7 @@ async def test_deep_processing_runs_only_after_threshold(monkeypatch):
             "text": "Красноярск стоматология услуги запись автоматизация " * 30,
         }
 
-    monkeypatch.setattr(discovery, "_search_searxng", fake_search)
+    monkeypatch.setattr(discovery, "get_search_gateway", lambda: _gateway_for(fake_search))
     monkeypatch.setattr(discovery, "fetch_site", fake_fetch)
 
     result = await discovery.run_hunt(req)
@@ -124,10 +177,35 @@ async def test_insufficient_candidate_never_starts_deep_processing(monkeypatch):
     async def forbidden_fetch(_url: str):
         raise AssertionError("insufficient_data candidate must not be fetched")
 
-    monkeypatch.setattr(discovery, "_search_searxng", fake_search)
+    monkeypatch.setattr(discovery, "get_search_gateway", lambda: _gateway_for(fake_search))
     monkeypatch.setattr(discovery, "fetch_site", forbidden_fetch)
 
     result = await discovery.run_hunt(req)
 
     assert result.candidates[0].pre_score_status == "insufficient_data"
     assert result.candidates[0].preliminary_score is None
+
+
+@pytest.mark.asyncio
+async def test_degraded_gateway_state_is_visible_in_hunt_api(monkeypatch):
+    req = _request(deep_audit_score=100)
+    monkeypatch.setattr(discovery, "_build_queries", lambda _req: ["query"])
+
+    async def fake_search(_query: str, _limit: int):
+        return [{
+            "url": "https://clinic.ru",
+            "title": "Стоматология Красноярск",
+            "content": "Каталог услуг",
+        }]
+
+    monkeypatch.setattr(
+        discovery,
+        "get_search_gateway",
+        lambda: _degraded_gateway_for(fake_search),
+    )
+
+    result = await discovery.run_hunt(req)
+
+    assert result.search is not None
+    assert result.search.state == GatewayState.DEGRADED
+    assert result.search.fallback_used is True

@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+from decimal import Decimal
+from enum import StrEnum
+from typing import Literal
+
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+
+
+class GatewayModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class GatewayState(StrEnum):
+    SUCCESS = "success"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
+
+
+class AttemptState(StrEnum):
+    SUCCEEDED = "succeeded"
+    EMPTY = "empty"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    CACHE_HIT = "cache_hit"
+
+
+class FallbackReason(StrEnum):
+    NOT_CONFIGURED = "not_configured"
+    POLICY_BLOCKED = "policy_blocked"
+    BUDGET_EXCEEDED = "budget_exceeded"
+    QUOTA_EXCEEDED = "quota_exceeded"
+    CIRCUIT_OPEN = "circuit_open"
+    TIMEOUT = "timeout"
+    PROVIDER_ERROR = "provider_error"
+    EMPTY_RESULTS = "empty_results"
+
+
+class SearchItem(GatewayModel):
+    url: AnyHttpUrl
+    title: str = Field(default="", max_length=1000)
+    snippet: str = Field(default="", max_length=4000)
+    published_at: str | None = Field(default=None, max_length=100)
+    provider: str = Field(min_length=1, max_length=100)
+
+    def as_legacy_dict(self) -> dict[str, str]:
+        payload = {
+            "url": str(self.url),
+            "title": self.title,
+            "content": self.snippet,
+            "provider": self.provider,
+        }
+        if self.published_at:
+            payload["publishedDate"] = self.published_at
+        return payload
+
+
+class SearchRequest(GatewayModel):
+    query: str = Field(min_length=1, max_length=400)
+    limit: int = Field(default=10, ge=1, le=100)
+    language: str = Field(default="ru-RU", min_length=2, max_length=20)
+    mission_id: str = Field(min_length=1, max_length=200)
+    correlation_id: str = Field(min_length=1, max_length=200)
+
+
+class SearchPolicy(GatewayModel):
+    provider_order: tuple[str, ...] = ("yandex", "searxng", "tavily")
+    allowed_providers: frozenset[str] | None = None
+    allow_paid_fallback: bool = False
+    max_cost_by_currency: dict[str, Decimal] = Field(default_factory=dict)
+    timeout_seconds: float = Field(default=15.0, ge=0.1, le=120)
+    retries: int = Field(default=1, ge=0, le=3)
+    cache_ttl_seconds: int = Field(default=900, ge=0, le=86400)
+
+
+class ProviderAttempt(GatewayModel):
+    provider: str
+    state: AttemptState
+    request_fingerprint: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    latency_ms: int = Field(ge=0)
+    result_count: int = Field(ge=0)
+    reason: FallbackReason | None = None
+    cost_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    cost_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+
+
+class SearchDiagnostics(GatewayModel):
+    state: GatewayState
+    selected_provider: str | None = None
+    cache_hit: bool = False
+    fallback_used: bool = False
+    attempts: list[ProviderAttempt] = Field(default_factory=list)
+    total_cost_by_currency: dict[str, Decimal] = Field(default_factory=dict)
+
+    @classmethod
+    def aggregate(cls, diagnostics: list[SearchDiagnostics]) -> SearchDiagnostics:
+        attempts = [attempt for item in diagnostics for attempt in item.attempts]
+        totals: dict[str, Decimal] = {}
+        for item in diagnostics:
+            for currency, amount in item.total_cost_by_currency.items():
+                totals[currency] = totals.get(currency, Decimal("0")) + amount
+        if not diagnostics or all(item.state == GatewayState.UNAVAILABLE for item in diagnostics):
+            state = GatewayState.UNAVAILABLE
+        elif any(item.state != GatewayState.SUCCESS for item in diagnostics):
+            state = GatewayState.DEGRADED
+        else:
+            state = GatewayState.SUCCESS
+        selected = next((item.selected_provider for item in diagnostics if item.selected_provider), None)
+        return cls(
+            state=state,
+            selected_provider=selected,
+            cache_hit=any(item.cache_hit for item in diagnostics),
+            fallback_used=any(item.fallback_used for item in diagnostics),
+            attempts=attempts,
+            total_cost_by_currency=totals,
+        )
+
+
+class SearchResponse(GatewayModel):
+    results: list[SearchItem]
+    diagnostics: SearchDiagnostics
+
+
+class ProviderHealth(GatewayModel):
+    provider: str
+    configured: bool
+    paid: bool
+    circuit_state: Literal["closed", "open", "half_open"]
+    quota_remaining: int | None = Field(default=None, ge=0)

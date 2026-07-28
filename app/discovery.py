@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import httpx
 
@@ -11,6 +11,12 @@ from app.heuristics import heuristic_analysis
 from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries
 from app.models import HuntCandidate, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
+from app.search_gateway import (
+    SearchDiagnostics,
+    SearchRequest,
+    get_search_gateway,
+    search_policy_from_env,
+)
 
 
 EXCLUDED_HOSTS = {
@@ -69,17 +75,6 @@ def _build_queries(req: HuntRequest) -> list[str]:
         add(f'{focus} {req.region} компания официальный сайт')
 
     return queries
-
-
-async def _search_searxng(query: str, limit: int) -> list[dict]:
-    base_url = os.getenv("SEARXNG_BASE_URL")
-    if not base_url:
-        raise RuntimeError("SEARXNG_BASE_URL не задан")
-    params = {"q": query, "format": "json", "language": "ru-RU"}
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        response = await client.get(f"{base_url.rstrip('/')}/search", params=params)
-        response.raise_for_status()
-    return list(response.json().get("results", []))[:limit]
 
 
 def _pre_score(req: HuntRequest, title: str, snippet: str, url: str) -> PreScoreResult:
@@ -159,19 +154,34 @@ def _shallow_candidate(
 async def run_hunt(req: HuntRequest) -> HuntResult:
     queries = _build_queries(req)
     raw_results: list[dict] = []
+    search_diagnostics: list[SearchDiagnostics] = []
+    mission_id = f"hunt-{uuid4()}"
+    correlation_id = f"corr-{uuid4()}"
+    gateway = get_search_gateway()
+    policy = search_policy_from_env()
     for query in queries:
-        try:
-            raw_results.extend(await _search_searxng(query, req.results_per_query))
-        except Exception as exc:
-            if not raw_results:
-                return HuntResult(
-                    region=req.region,
-                    search_zone=req.search_zone,
-                    queries=queries,
-                    discovered=0,
-                    candidates=[],
-                    notes=[f"Поиск не выполнен: {exc}"],
-                )
+        response = await gateway.search(
+            SearchRequest(
+                query=query,
+                limit=req.results_per_query,
+                mission_id=mission_id,
+                correlation_id=correlation_id,
+            ),
+            policy,
+        )
+        search_diagnostics.append(response.diagnostics)
+        raw_results.extend(item.as_legacy_dict() for item in response.results)
+    aggregate = SearchDiagnostics.aggregate(search_diagnostics)
+    if not raw_results:
+        return HuntResult(
+            region=req.region,
+            search_zone=req.search_zone,
+            queries=queries,
+            discovered=0,
+            candidates=[],
+            notes=[f"Поиск не дал результатов: gateway state={aggregate.state}."],
+            search=aggregate,
+        )
 
     unique: dict[str, dict] = {}
     for item in raw_results:
@@ -285,4 +295,5 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             f"Глубокая обработка запускается только при pre-score >= {req.deep_audit_score}.",
             "Количество найденных ссылок не входит в формулу pre-score.",
         ],
+        search=aggregate,
     )

@@ -70,6 +70,7 @@ Content-Type: application/json
 ```
 
 Результат включает анализ сайта, классифицированные источники, уровень доказательности, информационный запах, коммерческий балл и честный статус полноты `complete`/`partial`.
+Поле `search` показывает состояние Provider Gateway, fallback, задержку и оценочную стоимость без раскрытия запроса или ключей.
 
 ### Запрос на охоту
 
@@ -89,6 +90,7 @@ Content-Type: application/json
 ```
 
 Пустой список `industries` означает охоту по полному справочнику.
+Машинно-читаемое поле `search.state` принимает `success`, `degraded` или `unavailable`.
 
 ## Тактический план Search & Evidence Fabric
 
@@ -128,7 +130,19 @@ mcp>=1.25,<2
 ```text
 ROUTERAI_API_KEY=...
 ROUTERAI_MODEL=...
+SEARCH_PROVIDER_ORDER=yandex,searxng,tavily
+SEARCH_TIMEOUT_SECONDS=15
+SEARCH_RETRIES=1
+SEARCH_CACHE_TTL_SECONDS=900
+SEARCH_ALLOW_PAID_FALLBACK=false
 SEARXNG_BASE_URL=https://your-searxng-instance.example
+YANDEX_SEARCH_API_KEY=...
+YANDEX_SEARCH_FOLDER_ID=...
+YANDEX_SEARCH_COST_RUB=...
+SEARCH_MISSION_BUDGET_RUB=...
+TAVILY_API_KEY=...
+TAVILY_SEARCH_COST_USD=...
+SEARCH_MISSION_BUDGET_USD=...
 AIMETON_MCP_ADMIN_TOKEN=...
 AIMETON_MCP_PUBLIC_RATE_LIMIT=30
 AIMETON_MCP_ADMIN_RATE_LIMIT=20
@@ -136,7 +150,15 @@ AIMETON_MCP_RATE_WINDOW_SECONDS=60
 AIMETON_MCP_MAX_CONCURRENCY=4
 ```
 
-Без ключа RouterAI используется резервный эвристический анализ. Без SearXNG анализ официального сайта работает, но внешний OSINT-контур возвращает `partial`.
+Без ключа RouterAI используется резервный эвристический анализ. Ненастроенные поисковые адаптеры пропускаются; если недоступны все разрешённые провайдеры, внешний OSINT-контур возвращает `partial`, а `search.state` — `unavailable`.
+
+Безопасное состояние провайдеров без ключей и заголовков:
+
+```http
+GET /api/search/health
+```
+
+Подробный контракт и политика стоимости: [`docs/architecture/SEF-PROVIDER-GATEWAY-V0.1.md`](docs/architecture/SEF-PROVIDER-GATEWAY-V0.1.md).
 
 Если `AIMETON_MCP_ADMIN_TOKEN` отсутствует, административный MCP endpoint остаётся заблокированным и возвращает `401`.
 
