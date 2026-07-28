@@ -34,6 +34,11 @@ from app.osint_tools import get_osint_tools
 from app.runtime_core.api import router as runtime_router
 from app.scraper import FetchError, fetch_site
 from app.search_gateway import get_search_gateway
+from app.sef.company_profile import (
+    CompanyProfileBuildRequest,
+    CompanyProfileV1,
+    build_company_profile_from_request,
+)
 
 
 @asynccontextmanager
@@ -44,7 +49,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.8.0",
+    version="0.9.0",
     lifespan=lifespan,
 )
 app.include_router(runtime_router)
@@ -100,6 +105,7 @@ def health():
         "mcp_security": "public-rate-limited-admin-authenticated",
         "runtime_core": "/api/runtime",
         "search_gateway": "/api/search/health",
+        "sef_company_profile": "/api/sef/company-profile",
     }
     if identity:
         payload["deployment_sha"] = identity
@@ -150,6 +156,17 @@ async def company_intelligence(req: CompanyIntelligenceRequest):
     try:
         return await run_company_intelligence(req)
     except (FetchError, httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/sef/company-profile",
+    response_model=CompanyProfileV1,
+)
+def sef_company_profile(req: CompanyProfileBuildRequest):
+    try:
+        return build_company_profile_from_request(req)
+    except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

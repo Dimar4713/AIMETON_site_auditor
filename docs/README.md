@@ -14,6 +14,7 @@
 - [SEF Provider Gateway v0.1](architecture/SEF-PROVIDER-GATEWAY-V0.1.md) — единый контракт Yandex/SearXNG/Tavily, cache, fallback, бюджет, circuit breaker и безопасная телеметрия.
 - [SEF Document Fetch/Extract v0.1](architecture/SEF-DOCUMENT-FETCH-EXTRACT-V0.1.md) — HTTP-first загрузка, Crawl4AI/browser fallback, digest, locators и строгий переход `hint → document → evidence`.
 - [SEF Claim & Evidence Ledger v0.1](architecture/SEF-CLAIM-EVIDENCE-LEDGER-V0.1.md) — evidence tiers, freshness, conflict groups, effective review и fail-closed client eligibility.
+- [SEF Company Profile v1](architecture/SEF-COMPANY-PROFILE-V0.1.md) — 14 секций, шесть критических пробелов и evidence-only проекция Ledger.
 
 ## Политики управления
 

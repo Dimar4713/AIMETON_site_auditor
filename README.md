@@ -69,8 +69,34 @@ Content-Type: application/json
 }
 ```
 
-Результат включает анализ сайта, классифицированные источники, уровень доказательности, информационный запах, коммерческий балл и честный статус полноты `complete`/`partial`.
+Результат включает разведочный анализ сайта, классифицированные источники,
+уровень доказательности, информационный запах, коммерческий балл и честный
+статус полноты `complete`/`partial`. Это исследовательский контур; проверяемый
+Company Profile v1 строится отдельным SEF endpoint ниже.
 Поле `search` показывает состояние Provider Gateway, fallback, задержку и оценочную стоимость без раскрытия запроса или ключей.
+
+### Проверяемый Company Profile v1
+
+```http
+POST /api/sef/company-profile
+Content-Type: application/json
+
+{
+  "bundle": {"schema_version": "0.1.0", "...": "..."},
+  "ledger_request": {
+    "schema_version": "0.1.0",
+    "mission_id": "mission_...",
+    "as_of": "2026-07-28T12:00:00Z",
+    "evidence_metadata": []
+  },
+  "entity_id": "entity_..."
+}
+```
+
+Endpoint сам пересчитывает Ledger snapshot и возвращает 14 секций, шесть
+critical-gap assessment и приложение документных доказательств. Успешный
+`profile_gate_passed` не разрешает выдачу клиенту: подписанный report и
+финальный human review добавляются в `SA-SEF-06`.
 
 ### Запрос на охоту
 
@@ -111,7 +137,8 @@ MCP Streamable HTTP разделён на два профиля:
 
 - `analyze_site` — анализ конкретного сайта;
 - `hunt_companies` — отраслевая охота;
-- `company_intelligence` — полный рабочий профиль компании.
+- `company_intelligence` — разведочный профиль компании; проверяемый SEF
+  Company Profile v1 доступен через REST API.
 
 Административные инструменты не публикуются в public profile. Admin endpoint работает fail-closed и требует секрет `AIMETON_MCP_ADMIN_TOKEN`.
 
