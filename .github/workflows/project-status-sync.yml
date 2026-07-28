@@ -7,21 +7,33 @@ on:
     types: [opened, reopened, closed, ready_for_review, converted_to_draft, labeled, unlabeled, review_requested]
   workflow_dispatch:
     inputs:
-      item_kind:
-        description: Issue or pull_request
+      operation:
+        description: Synchronize one item or ensure Project fields/views
         required: true
+        type: choice
+        options: [sync_item, ensure_schema]
+        default: sync_item
+      item_kind:
+        description: Issue or pull_request (sync_item only)
+        required: false
         type: choice
         options: [issue, pull_request]
         default: issue
       item_number:
-        description: Issue or PR number
-        required: true
-        type: number
+        description: Issue or PR number (sync_item only)
+        required: false
+        type: string
       target_status:
-        description: Explicit Project status
-        required: true
+        description: Explicit Project status (sync_item only)
+        required: false
         type: choice
-        options: [Backlog, In Progress, In Review, Validation, Blocked, Done]
+        options: [Backlog, Ready, In Progress, In Review, Validation, Blocked, Done]
+        default: Backlog
+      dry_run:
+        description: Report intended changes without writing them
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -29,7 +41,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: project-status-${{ github.event.issue.number || github.event.pull_request.number || inputs.item_number }}
+  group: project-status-${{ github.event.issue.number || github.event.pull_request.number || inputs.item_number || 'schema' }}
   cancel-in-progress: false
 
 jobs:
@@ -42,7 +54,9 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       EVENT_NAME: ${{ github.event_name }}
       EVENT_ACTION: ${{ github.event.action }}
-      MANUAL_STATUS: ${{ inputs.target_status }}
+      OPERATION: ${{ github.event_name == 'workflow_dispatch' && inputs.operation || 'sync_item' }}
+      MANUAL_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'sync_item' && inputs.target_status || '' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
     steps:
       - name: Validate Project automation configuration
         shell: bash
@@ -55,6 +69,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Resolve event item
+        if: github.event_name != 'workflow_dispatch' || inputs.operation == 'sync_item'
         id: item
         uses: actions/github-script@v7
         with:
@@ -66,17 +81,44 @@ jobs:
             const number = context.eventName === 'workflow_dispatch'
               ? Number('${{ inputs.item_number }}')
               : (context.payload.issue?.number ?? context.payload.pull_request?.number);
+            if (!Number.isInteger(number) || number <= 0) {
+              core.setFailed('item_number must be a positive integer for sync_item');
+              return;
+            }
             const item = kind === 'pull_request'
-              ? (await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: number})).data
-              : (await github.rest.issues.get({owner: context.repo.owner, repo: context.repo.repo, issue_number: number})).data;
+              ? (await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: number
+                })).data
+              : (await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: number
+                })).data;
             core.setOutput('kind', kind);
             core.setOutput('number', String(number));
             core.setOutput('node_id', item.node_id);
             core.setOutput('state', item.state);
             core.setOutput('title', item.title || '');
-            core.setOutput('labels', (item.labels || []).map(x => typeof x === 'string' ? x : x.name).filter(Boolean).join(','));
+            core.setOutput(
+              'labels',
+              (item.labels || [])
+                .map(x => typeof x === 'string' ? x : x.name)
+                .filter(Boolean)
+                .join(',')
+            );
+            core.setOutput(
+              'event_at',
+              context.eventName === 'workflow_dispatch'
+                ? new Date().toISOString()
+                : (item.updated_at || new Date().toISOString())
+            );
+            core.setOutput('closed_at', item.closed_at || '');
+            core.setOutput('merged', String(Boolean(item.merged)));
+            core.setOutput('merged_at', item.merged_at || '');
 
-      - name: Synchronize Project V2 status
+      - name: Synchronize Project V2 status, fields, views, and dates
         env:
           CONTENT_NODE_ID: ${{ steps.item.outputs.node_id }}
           ITEM_NUMBER: ${{ steps.item.outputs.number }}
@@ -84,4 +126,8 @@ jobs:
           ITEM_STATE: ${{ steps.item.outputs.state }}
           ITEM_TITLE: ${{ steps.item.outputs.title }}
           ITEM_LABELS: ${{ steps.item.outputs.labels }}
+          EVENT_AT: ${{ steps.item.outputs.event_at }}
+          ITEM_CLOSED_AT: ${{ steps.item.outputs.closed_at }}
+          PR_MERGED: ${{ steps.item.outputs.merged }}
+          PR_MERGED_AT: ${{ steps.item.outputs.merged_at }}
         run: python scripts/project_status_sync_entry.py
