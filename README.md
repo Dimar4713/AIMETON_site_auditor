@@ -90,6 +90,12 @@ Content-Type: application/json
 
 Пустой список `industries` означает охоту по полному справочнику.
 
+## Тактический план Search & Evidence Fabric
+
+Переход от текущего контура разведки к повторяемому продаваемому доказательному профилю компании ведётся по этапам SEF-P0: контракты миссии и доказательств, Provider Gateway, загрузка документов, PostgreSQL/pgvector, Company Profile v1, Benchmark-20 и внешняя приёмка.
+
+- [Тактический план доработки инфраструктуры и AIMETON Site Auditor](docs/plans/AIMETON_SEF_tactical_plan_2026-07-28.md)
+
 ## MCP
 
 MCP Streamable HTTP разделён на два профиля:
