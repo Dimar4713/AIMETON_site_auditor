@@ -1,0 +1,283 @@
+{
+  "schema_version": "1.0.0",
+  "benchmark_id": "SEF-BENCHMARK-20",
+  "version": "0.1.0",
+  "status": "frozen",
+  "frozen_at": "2026-07-28",
+  "owner": "AIMETON Site Auditor / SEF-P0",
+  "purpose": "Reproducible Russian-company cohort for discovery, identity, evidence, completeness, latency and cost acceptance.",
+  "change_policy": {
+    "case_set": "immutable within version 0.1.x",
+    "allowed_patch_changes": [
+      "source availability metadata",
+      "non-semantic corrections",
+      "new observations that do not change expected identity"
+    ],
+    "requires_minor_version": [
+      "case replacement",
+      "industry reassignment",
+      "expected identity change",
+      "required fact type change"
+    ],
+    "approval": "PR with reason, source evidence and benchmark regression result"
+  },
+  "cohort_contract": {
+    "case_count": 20,
+    "industry_count": 4,
+    "cases_per_industry": 5,
+    "manual_golden_case_count": 5,
+    "required_footprint_bands": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "required_fact_types": [
+      "legal_name",
+      "inn",
+      "ogrn",
+      "official_domain"
+    ]
+  },
+  "cases": [
+    {
+      "id": "SEF-B20-01",
+      "display_name": "Первая Климатическая Компания",
+      "query_name": "Первая Климатическая Компания Красноярск",
+      "official_url": "https://climateone.ru/",
+      "industry": "hvac",
+      "region": "Красноярск",
+      "sample_scale": "regional_smb",
+      "digital_footprint": "medium",
+      "identity_complexity": "brand_and_legal_entity",
+      "golden_status": "manual_v0.1"
+    },
+    {
+      "id": "SEF-B20-02",
+      "display_name": "Sib Dental Clinic",
+      "query_name": "Sib Dental Clinic Красноярск",
+      "official_url": "https://sibdentalclinic.ru/",
+      "industry": "dental",
+      "region": "Красноярск",
+      "sample_scale": "regional_clinic",
+      "digital_footprint": "medium",
+      "identity_complexity": "brand_and_legal_entity",
+      "golden_status": "manual_v0.1"
+    },
+    {
+      "id": "SEF-B20-03",
+      "display_name": "CDEK",
+      "query_name": "СДЭК",
+      "official_url": "https://www.cdek.ru/",
+      "industry": "logistics",
+      "region": "Россия",
+      "sample_scale": "national_network",
+      "digital_footprint": "high",
+      "identity_complexity": "brand_network_and_legal_entity",
+      "golden_status": "manual_v0.1"
+    },
+    {
+      "id": "SEF-B20-04",
+      "display_name": "Timeweb",
+      "query_name": "Timeweb",
+      "official_url": "https://timeweb.com/",
+      "industry": "it_infrastructure",
+      "region": "Россия",
+      "sample_scale": "national_provider",
+      "digital_footprint": "high",
+      "identity_complexity": "brand_and_reorganized_legal_entity",
+      "golden_status": "manual_v0.1"
+    },
+    {
+      "id": "SEF-B20-05",
+      "display_name": "REG.RU",
+      "query_name": "REG.RU",
+      "official_url": "https://www.reg.ru/",
+      "industry": "it_infrastructure",
+      "region": "Россия",
+      "sample_scale": "national_provider",
+      "digital_footprint": "high",
+      "identity_complexity": "brand_and_long_legal_name",
+      "golden_status": "manual_v0.1"
+    },
+    {
+      "id": "SEF-B20-06",
+      "display_name": "Умный воздух",
+      "query_name": "Умный воздух Красноярск",
+      "official_url": "https://smair24.ru/",
+      "industry": "hvac",
+      "region": "Красноярск",
+      "sample_scale": "regional_smb",
+      "digital_footprint": "low",
+      "identity_complexity": "brand_first",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-07",
+      "display_name": "ВентСистемы",
+      "query_name": "ВентСистемы Красноярск",
+      "official_url": "https://ventsystem24.ru/",
+      "industry": "hvac",
+      "region": "Красноярск",
+      "sample_scale": "regional_smb",
+      "digital_footprint": "low",
+      "identity_complexity": "generic_brand_name",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-08",
+      "display_name": "БизнесВент",
+      "query_name": "БизнесВент Красноярск",
+      "official_url": "https://promventil.ru/",
+      "industry": "hvac",
+      "region": "Красноярск",
+      "sample_scale": "regional_smb",
+      "digital_footprint": "medium",
+      "identity_complexity": "brand_and_domain_mismatch",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-09",
+      "display_name": "Вент124",
+      "query_name": "Вент124 Красноярск",
+      "official_url": "https://vent124.ru/",
+      "industry": "hvac",
+      "region": "Красноярск",
+      "sample_scale": "regional_smb",
+      "digital_footprint": "low",
+      "identity_complexity": "brand_first",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-10",
+      "display_name": "Альдента",
+      "query_name": "Альдента Красноярск",
+      "official_url": "https://aldenta.ru/",
+      "industry": "dental",
+      "region": "Красноярск",
+      "sample_scale": "regional_network",
+      "digital_footprint": "high",
+      "identity_complexity": "clinic_network",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-11",
+      "display_name": "Mira",
+      "query_name": "Стоматология Mira Красноярск",
+      "official_url": "https://mira-stom.ru/",
+      "industry": "dental",
+      "region": "Красноярск",
+      "sample_scale": "regional_network",
+      "digital_footprint": "high",
+      "identity_complexity": "short_brand_name",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-12",
+      "display_name": "Астрея",
+      "query_name": "Стоматология Астрея Красноярск",
+      "official_url": "https://astreyastom.ru/",
+      "industry": "dental",
+      "region": "Красноярск",
+      "sample_scale": "regional_network",
+      "digital_footprint": "medium",
+      "identity_complexity": "clinic_network",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-13",
+      "display_name": "Доступная стоматология",
+      "query_name": "Доступная стоматология Красноярск",
+      "official_url": "https://dostupstom24.ru/",
+      "industry": "dental",
+      "region": "Красноярск",
+      "sample_scale": "regional_network",
+      "digital_footprint": "medium",
+      "identity_complexity": "generic_brand_and_network",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-14",
+      "display_name": "Деловые Линии",
+      "query_name": "Деловые Линии",
+      "official_url": "https://www.dellin.ru/",
+      "industry": "logistics",
+      "region": "Россия",
+      "sample_scale": "national_network",
+      "digital_footprint": "high",
+      "identity_complexity": "brand_network_and_legal_entities",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-15",
+      "display_name": "ПЭК",
+      "query_name": "ПЭК транспортная компания",
+      "official_url": "https://pecom.ru/",
+      "industry": "logistics",
+      "region": "Россия",
+      "sample_scale": "national_network",
+      "digital_footprint": "high",
+      "identity_complexity": "abbreviation_and_network",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-16",
+      "display_name": "Байкал Сервис",
+      "query_name": "Байкал Сервис транспортная компания",
+      "official_url": "https://www.baikalsr.ru/",
+      "industry": "logistics",
+      "region": "Россия",
+      "sample_scale": "national_network",
+      "digital_footprint": "medium",
+      "identity_complexity": "brand_network_and_legal_entities",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-17",
+      "display_name": "ТК Энергия",
+      "query_name": "ТК Энергия доставка",
+      "official_url": "https://nrg-tk.ru/",
+      "industry": "logistics",
+      "region": "Россия",
+      "sample_scale": "interregional_network",
+      "digital_footprint": "medium",
+      "identity_complexity": "generic_brand_and_network",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-18",
+      "display_name": "Selectel",
+      "query_name": "Selectel",
+      "official_url": "https://selectel.ru/",
+      "industry": "it_infrastructure",
+      "region": "Россия",
+      "sample_scale": "national_provider",
+      "digital_footprint": "high",
+      "identity_complexity": "brand_and_reorganized_legal_entity",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-19",
+      "display_name": "Beget",
+      "query_name": "Beget хостинг",
+      "official_url": "https://beget.com/",
+      "industry": "it_infrastructure",
+      "region": "Россия",
+      "sample_scale": "national_provider",
+      "digital_footprint": "medium",
+      "identity_complexity": "brand_and_legal_entity",
+      "golden_status": "candidate"
+    },
+    {
+      "id": "SEF-B20-20",
+      "display_name": "RUVDS",
+      "query_name": "RUVDS",
+      "official_url": "https://ruvds.com/",
+      "industry": "it_infrastructure",
+      "region": "Россия",
+      "sample_scale": "national_provider",
+      "digital_footprint": "medium",
+      "identity_complexity": "brand_and_legal_entity",
+      "golden_status": "candidate"
+    }
+  ]
+}
