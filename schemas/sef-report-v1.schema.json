@@ -1,0 +1,2329 @@
+{
+  "$defs": {
+    "Claim": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "critical": {
+          "default": false,
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "entity_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/ClaimEvidenceRef"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "predicate": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Predicate",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ClaimState"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "entity_id",
+        "correlation_id",
+        "predicate",
+        "value",
+        "state",
+        "created_at"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "ClaimEvidenceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "relation": {
+          "$ref": "#/$defs/EvidenceRelation"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "relation"
+      ],
+      "title": "ClaimEvidenceRef",
+      "type": "object"
+    },
+    "ClaimState": {
+      "enum": [
+        "candidate",
+        "confirmed",
+        "contradicted",
+        "not_found"
+      ],
+      "title": "ClaimState",
+      "type": "string"
+    },
+    "CompanyProfileField": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "client_eligible": {
+          "title": "Client Eligible",
+          "type": "boolean"
+        },
+        "critical": {
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "evidence_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "period": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Period"
+        },
+        "predicate": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Predicate",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "section": {
+          "$ref": "#/$defs/ProfileSectionCode"
+        },
+        "status": {
+          "$ref": "#/$defs/ProfileFieldStatus"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "claim_id",
+        "section",
+        "predicate",
+        "value",
+        "status",
+        "critical",
+        "client_eligible"
+      ],
+      "title": "CompanyProfileField",
+      "type": "object"
+    },
+    "CompanyProfileSection": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ProfileSectionCode"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/CompanyProfileField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/ProfileSectionStatus"
+        },
+        "title": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "title",
+        "status"
+      ],
+      "title": "CompanyProfileSection",
+      "type": "object"
+    },
+    "CompanyProfileSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "blocked_fields": {
+          "minimum": 0,
+          "title": "Blocked Fields",
+          "type": "integer"
+        },
+        "client_release_ready": {
+          "title": "Client Release Ready",
+          "type": "boolean"
+        },
+        "closed_critical_gaps": {
+          "maximum": 6,
+          "minimum": 0,
+          "title": "Closed Critical Gaps",
+          "type": "integer"
+        },
+        "critical_gap_coverage": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Critical Gap Coverage",
+          "type": "number"
+        },
+        "critical_gaps": {
+          "default": 6,
+          "maximum": 6,
+          "minimum": 6,
+          "title": "Critical Gaps",
+          "type": "integer"
+        },
+        "hypothesis_fields": {
+          "minimum": 0,
+          "title": "Hypothesis Fields",
+          "type": "integer"
+        },
+        "profile_gate_passed": {
+          "title": "Profile Gate Passed",
+          "type": "boolean"
+        },
+        "release_blockers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Release Blockers",
+          "type": "array"
+        },
+        "required_sections": {
+          "default": 14,
+          "maximum": 14,
+          "minimum": 14,
+          "title": "Required Sections",
+          "type": "integer"
+        },
+        "section_coverage": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Section Coverage",
+          "type": "number"
+        },
+        "unresolved_conflicts": {
+          "minimum": 0,
+          "title": "Unresolved Conflicts",
+          "type": "integer"
+        },
+        "verified_fields": {
+          "minimum": 0,
+          "title": "Verified Fields",
+          "type": "integer"
+        },
+        "verified_sections": {
+          "maximum": 14,
+          "minimum": 0,
+          "title": "Verified Sections",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "verified_sections",
+        "section_coverage",
+        "closed_critical_gaps",
+        "critical_gap_coverage",
+        "verified_fields",
+        "hypothesis_fields",
+        "blocked_fields",
+        "unresolved_conflicts",
+        "profile_gate_passed",
+        "client_release_ready"
+      ],
+      "title": "CompanyProfileSummary",
+      "type": "object"
+    },
+    "CompanyProfileV1": {
+      "$id": "https://aimeton.ru/schemas/sef-company-profile-v0.1.schema.json",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "canonical_name": {
+          "title": "Canonical Name",
+          "type": "string"
+        },
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "critical_gap_assessments": {
+          "items": {
+            "$ref": "#/$defs/CriticalGapAssessment"
+          },
+          "maxItems": 6,
+          "minItems": 6,
+          "title": "Critical Gap Assessments",
+          "type": "array"
+        },
+        "entity_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "evidence_appendix": {
+          "items": {
+            "$ref": "#/$defs/ProfileEvidenceItem"
+          },
+          "title": "Evidence Appendix",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/CompanyProfileSection"
+          },
+          "maxItems": 14,
+          "minItems": 14,
+          "title": "Sections",
+          "type": "array"
+        },
+        "summary": {
+          "$ref": "#/$defs/CompanyProfileSummary"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "entity_id",
+        "correlation_id",
+        "as_of",
+        "canonical_name",
+        "sections",
+        "critical_gap_assessments",
+        "summary"
+      ],
+      "title": "CompanyProfileV1",
+      "type": "object"
+    },
+    "CostEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,19}0*$)\\d{0,12}\\.\\d{0,6}0*$)",
+              "type": "string"
+            }
+          ],
+          "title": "Amount"
+        },
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "provider_call_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Call Id"
+        },
+        "unit_name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Unit Name",
+          "type": "string"
+        },
+        "units": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,19}0*$)\\d{0,12}\\.\\d{0,6}0*$)",
+              "type": "string"
+            }
+          ],
+          "title": "Units"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "correlation_id",
+        "currency",
+        "amount",
+        "units",
+        "unit_name",
+        "occurred_at"
+      ],
+      "title": "CostEvent",
+      "type": "object"
+    },
+    "CriticalGapAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "closed": {
+          "title": "Closed",
+          "type": "boolean"
+        },
+        "code": {
+          "$ref": "#/$defs/CriticalGapCode"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CriticalGapStatus"
+        }
+      },
+      "required": [
+        "code",
+        "status",
+        "closed"
+      ],
+      "title": "CriticalGapAssessment",
+      "type": "object"
+    },
+    "CriticalGapCode": {
+      "enum": [
+        "contacts",
+        "workforce",
+        "financials",
+        "ownership",
+        "affiliations",
+        "legal_events"
+      ],
+      "title": "CriticalGapCode",
+      "type": "string"
+    },
+    "CriticalGapStatus": {
+      "enum": [
+        "closed",
+        "hypothesis",
+        "blocked",
+        "missing"
+      ],
+      "title": "CriticalGapStatus",
+      "type": "string"
+    },
+    "DiscoveryHint": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "discovered_at": {
+          "format": "date-time",
+          "title": "Discovered At",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "provider_call_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Provider Call Id",
+          "type": "string"
+        },
+        "snippet": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Snippet",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "provider_call_id",
+        "correlation_id",
+        "url",
+        "title",
+        "snippet",
+        "discovered_at"
+      ],
+      "title": "DiscoveryHint",
+      "type": "object"
+    },
+    "Document": {
+      "additionalProperties": false,
+      "properties": {
+        "accessed_at": {
+          "format": "date-time",
+          "title": "Accessed At",
+          "type": "string"
+        },
+        "content_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Digest"
+        },
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "fetch_status": {
+          "$ref": "#/$defs/DocumentFetchState"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "media_type": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Media Type"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "source_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "source_id",
+        "correlation_id",
+        "url",
+        "title",
+        "accessed_at",
+        "fetch_status"
+      ],
+      "title": "Document",
+      "type": "object"
+    },
+    "DocumentFetchState": {
+      "enum": [
+        "fetched",
+        "failed",
+        "blocked"
+      ],
+      "title": "DocumentFetchState",
+      "type": "string"
+    },
+    "Entity": {
+      "additionalProperties": false,
+      "properties": {
+        "canonical_name": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Canonical Name",
+          "type": "string"
+        },
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "entity_type": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Entity Type",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "correlation_id",
+        "entity_type",
+        "canonical_name"
+      ],
+      "title": "Entity",
+      "type": "object"
+    },
+    "EntityIdentifier": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "entity_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "normalized_value": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Normalized Value",
+          "type": "string"
+        },
+        "scheme": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Scheme",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "entity_id",
+        "correlation_id",
+        "scheme",
+        "value",
+        "normalized_value"
+      ],
+      "title": "EntityIdentifier",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "document_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "evidence_type": {
+          "enum": [
+            "document_quote",
+            "official_record",
+            "dataset_row"
+          ],
+          "title": "Evidence Type",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "locator": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "quote": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "source_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "source_id",
+        "document_id",
+        "correlation_id",
+        "evidence_type",
+        "quote",
+        "locator",
+        "observed_at",
+        "digest"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "EvidenceMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "evidence_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "fresh_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fresh Until"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "tier": {
+          "$ref": "#/$defs/EvidenceTier"
+        },
+        "valid_at": {
+          "format": "date-time",
+          "title": "Valid At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "evidence_id",
+        "correlation_id",
+        "tier",
+        "valid_at",
+        "recorded_at"
+      ],
+      "title": "EvidenceMetadata",
+      "type": "object"
+    },
+    "EvidenceRelation": {
+      "enum": [
+        "supports",
+        "contradicts"
+      ],
+      "title": "EvidenceRelation",
+      "type": "string"
+    },
+    "EvidenceTier": {
+      "enum": [
+        "tier_1_authority",
+        "tier_2_first_party",
+        "tier_3_independent",
+        "tier_4_signal",
+        "unassessed"
+      ],
+      "title": "EvidenceTier",
+      "type": "string"
+    },
+    "FreshnessState": {
+      "enum": [
+        "current",
+        "stale",
+        "not_yet_valid",
+        "unassessed"
+      ],
+      "title": "FreshnessState",
+      "type": "string"
+    },
+    "HumanReviewInput": {
+      "additionalProperties": false,
+      "properties": {
+        "attested": {
+          "title": "Attested",
+          "type": "boolean"
+        },
+        "decided_at": {
+          "format": "date-time",
+          "title": "Decided At",
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/ReviewDecisionValue"
+        },
+        "reason": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "reviewed_evidence_appendix_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Reviewed Evidence Appendix Digest",
+          "type": "string"
+        },
+        "reviewed_profile_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Reviewed Profile Digest",
+          "type": "string"
+        },
+        "reviewer_ref": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Reviewer Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reviewer_ref",
+        "decision",
+        "reason",
+        "decided_at",
+        "attested",
+        "reviewed_profile_digest",
+        "reviewed_evidence_appendix_digest"
+      ],
+      "title": "HumanReviewInput",
+      "type": "object"
+    },
+    "HumanReviewedReportV1": {
+      "$id": "https://aimeton.ru/schemas/sef-human-reviewed-report-v1.schema.json",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "canonical_name": {
+          "title": "Canonical Name",
+          "type": "string"
+        },
+        "claim_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "critical_gap_assessments": {
+          "items": {
+            "$ref": "#/$defs/CriticalGapAssessment"
+          },
+          "maxItems": 6,
+          "minItems": 6,
+          "title": "Critical Gap Assessments",
+          "type": "array"
+        },
+        "entity_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "evidence_appendix": {
+          "items": {
+            "$ref": "#/$defs/ProfileEvidenceItem"
+          },
+          "minItems": 1,
+          "title": "Evidence Appendix",
+          "type": "array"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "human_sign_off": {
+          "$ref": "#/$defs/HumanSignOff"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "integrity": {
+          "$ref": "#/$defs/ReportIntegrity"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "profile_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/ReportSection"
+          },
+          "maxItems": 14,
+          "minItems": 14,
+          "title": "Sections",
+          "type": "array"
+        },
+        "summary": {
+          "$ref": "#/$defs/ReportReleaseSummary"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "mission_id",
+        "entity_id",
+        "correlation_id",
+        "profile_id",
+        "title",
+        "canonical_name",
+        "as_of",
+        "generated_at",
+        "claim_ids",
+        "sections",
+        "critical_gap_assessments",
+        "evidence_appendix",
+        "human_sign_off",
+        "integrity",
+        "summary"
+      ],
+      "title": "HumanReviewedReportV1",
+      "type": "object"
+    },
+    "HumanSignOff": {
+      "additionalProperties": false,
+      "properties": {
+        "attested": {
+          "const": true,
+          "title": "Attested",
+          "type": "boolean"
+        },
+        "decided_at": {
+          "format": "date-time",
+          "title": "Decided At",
+          "type": "string"
+        },
+        "decision": {
+          "const": "approved",
+          "title": "Decision",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "reviewed_evidence_appendix_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Reviewed Evidence Appendix Digest",
+          "type": "string"
+        },
+        "reviewed_profile_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Reviewed Profile Digest",
+          "type": "string"
+        },
+        "reviewer_ref": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Reviewer Ref",
+          "type": "string"
+        },
+        "sign_off_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Sign Off Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reviewer_ref",
+        "decision",
+        "reason",
+        "decided_at",
+        "attested",
+        "reviewed_profile_digest",
+        "reviewed_evidence_appendix_digest",
+        "sign_off_digest"
+      ],
+      "title": "HumanSignOff",
+      "type": "object"
+    },
+    "LedgerPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "default_accepted_tiers": {
+          "items": {
+            "$ref": "#/$defs/EvidenceTier"
+          },
+          "minItems": 1,
+          "title": "Default Accepted Tiers",
+          "type": "array"
+        },
+        "default_max_age_days": {
+          "default": 365,
+          "maximum": 36500,
+          "minimum": 0,
+          "title": "Default Max Age Days",
+          "type": "integer"
+        },
+        "predicates": {
+          "items": {
+            "$ref": "#/$defs/PredicateFreshnessPolicy"
+          },
+          "title": "Predicates",
+          "type": "array"
+        }
+      },
+      "title": "LedgerPolicy",
+      "type": "object"
+    },
+    "LedgerRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "evidence_metadata": {
+          "items": {
+            "$ref": "#/$defs/EvidenceMetadata"
+          },
+          "title": "Evidence Metadata",
+          "type": "array"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/LedgerPolicy"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mission_id",
+        "as_of"
+      ],
+      "title": "LedgerRequest",
+      "type": "object"
+    },
+    "Mission": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "goal": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Goal",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "runtime_task_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runtime Task Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "search_plan": {
+          "$ref": "#/$defs/SearchPlan"
+        },
+        "state": {
+          "$ref": "#/$defs/MissionState"
+        },
+        "title": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "runtime_task_id",
+        "correlation_id",
+        "title",
+        "goal",
+        "state",
+        "search_plan",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "Mission",
+      "type": "object"
+    },
+    "MissionState": {
+      "enum": [
+        "created",
+        "running",
+        "review",
+        "completed",
+        "blocked",
+        "failed",
+        "cancelled"
+      ],
+      "title": "MissionState",
+      "type": "string"
+    },
+    "PredicateFreshnessPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_tiers": {
+          "items": {
+            "$ref": "#/$defs/EvidenceTier"
+          },
+          "minItems": 1,
+          "title": "Accepted Tiers",
+          "type": "array"
+        },
+        "max_age_days": {
+          "maximum": 36500,
+          "minimum": 0,
+          "title": "Max Age Days",
+          "type": "integer"
+        },
+        "predicate": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Predicate",
+          "type": "string"
+        }
+      },
+      "required": [
+        "predicate",
+        "max_age_days"
+      ],
+      "title": "PredicateFreshnessPolicy",
+      "type": "object"
+    },
+    "ProfileEvidenceClaimAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "freshness": {
+          "$ref": "#/$defs/FreshnessState"
+        },
+        "tier": {
+          "$ref": "#/$defs/EvidenceTier"
+        }
+      },
+      "required": [
+        "claim_id",
+        "tier",
+        "freshness"
+      ],
+      "title": "ProfileEvidenceClaimAssessment",
+      "type": "object"
+    },
+    "ProfileEvidenceItem": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_assessments": {
+          "items": {
+            "$ref": "#/$defs/ProfileEvidenceClaimAssessment"
+          },
+          "minItems": 1,
+          "title": "Claim Assessments",
+          "type": "array"
+        },
+        "document_accessed_at": {
+          "format": "date-time",
+          "title": "Document Accessed At",
+          "type": "string"
+        },
+        "document_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Document Digest",
+          "type": "string"
+        },
+        "document_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "document_title": {
+          "title": "Document Title",
+          "type": "string"
+        },
+        "document_url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Document Url",
+          "type": "string"
+        },
+        "evidence_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Evidence Digest",
+          "type": "string"
+        },
+        "evidence_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "locator": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "publisher": {
+          "title": "Publisher",
+          "type": "string"
+        },
+        "quote": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "source_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/SourceKind"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "source_id",
+        "source_kind",
+        "publisher",
+        "document_id",
+        "document_url",
+        "document_title",
+        "document_accessed_at",
+        "document_digest",
+        "quote",
+        "locator",
+        "evidence_digest",
+        "claim_assessments"
+      ],
+      "title": "ProfileEvidenceItem",
+      "type": "object"
+    },
+    "ProfileFieldStatus": {
+      "enum": [
+        "verified",
+        "hypothesis",
+        "not_found",
+        "blocked"
+      ],
+      "title": "ProfileFieldStatus",
+      "type": "string"
+    },
+    "ProfileSectionCode": {
+      "enum": [
+        "identity",
+        "official_presence",
+        "contacts",
+        "workforce",
+        "financials",
+        "leadership_and_founders",
+        "ownership_and_affiliations",
+        "legal_events",
+        "market_signals",
+        "business_machine",
+        "economic_signals",
+        "ai_opportunity",
+        "risks_gaps_conflicts",
+        "evidence_appendix"
+      ],
+      "title": "ProfileSectionCode",
+      "type": "string"
+    },
+    "ProfileSectionStatus": {
+      "enum": [
+        "verified",
+        "partial",
+        "missing",
+        "blocked"
+      ],
+      "title": "ProfileSectionStatus",
+      "type": "string"
+    },
+    "ProviderCall": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "finished_at": {
+          "format": "date-time",
+          "title": "Finished At",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "operation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "provider_ref": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Provider Ref",
+          "type": "string"
+        },
+        "request_fingerprint": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Request Fingerprint",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ProviderCallState"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "correlation_id",
+        "provider_ref",
+        "operation",
+        "request_fingerprint",
+        "state",
+        "started_at",
+        "finished_at"
+      ],
+      "title": "ProviderCall",
+      "type": "object"
+    },
+    "ProviderCallState": {
+      "enum": [
+        "succeeded",
+        "partial",
+        "failed",
+        "skipped"
+      ],
+      "title": "ProviderCallState",
+      "type": "string"
+    },
+    "Report": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "client_facing": {
+          "default": true,
+          "title": "Client Facing",
+          "type": "boolean"
+        },
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "correlation_id",
+        "title",
+        "claim_ids",
+        "generated_at"
+      ],
+      "title": "Report",
+      "type": "object"
+    },
+    "ReportBuildRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "bundle": {
+          "$ref": "#/$defs/SefBundle"
+        },
+        "entity_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "ledger_request": {
+          "$ref": "#/$defs/LedgerRequest"
+        },
+        "review": {
+          "$ref": "#/$defs/HumanReviewInput"
+        },
+        "title": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "bundle",
+        "ledger_request",
+        "entity_id",
+        "review",
+        "generated_at",
+        "title"
+      ],
+      "title": "ReportBuildRequest",
+      "type": "object"
+    },
+    "ReportIntegrity": {
+      "additionalProperties": false,
+      "properties": {
+        "canonicalization": {
+          "const": "json-sort-keys-utf8-v1",
+          "default": "json-sort-keys-utf8-v1",
+          "title": "Canonicalization",
+          "type": "string"
+        },
+        "evidence_appendix_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Evidence Appendix Digest",
+          "type": "string"
+        },
+        "profile_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Profile Digest",
+          "type": "string"
+        },
+        "report_content_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Report Content Digest",
+          "type": "string"
+        },
+        "sign_off_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Sign Off Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_digest",
+        "evidence_appendix_digest",
+        "sign_off_digest",
+        "report_content_digest"
+      ],
+      "title": "ReportIntegrity",
+      "type": "object"
+    },
+    "ReportReleaseSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "client_release_ready": {
+          "const": true,
+          "default": true,
+          "title": "Client Release Ready",
+          "type": "boolean"
+        },
+        "closed_critical_gaps": {
+          "maximum": 6,
+          "minimum": 6,
+          "title": "Closed Critical Gaps",
+          "type": "integer"
+        },
+        "evidence_items": {
+          "minimum": 1,
+          "title": "Evidence Items",
+          "type": "integer"
+        },
+        "human_review_approved": {
+          "const": true,
+          "default": true,
+          "title": "Human Review Approved",
+          "type": "boolean"
+        },
+        "profile_gate_passed": {
+          "const": true,
+          "default": true,
+          "title": "Profile Gate Passed",
+          "type": "boolean"
+        },
+        "released_claims": {
+          "minimum": 1,
+          "title": "Released Claims",
+          "type": "integer"
+        },
+        "review_bound_to_snapshot": {
+          "const": true,
+          "default": true,
+          "title": "Review Bound To Snapshot",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "released_claims",
+        "evidence_items",
+        "closed_critical_gaps"
+      ],
+      "title": "ReportReleaseSummary",
+      "type": "object"
+    },
+    "ReportReviewPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Blockers",
+          "type": "array"
+        },
+        "evidence_appendix_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Evidence Appendix Digest",
+          "type": "string"
+        },
+        "profile": {
+          "$ref": "#/$defs/CompanyProfileV1"
+        },
+        "profile_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Profile Digest",
+          "type": "string"
+        },
+        "reviewable": {
+          "title": "Reviewable",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile",
+        "profile_digest",
+        "evidence_appendix_digest",
+        "reviewable"
+      ],
+      "title": "ReportReviewPackage",
+      "type": "object"
+    },
+    "ReportReviewPackageRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "bundle": {
+          "$ref": "#/$defs/SefBundle"
+        },
+        "entity_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "ledger_request": {
+          "$ref": "#/$defs/LedgerRequest"
+        }
+      },
+      "required": [
+        "bundle",
+        "ledger_request",
+        "entity_id"
+      ],
+      "title": "ReportReviewPackageRequest",
+      "type": "object"
+    },
+    "ReportSection": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ProfileSectionCode"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/CompanyProfileField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "title"
+      ],
+      "title": "ReportSection",
+      "type": "object"
+    },
+    "ReviewDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "decided_at": {
+          "format": "date-time",
+          "title": "Decided At",
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/ReviewDecisionValue"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "reviewer_ref": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Reviewer Ref",
+          "type": "string"
+        },
+        "target_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Id",
+          "type": "string"
+        },
+        "target_type": {
+          "enum": [
+            "claim",
+            "evidence",
+            "report"
+          ],
+          "title": "Target Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "correlation_id",
+        "target_type",
+        "target_id",
+        "decision",
+        "reviewer_ref",
+        "reason",
+        "decided_at"
+      ],
+      "title": "ReviewDecision",
+      "type": "object"
+    },
+    "ReviewDecisionValue": {
+      "enum": [
+        "approved",
+        "rejected",
+        "needs_more_evidence"
+      ],
+      "title": "ReviewDecisionValue",
+      "type": "string"
+    },
+    "SearchPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "query_count": {
+          "minimum": 0,
+          "title": "Query Count",
+          "type": "integer"
+        },
+        "required_source_kinds": {
+          "items": {
+            "$ref": "#/$defs/SourceKind"
+          },
+          "title": "Required Source Kinds",
+          "type": "array"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "status": {
+          "$ref": "#/$defs/SearchPlanState"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "query_count"
+      ],
+      "title": "SearchPlan",
+      "type": "object"
+    },
+    "SearchPlanState": {
+      "enum": [
+        "planned",
+        "running",
+        "completed",
+        "failed"
+      ],
+      "title": "SearchPlanState",
+      "type": "string"
+    },
+    "SefBundle": {
+      "$id": "https://aimeton.ru/schemas/sef-v0.1.schema.json",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "Provider-neutral transport and validation envelope for SEF v0.1.",
+      "properties": {
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "title": "Claims",
+          "type": "array"
+        },
+        "cost_events": {
+          "items": {
+            "$ref": "#/$defs/CostEvent"
+          },
+          "title": "Cost Events",
+          "type": "array"
+        },
+        "discovery_hints": {
+          "items": {
+            "$ref": "#/$defs/DiscoveryHint"
+          },
+          "title": "Discovery Hints",
+          "type": "array"
+        },
+        "documents": {
+          "items": {
+            "$ref": "#/$defs/Document"
+          },
+          "title": "Documents",
+          "type": "array"
+        },
+        "entities": {
+          "items": {
+            "$ref": "#/$defs/Entity"
+          },
+          "title": "Entities",
+          "type": "array"
+        },
+        "entity_identifiers": {
+          "items": {
+            "$ref": "#/$defs/EntityIdentifier"
+          },
+          "title": "Entity Identifiers",
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "missions": {
+          "items": {
+            "$ref": "#/$defs/Mission"
+          },
+          "minItems": 1,
+          "title": "Missions",
+          "type": "array"
+        },
+        "provider_calls": {
+          "items": {
+            "$ref": "#/$defs/ProviderCall"
+          },
+          "title": "Provider Calls",
+          "type": "array"
+        },
+        "reports": {
+          "items": {
+            "$ref": "#/$defs/Report"
+          },
+          "title": "Reports",
+          "type": "array"
+        },
+        "review_decisions": {
+          "items": {
+            "$ref": "#/$defs/ReviewDecision"
+          },
+          "title": "Review Decisions",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/Source"
+          },
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "missions"
+      ],
+      "title": "SefBundle",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "homepage_url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Homepage Url",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "publisher": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Publisher",
+          "type": "string"
+        },
+        "terms_ref": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Terms Ref"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "correlation_id",
+        "kind",
+        "publisher",
+        "homepage_url"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "SourceKind": {
+      "enum": [
+        "official_registry",
+        "first_party",
+        "licensed_provider",
+        "news_media",
+        "industry_catalog",
+        "scientific_database",
+        "social",
+        "manual"
+      ],
+      "title": "SourceKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://aimeton.ru/schemas/sef-report-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "report": {
+      "$ref": "#/$defs/HumanReviewedReportV1"
+    },
+    "report_build_request": {
+      "$ref": "#/$defs/ReportBuildRequest"
+    },
+    "review_package": {
+      "$ref": "#/$defs/ReportReviewPackage"
+    },
+    "review_package_request": {
+      "$ref": "#/$defs/ReportReviewPackageRequest"
+    }
+  },
+  "required": [
+    "review_package_request",
+    "review_package",
+    "report_build_request",
+    "report"
+  ],
+  "title": "ReportApiContract",
+  "type": "object"
+}
