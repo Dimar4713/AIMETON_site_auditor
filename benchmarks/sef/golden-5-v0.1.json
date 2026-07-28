@@ -1,0 +1,295 @@
+{
+  "schema_version": "1.0.0",
+  "benchmark_id": "SEF-BENCHMARK-20",
+  "benchmark_version": "0.1.0",
+  "golden_version": "0.1.0",
+  "status": "frozen",
+  "verified_at": "2026-07-28",
+  "verification_method": "manual review of first-party public pages",
+  "rules": {
+    "llm_is_source": false,
+    "search_snippet_is_evidence": false,
+    "critical_identity_requires_first_party_source": true,
+    "volatile_fact_policy": "recheck at execution time",
+    "missing_fact_policy": "not_found requires an executed search plan"
+  },
+  "cases": [
+    {
+      "case_id": "SEF-B20-01",
+      "facts": [
+        {
+          "predicate": "legal_name",
+          "value": "ООО «ПЕРВАЯ КЛИМАТИЧЕСКАЯ КОМПАНИЯ»",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://climateone.ru/contacts",
+            "publisher": "Первая Климатическая Компания",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Контакты → Партнерам → реквизиты"
+          }
+        },
+        {
+          "predicate": "inn",
+          "value": "2460107780",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://climateone.ru/contacts",
+            "publisher": "Первая Климатическая Компания",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Контакты → ИНН/КПП"
+          }
+        },
+        {
+          "predicate": "ogrn",
+          "value": "1182468018644",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://climateone.ru/contacts",
+            "publisher": "Первая Климатическая Компания",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Контакты → ОГРН"
+          }
+        },
+        {
+          "predicate": "official_domain",
+          "value": "climateone.ru",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://climateone.ru/contacts",
+            "publisher": "Первая Климатическая Компания",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "first-party contact and requisites page"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "SEF-B20-02",
+      "facts": [
+        {
+          "predicate": "legal_name",
+          "value": "ООО «СИБИРЬ ДЕНТ»",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://sibdentalclinic.ru/rekvizity/",
+            "publisher": "Sib Dental Clinic",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты клиники"
+          }
+        },
+        {
+          "predicate": "inn",
+          "value": "2466288571",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://sibdentalclinic.ru/rekvizity/",
+            "publisher": "Sib Dental Clinic",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты → ИНН"
+          }
+        },
+        {
+          "predicate": "ogrn",
+          "value": "1212400020601",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://sibdentalclinic.ru/rekvizity/",
+            "publisher": "Sib Dental Clinic",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты → ОГРН"
+          }
+        },
+        {
+          "predicate": "official_domain",
+          "value": "sibdentalclinic.ru",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://sibdentalclinic.ru/rekvizity/",
+            "publisher": "Sib Dental Clinic",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "first-party requisites page"
+          }
+        },
+        {
+          "predicate": "medical_license",
+          "value": "Л041-01019-24/00624057",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://sibdentalclinic.ru/rekvizity/",
+            "publisher": "Sib Dental Clinic",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты → лицензия на медицинскую деятельность"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "SEF-B20-03",
+      "facts": [
+        {
+          "predicate": "legal_name",
+          "value": "ООО «СДЭК-ГЛОБАЛ»",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://www.cdek.ru/ru/contacts/",
+            "publisher": "CDEK",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Контакты → Юридические данные"
+          }
+        },
+        {
+          "predicate": "inn",
+          "value": "7722327689",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://www.cdek.ru/ru/contacts/",
+            "publisher": "CDEK",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Юридические данные → ИНН"
+          }
+        },
+        {
+          "predicate": "ogrn",
+          "value": "1157746448463",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://www.cdek.ru/ru/contacts/",
+            "publisher": "CDEK",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Юридические данные → ОГРН"
+          }
+        },
+        {
+          "predicate": "official_domain",
+          "value": "cdek.ru",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://www.cdek.ru/ru/contacts/",
+            "publisher": "CDEK",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "first-party contacts page"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "SEF-B20-04",
+      "facts": [
+        {
+          "predicate": "legal_name",
+          "value": "АО «ТаймВэб»",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://timeweb.com/ru/contacts/",
+            "publisher": "Timeweb",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты → Полное наименование организации"
+          }
+        },
+        {
+          "predicate": "inn",
+          "value": "7810353960",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://timeweb.com/ru/contacts/",
+            "publisher": "Timeweb",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты → ИНН"
+          }
+        },
+        {
+          "predicate": "ogrn",
+          "value": "1247800127112",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://timeweb.com/ru/contacts/",
+            "publisher": "Timeweb",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты → ОГРН"
+          }
+        },
+        {
+          "predicate": "official_domain",
+          "value": "timeweb.com",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://timeweb.com/ru/contacts/",
+            "publisher": "Timeweb",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "first-party contacts and requisites page"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "SEF-B20-05",
+      "facts": [
+        {
+          "predicate": "legal_name",
+          "value": "ООО «Регистратор доменных имен РЕГ.РУ»",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://www.reg.ru/company/requisites_and_docs",
+            "publisher": "REG.RU",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты и документы → Полное наименование"
+          }
+        },
+        {
+          "predicate": "inn",
+          "value": "7733568767",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://www.reg.ru/company/requisites_and_docs",
+            "publisher": "REG.RU",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты и документы → ИНН"
+          }
+        },
+        {
+          "predicate": "ogrn",
+          "value": "1067746613494",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://img.reg.ru/faq/agreement_170823.pdf",
+            "publisher": "REG.RU",
+            "evidence_tier": "T2_official_company_document",
+            "accessed_at": "2026-07-28",
+            "locator": "Соглашение поручения → реквизиты ООО «РЕГ.РУ»"
+          }
+        },
+        {
+          "predicate": "official_domain",
+          "value": "reg.ru",
+          "verification_status": "verified",
+          "source": {
+            "url": "https://www.reg.ru/company/requisites_and_docs",
+            "publisher": "REG.RU",
+            "evidence_tier": "T2_official_company",
+            "accessed_at": "2026-07-28",
+            "locator": "Реквизиты и документы → WWW"
+          }
+        }
+      ]
+    }
+  ]
+}
