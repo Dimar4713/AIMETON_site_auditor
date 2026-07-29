@@ -160,7 +160,7 @@ def load_context() -> Context:
         dry_run=parse_bool(env("DRY_RUN")),
         content_node_id=env("CONTENT_NODE_ID"),
         repository=env("REPOSITORY"),
-        item_number=int(env("ITEM_NUMBER", "0")),
+        item_number=int(env("ITEM_NUMBER") or "0"),
         event_name=env("EVENT_NAME"),
         event_action=env("EVENT_ACTION"),
         item_kind=env("ITEM_KIND", "issue"),
