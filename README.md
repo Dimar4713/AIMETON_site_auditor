@@ -105,14 +105,24 @@ critical-gap assessment и приложение документных дока�
 POST /api/sef/report/review-package
 POST /api/sef/report
 POST /api/sef/report.html
+POST /api/sef/report.md
+POST /api/sef/report.docx
 ```
 
 Первый endpoint пересчитывает Ledger и Company Profile и возвращает точные
 `profile_digest` и `evidence_appendix_digest` для проверки человеком. Два
-следующих принимают human sign-off, привязанный к этим digest, повторно
-пересчитывают snapshot и выпускают JSON либо печатный HTML только при
-прохождении fail-closed шлюза. Клиент не может передать готовый профиль,
-Ledger snapshot или `client_release_ready=true`.
+следующие принимают human sign-off, привязанный к этим digest, повторно
+пересчитывают snapshot и выпускают JSON, печатный HTML, Markdown или
+редактируемый Word `.docx` только при прохождении fail-closed шлюза. Клиент не
+может передать готовый профиль, Ledger snapshot или
+`client_release_ready=true`.
+
+В интерфейсе предварительный результат можно выгрузить в PDF, Markdown или
+Word. PDF больше не включает диалог с консультантом. Markdown и Word строятся
+из структурированного объекта анализа и явно помечаются как предварительные;
+они не заменяют подписанный Report v1. Диалог хранится отдельно для каждого
+`analysis_id`, поэтому переключение истории не смешивает сообщения разных
+компаний.
 
 Контракт, reason codes и границы P0 описаны в
 [`docs/architecture/SEF_HUMAN_REVIEW_REPORT_V1.md`](docs/architecture/SEF_HUMAN_REVIEW_REPORT_V1.md).

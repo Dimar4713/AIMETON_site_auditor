@@ -29,7 +29,13 @@ from app.hunter_sources import get_hunter_sources
 from app.llm import chat_with_routerai
 from app.mcp_security import McpSecurityMiddleware
 from app.mcp_server import admin_mcp, admin_mcp_http_app, mcp, mcp_http_app
-from app.models import AnalyzeRequest, ChatRequest, CompanyIntelligenceRequest, HuntRequest
+from app.models import (
+    AnalyzeRequest,
+    ChatRequest,
+    CompanyIntelligenceRequest,
+    HuntRequest,
+    SiteAnalysis,
+)
 from app.osint_tools import get_osint_tools
 from app.runtime_core.api import router as runtime_router
 from app.scraper import FetchError, fetch_site
@@ -38,6 +44,15 @@ from app.sef.company_profile import (
     CompanyProfileBuildRequest,
     CompanyProfileV1,
     build_company_profile_from_request,
+)
+from app.sef.exports import (
+    MARKDOWN_MEDIA_TYPE,
+    WORD_MEDIA_TYPE,
+    export_filename,
+    render_report_docx,
+    render_report_markdown,
+    render_site_analysis_docx,
+    render_site_analysis_markdown,
 )
 from app.sef.report import (
     HumanReviewedReportV1,
@@ -59,7 +74,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.10.0",
+    version="0.10.1",
     lifespan=lifespan,
 )
 app.include_router(runtime_router)
@@ -118,6 +133,10 @@ def health():
         "sef_company_profile": "/api/sef/company-profile",
         "sef_report_review_package": "/api/sef/report/review-package",
         "sef_report": "/api/sef/report",
+        "sef_report_markdown": "/api/sef/report.md",
+        "sef_report_word": "/api/sef/report.docx",
+        "preliminary_analysis_markdown": "/api/export/analysis.md",
+        "preliminary_analysis_word": "/api/export/analysis.docx",
     }
     if identity:
         payload["deployment_sha"] = identity
@@ -224,6 +243,57 @@ def sef_report(req: ReportBuildRequest):
 )
 def sef_report_html(req: ReportBuildRequest):
     return HTMLResponse(render_report_html(_build_report_or_http_error(req)))
+
+
+def _export_headers(report_id: str, extension: str) -> dict[str, str]:
+    return {
+        "Content-Disposition": (
+            f'attachment; filename="{export_filename(report_id, extension)}"'
+        ),
+        "X-AIMETON-Report-ID": report_id,
+    }
+
+
+@app.post("/api/sef/report.md")
+def sef_report_markdown(req: ReportBuildRequest):
+    report = _build_report_or_http_error(req)
+    headers = _export_headers(report.id, "md")
+    headers["X-AIMETON-Report-Digest"] = report.integrity.report_content_digest
+    return Response(
+        render_report_markdown(report),
+        media_type=MARKDOWN_MEDIA_TYPE,
+        headers=headers,
+    )
+
+
+@app.post("/api/sef/report.docx")
+def sef_report_docx(req: ReportBuildRequest):
+    report = _build_report_or_http_error(req)
+    headers = _export_headers(report.id, "docx")
+    headers["X-AIMETON-Report-Digest"] = report.integrity.report_content_digest
+    return Response(
+        render_report_docx(report),
+        media_type=WORD_MEDIA_TYPE,
+        headers=headers,
+    )
+
+
+@app.post("/api/export/analysis.md")
+def preliminary_analysis_markdown(req: SiteAnalysis):
+    return Response(
+        render_site_analysis_markdown(req),
+        media_type=MARKDOWN_MEDIA_TYPE,
+        headers=_export_headers("preliminary-analysis", "md"),
+    )
+
+
+@app.post("/api/export/analysis.docx")
+def preliminary_analysis_docx(req: SiteAnalysis):
+    return Response(
+        render_site_analysis_docx(req),
+        media_type=WORD_MEDIA_TYPE,
+        headers=_export_headers("preliminary-analysis", "docx"),
+    )
 
 
 @app.post("/api/hunt")

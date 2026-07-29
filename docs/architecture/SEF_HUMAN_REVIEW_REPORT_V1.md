@@ -15,7 +15,8 @@ Report v1 превращает доказательный Company Profile v1 в 
    - `evidence_appendix_digest`;
    - `reviewable` и список блокеров.
 2. Рецензент проверяет этот пакет и передаёт оба digest в
-   `POST /api/sef/report` или `POST /api/sef/report.html` вместе с решением,
+   `POST /api/sef/report`, `POST /api/sef/report.html`,
+   `POST /api/sef/report.md` или `POST /api/sef/report.docx` вместе с решением,
    временем, основанием и attestation.
 
 Клиент не передаёт Ledger snapshot, готовый профиль, Report ID,
@@ -58,17 +59,30 @@ Digest вычисляются как SHA-256 от UTF-8 JSON с сортиров
 проверенных digest. Это не квалифицированная электронная подпись и не заменяет
 КЭП. Криптографическая PDF-подпись и PKI находятся вне P0.
 
-## HTML export
+## Форматы экспорта
 
 `POST /api/sef/report.html` возвращает печатное HTML-представление того же
 проверенного Report v1. Все значения из профиля и доказательств HTML-экранируются.
 Поисковые snippets не входят в Company Profile и потому не могут попасть ни в
 JSON, ни в HTML.
 
+`POST /api/sef/report.md` возвращает структурированный Markdown, а
+`POST /api/sef/report.docx` — нативный редактируемый Word-документ. Оба формата
+содержат Report ID, human sign-off, evidence appendix и все digest целостности.
+Они строятся только из заново пересчитанного и выпущенного Report v1 и
+наследуют тот же fail-closed шлюз.
+
+Для исследовательского результата до human review доступны отдельные
+`POST /api/export/analysis.md` и `POST /api/export/analysis.docx`. Такие файлы
+имеют явную маркировку «предварительный анализ», не содержат
+`client_release_ready=true` и никогда не включают диалог с консультантом.
+Формат старого Word `.doc` не создаётся: используется современный открытый
+формат `.docx`.
+
 ## Не входит в P0
 
 - очередь рецензентов, RBAC и UI;
 - долговременное хранилище версий;
-- PDF с КЭП и XLSX;
+- PDF с КЭП, бинарный `.doc` и XLSX;
 - автоматическое разрешение конфликтов;
 - batch/hunt.

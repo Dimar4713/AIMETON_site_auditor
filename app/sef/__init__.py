@@ -15,6 +15,12 @@ from app.sef.ledger import (
     require_client_eligible_claims,
 )
 from app.sef.models import SEF_SCHEMA_VERSION, SefBundle
+from app.sef.exports import (
+    render_report_docx,
+    render_report_markdown,
+    render_site_analysis_docx,
+    render_site_analysis_markdown,
+)
 from app.sef.report import (
     REPORT_SCHEMA_VERSION,
     HumanReviewedReportV1,
@@ -46,5 +52,9 @@ __all__ = [
     "build_ledger_snapshot",
     "build_review_package_from_request",
     "render_report_html",
+    "render_report_docx",
+    "render_report_markdown",
+    "render_site_analysis_docx",
+    "render_site_analysis_markdown",
     "require_client_eligible_claims",
 ]

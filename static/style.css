@@ -78,13 +78,38 @@ button:not(:disabled):hover { opacity: .85; }
 .score-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: .06em; }
 
 /* ── Export button ── */
-.export-row { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.export-row {
+  display: flex; justify-content: flex-end; gap: 8px;
+  flex-wrap: wrap; margin-bottom: 8px;
+}
 .btn-export {
   background: transparent; border: 1px solid #dce3ee; color: #5b61e6;
   border-radius: 10px; padding: 8px 16px; font-size: 13px; font-weight: 600;
   display: flex; align-items: center; gap: 6px; cursor: pointer;
 }
 .btn-export:hover { background: #f0f1ff; }
+
+/* ── Structured report ── */
+.notice {
+  border-left: 4px solid #5b61e6; border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 18px; line-height: 1.5;
+}
+.notice-warning { background: #fff8db; border-left-color: #d9a400; color: #5b4700; }
+.muted { color: #64748b; font-size: 13px; }
+.table-scroll { overflow-x: auto; margin-bottom: 20px; }
+.data-table { border-collapse: collapse; width: 100%; min-width: 700px; font-size: 13px; }
+.data-table th, .data-table td {
+  border: 1px solid #dce3ee; padding: 9px 10px;
+  text-align: left; vertical-align: top;
+}
+.data-table th { background: #eef0ff; color: #313782; }
+.source-list { display: grid; gap: 12px; margin-bottom: 20px; }
+.source-card {
+  border: 1px solid #dde4ed; border-radius: 15px; padding: 16px;
+  overflow-wrap: anywhere;
+}
+.source-card h3 { margin: 8px 0 4px; font-size: 15px; }
+.source-card a { color: #464dcc; }
 
 /* ── Tags ── */
 .tag {
@@ -157,6 +182,8 @@ button:not(:disabled):hover { opacity: .85; }
   main { padding: 0; max-width: 100%; }
   .company-card { background: #1a1f35 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .panel, #result { box-shadow: none; border: 1px solid #dce3ee; }
+  .table-scroll { overflow: visible; }
+  .data-table { min-width: 0; font-size: 10px; }
 }
 
 @media (max-width: 650px) {

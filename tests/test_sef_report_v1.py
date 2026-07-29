@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
 from pathlib import Path
 
 import pytest
+from docx import Document
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
 from app.main import app
 from app.sef.ledger import LedgerRequest
 from app.sef.models import SefBundle
+from app.sef.exports import render_report_docx, render_report_markdown
 from app.sef.report import (
     ReportBuildRequest,
     ReportReleaseError,
@@ -346,6 +349,76 @@ def test_html_export_is_escaped_and_contains_no_search_snippet():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "FORBIDDEN_SEARCH_SNIPPET" not in response.text
+
+
+def test_markdown_and_docx_exports_are_bound_to_signed_report():
+    report = build_human_reviewed_report(_report_request())
+    markdown = render_report_markdown(report)
+    word = render_report_docx(report)
+    word_document = Document(io.BytesIO(word))
+    word_text = "\n".join(
+        [
+            *(paragraph.text for paragraph in word_document.paragraphs),
+            *(
+                cell.text
+                for table in word_document.tables
+                for row in table.rows
+                for cell in row.cells
+            ),
+        ]
+    )
+
+    assert report.id in markdown
+    assert report.integrity.report_content_digest in markdown
+    assert "Критические пробелы" in markdown
+    assert word.startswith(b"PK")
+    assert report.id in word_text
+    assert report.integrity.report_content_digest in word_text
+    assert "Human sign-off" in word_text
+
+
+@pytest.mark.parametrize(
+    ("path", "extension", "media_type"),
+    [
+        ("/api/sef/report.md", "md", "text/markdown"),
+        (
+            "/api/sef/report.docx",
+            "docx",
+            "application/vnd.openxmlformats-officedocument",
+        ),
+    ],
+)
+def test_signed_export_endpoints_are_attachments(
+    path: str,
+    extension: str,
+    media_type: str,
+):
+    request = _report_request()
+    report = build_human_reviewed_report(request)
+    response = TestClient(app).post(path, json=request.model_dump(mode="json"))
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(media_type)
+    assert response.headers["content-disposition"].endswith(
+        f'filename="aimeton-{report.id}.{extension}"'
+    )
+    assert response.headers["x-aimeton-report-id"] == report.id
+    assert (
+        response.headers["x-aimeton-report-digest"]
+        == report.integrity.report_content_digest
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/sef/report.md", "/api/sef/report.docx"],
+)
+def test_signed_export_endpoints_fail_closed(path: str):
+    request = _report_request(reviewed_profile_digest=_digest(777))
+    response = TestClient(app).post(path, json=request.model_dump(mode="json"))
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "report_release_blocked"
 
 
 def test_changed_profile_invalidates_previous_human_review():
