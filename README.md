@@ -81,6 +81,22 @@ Company Profile v1 строится отдельным SEF endpoint ниже.
 нулевая или неизвестная цена закрывает вызов; `configured=true` само по себе
 не означает `active`.
 
+### Поисковая миссия
+
+Все новые входы создают канонический Mission Contract:
+
+```http
+POST /api/missions
+GET /api/missions/{mission_id}
+POST /api/missions/{mission_id}/plan
+POST /api/missions/{mission_id}/turns
+```
+
+UI/REST/MCP используют один builder контракта. `/api/analyze` сохранён как
+backward-compatible adapter: он создаёт изолированные `mission_id` и
+`analysis_id`, записывает preliminary turn и не может объявить L0-результат
+завершённой поисковой миссией.
+
 ### Проверяемый Company Profile v1
 
 ```http

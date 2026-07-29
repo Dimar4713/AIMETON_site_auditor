@@ -20,6 +20,9 @@ _Last updated: 2026-07-29_
 - Регистрационные данные платных providers потребуются только после зелёного
   CI `#82`, перед live-проверкой stage. Значения секретов не передаются через
   чат, Issues, PR, код или логи.
+- Следующий активный шаг: `SA-SR-02 / #83`, Mission Orchestrator. Candidate
+  реализуется в ветке `agent/sa-sr-02-mission-orchestrator`; до merge/CI/deploy
+  это не факт stage.
 
 ## Текущее положение
 

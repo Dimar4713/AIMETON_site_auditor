@@ -9,6 +9,12 @@ from app.company_intelligence import run_company_intelligence
 from app.discovery import run_hunt
 from app.heuristics import heuristic_analysis
 from app.llm import analyze_with_routerai
+from app.mission_orchestrator import (
+    EntryPoint,
+    default_site_mission_request,
+    get_mission_orchestrator,
+    record_legacy_site_turn,
+)
 from app.models import CompanyIntelligenceRequest, HuntRequest
 from app.scraper import fetch_site
 
@@ -82,7 +88,21 @@ admin_mcp = FastMCP(
 @mcp.tool()
 async def analyze_site(url: str) -> dict:
     """Analyze one public website and propose commercially useful AI solutions."""
-    page = await fetch_site(url)
+    orchestrator = get_mission_orchestrator()
+    mission = orchestrator.create_mission(
+        default_site_mission_request(url),
+        entry_point=EntryPoint.MCP,
+    )
+    try:
+        page = await fetch_site(url)
+    except Exception:
+        record_legacy_site_turn(
+            orchestrator,
+            mission.contract.mission_id,
+            final_url=url,
+            succeeded=False,
+        )
+        raise
     try:
         result = await analyze_with_routerai(page["final_url"], page["title"], page["text"])
     except Exception as exc:
@@ -96,7 +116,28 @@ async def analyze_site(url: str) -> dict:
         result.risks_and_assumptions.append(
             "Used fallback local analysis because the LLM was unavailable or returned invalid output."
         )
-    return result.model_dump(mode="json")
+    record_legacy_site_turn(
+        orchestrator,
+        mission.contract.mission_id,
+        final_url=page["final_url"],
+        succeeded=True,
+    )
+    return result.model_copy(
+        update={
+            "mission_id": mission.contract.mission_id,
+            "analysis_id": mission.contract.analysis_id,
+        }
+    ).model_dump(mode="json")
+
+
+@mcp.tool()
+async def start_search_mission(url: str) -> dict:
+    """Create the same canonical search mission used by UI and REST adapters."""
+    mission = get_mission_orchestrator().create_mission(
+        default_site_mission_request(url),
+        entry_point=EntryPoint.MCP,
+    )
+    return mission.model_dump(mode="json")
 
 
 @mcp.tool()

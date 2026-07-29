@@ -29,6 +29,13 @@ from app.hunter_sources import get_hunter_sources
 from app.llm import chat_with_routerai
 from app.mcp_security import McpSecurityMiddleware
 from app.mcp_server import admin_mcp, admin_mcp_http_app, mcp, mcp_http_app
+from app.mission_orchestrator import (
+    EntryPoint,
+    default_site_mission_request,
+    get_mission_orchestrator,
+    record_legacy_site_turn,
+)
+from app.mission_orchestrator.api import router as mission_router
 from app.models import (
     AnalyzeRequest,
     ChatRequest,
@@ -74,10 +81,11 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.12.0",
+    version="0.13.0",
     lifespan=lifespan,
 )
 app.include_router(runtime_router)
+app.include_router(mission_router)
 
 
 @app.middleware("http")
@@ -129,6 +137,7 @@ def health():
         "mcp_admin": "/mcp-admin",
         "mcp_security": "public-rate-limited-admin-authenticated",
         "runtime_core": "/api/runtime",
+        "mission_orchestrator": "/api/missions",
         "search_gateway": "/api/search/health",
         "sef_company_profile": "/api/sef/company-profile",
         "sef_report_review_package": "/api/sef/report/review-package",
@@ -176,10 +185,39 @@ def osint_tools():
 @app.post("/api/analyze")
 async def analyze(req: AnalyzeRequest):
     """Find an AI sales opportunity and enrich it with a source-traceable company and canonical KM profile."""
+    orchestrator = get_mission_orchestrator()
+    mission = orchestrator.create_mission(
+        default_site_mission_request(str(req.url)),
+        entry_point=EntryPoint.LEGACY_ADAPTER,
+    )
+    final_url = str(req.url)
     try:
         page = await fetch_site(str(req.url))
-        return await run_enriched_site_analysis(page["final_url"], page["title"], page["text"])
+        final_url = page["final_url"]
+        result = await run_enriched_site_analysis(
+            page["final_url"],
+            page["title"],
+            page["text"],
+        )
+        record_legacy_site_turn(
+            orchestrator,
+            mission.contract.mission_id,
+            final_url=page["final_url"],
+            succeeded=True,
+        )
+        return result.model_copy(
+            update={
+                "mission_id": mission.contract.mission_id,
+                "analysis_id": mission.contract.analysis_id,
+            }
+        )
     except (FetchError, httpx.HTTPError, ValueError) as exc:
+        record_legacy_site_turn(
+            orchestrator,
+            mission.contract.mission_id,
+            final_url=final_url,
+            succeeded=False,
+        )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

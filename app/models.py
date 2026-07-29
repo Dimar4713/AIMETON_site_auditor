@@ -165,6 +165,8 @@ class PreliminaryResultReadiness(BaseModel):
 
 
 class SiteAnalysis(BaseModel):
+    mission_id: str | None = None
+    analysis_id: str | None = None
     url: str
     company_name: str
     business_summary: str
