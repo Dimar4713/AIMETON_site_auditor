@@ -212,6 +212,117 @@ class ProjectStatusDateTests(unittest.TestCase):
         self.assertEqual(sync.choose_status(ctx, "Backlog"), "Ready")
         sync.update_status(ctx, value, "item", "ready")
 
+    def test_repair_copies_legacy_dates_to_new_mirror(self):
+        ctx = context(repository="owner/repo")
+        items = [
+            {
+                "id": "item-1",
+                "content": {
+                    "number": 12,
+                    "title": "Existing plan",
+                    "body": "",
+                    "repository": {"nameWithOwner": "owner/repo"},
+                },
+                "fieldValues": {
+                    "nodes": [
+                        {
+                            "date": "2026-07-20",
+                            "field": {"name": "Start date"},
+                        },
+                        {
+                            "date": "2026-07-25",
+                            "field": {"name": "Target date"},
+                        },
+                    ]
+                },
+            }
+        ]
+
+        repairs, conflicts = sync.plan_roadmap_repairs(ctx, items)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            repairs[0]["updates"],
+            {
+                "Planned start": "2026-07-20",
+                "Planned finish": "2026-07-25",
+            },
+        )
+
+    def test_repair_fills_search_recovery_schedule_in_both_pairs(self):
+        ctx = context(repository="Dimar4713/AIMETON_site_auditor")
+        items = [
+            {
+                "id": "item-84",
+                "content": {
+                    "number": 84,
+                    "title": "Entity Resolution",
+                    "body": "",
+                    "repository": {
+                        "nameWithOwner": (
+                            "Dimar4713/AIMETON_site_auditor"
+                        )
+                    },
+                },
+                "fieldValues": {"nodes": []},
+            }
+        ]
+
+        repairs, conflicts = sync.plan_roadmap_repairs(ctx, items)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(
+            repairs[0]["updates"],
+            {
+                "Start date": "2026-08-11",
+                "Planned start": "2026-08-11",
+                "Target date": "2026-08-17",
+                "Planned finish": "2026-08-17",
+            },
+        )
+
+    def test_repair_fails_before_writes_on_conflicting_dates(self):
+        ctx = context(
+            operation="repair_roadmap",
+            repository="Dimar4713/AIMETON_site_auditor",
+        )
+        value = project()
+        for name in sync.DATE_FIELDS:
+            value["fields"]["nodes"].append(
+                {"id": name, "name": name, "dataType": "DATE"}
+            )
+        items = [
+            {
+                "id": "item-84",
+                "content": {
+                    "number": 84,
+                    "title": "Entity Resolution",
+                    "body": "",
+                    "repository": {
+                        "nameWithOwner": (
+                            "Dimar4713/AIMETON_site_auditor"
+                        )
+                    },
+                },
+                "fieldValues": {
+                    "nodes": [
+                        {
+                            "date": "2026-08-12",
+                            "field": {"name": "Start date"},
+                        }
+                    ]
+                },
+            }
+        ]
+
+        with (
+            patch.object(sync, "list_project_items", return_value=items),
+            patch.object(sync, "update_date_fields") as update,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "conflicts"):
+                sync.repair_roadmap_dates(ctx, value)
+        update.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
