@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.main import app
+from app.heuristics import heuristic_analysis
 from app.mission_orchestrator import (
     ActionCandidate,
     ActionOutcome,
@@ -452,3 +453,87 @@ def test_rest_mission_endpoint_returns_canonical_contract():
     assert payload["contract"]["target_sufficiency"] == "L4"
     assert payload["contract"]["contract_fingerprint"].startswith("sha256:")
     assert payload["lifecycle"] == "planned"
+
+
+def test_rest_entrypoint_executes_serialized_plan_and_turn():
+    client = TestClient(app)
+    created = client.post(
+        "/api/missions",
+        json=default_site_mission_request(
+            "https://rest-loop.example/"
+        ).model_dump(mode="json"),
+    )
+    assert created.status_code == 200
+    mission_id = created.json()["contract"]["mission_id"]
+    planned = client.post(
+        f"/api/missions/{mission_id}/plan",
+        json={
+            "deficits": ["identity"],
+            "candidates": [
+                {
+                    "action_type": "resolve_identity",
+                    "deficit_code": "identity",
+                    "expected_sufficiency_gain": 0.4,
+                }
+            ],
+            "policy": {"remaining_actions": 2},
+        },
+    )
+    assert planned.status_code == 200
+    recorded = client.post(
+        f"/api/missions/{mission_id}/turns",
+        json={
+            "plan": planned.json(),
+            "outcome": {
+                "state": "partial",
+                "artifact_refs": ["identity_candidate"],
+            },
+            "feedback": {
+                "achieved": "L1",
+                "question_states": {
+                    "identity": "partially_verified",
+                },
+                "critical_gaps": ["identity"],
+            },
+        },
+    )
+
+    assert recorded.status_code == 200
+    assert recorded.json()["lifecycle"] == "running"
+    assert recorded.json()["turns"][0]["mission_id"] == mission_id
+    assert (
+        client.get(f"/api/missions/{mission_id}").json()
+        == recorded.json()
+    )
+
+
+def test_legacy_browser_analysis_is_attached_to_preliminary_mission(monkeypatch):
+    async def fake_fetch(url: str):
+        return {
+            "final_url": url,
+            "title": "Example",
+            "text": "Example company contacts",
+        }
+
+    async def fake_enriched(url: str, title: str, text: str):
+        return heuristic_analysis(url, title, text)
+
+    monkeypatch.setattr("app.main.fetch_site", fake_fetch)
+    monkeypatch.setattr("app.main.run_enriched_site_analysis", fake_enriched)
+    response = TestClient(app).post(
+        "/api/analyze",
+        json={"url": "https://browser.example/"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mission_id"]
+    assert payload["analysis_id"]
+    snapshot = TestClient(app).get(
+        f"/api/missions/{payload['mission_id']}"
+    ).json()
+    assert snapshot["contract"]["analysis_id"] == payload["analysis_id"]
+    assert snapshot["contract"]["entry_point"] == "legacy_adapter"
+    assert snapshot["achieved_sufficiency"] == "L0"
+    assert snapshot["lifecycle"] == "running"
+    assert len(snapshot["turns"]) == 1
