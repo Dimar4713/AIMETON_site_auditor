@@ -55,6 +55,18 @@ def _origin(value: str) -> str:
     return f"{parsed.scheme.lower()}://{netloc}"
 
 
+def _allowlist_key(value: str) -> str:
+    parsed = urlsplit(value)
+    host = (parsed.hostname or "").lower()
+    port = parsed.port
+    if port and not (
+        (parsed.scheme.lower() == "http" and port == 80)
+        or (parsed.scheme.lower() == "https" and port == 443)
+    ):
+        return f"{host}:{port}"
+    return host
+
+
 def _decode_candidate(content: bytes, encoding: str) -> str | None:
     try:
         decoded = content.decode(encoding, errors="strict")
@@ -153,6 +165,7 @@ class StaticHttpFetcher:
         timeout_seconds: float,
         max_bytes: int,
         max_redirects: int,
+        allowed_hosts: frozenset[str] = frozenset(),
     ) -> RawDocument:
         async with httpx.AsyncClient(
             follow_redirects=False,
@@ -164,6 +177,8 @@ class StaticHttpFetcher:
             redirect_history: list[RedirectHop] = []
             for _ in range(max_redirects + 1):
                 _validate_public_url(current)
+                if allowed_hosts and _allowlist_key(current) not in allowed_hosts:
+                    raise FetchError("Redirect нарушает domain allowlist")
                 try:
                     async with client.stream("GET", current) as response:
                         if response.is_redirect:
@@ -171,6 +186,11 @@ class StaticHttpFetcher:
                             if not location:
                                 raise FetchError("Сайт вернул некорректное перенаправление")
                             target = str(httpx.URL(current).join(location))
+                            if (
+                                allowed_hosts
+                                and _allowlist_key(target) not in allowed_hosts
+                            ):
+                                raise FetchError("Redirect нарушает domain allowlist")
                             redirect_history.append(
                                 RedirectHop(
                                     status_code=response.status_code,

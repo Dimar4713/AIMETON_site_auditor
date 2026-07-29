@@ -173,6 +173,45 @@ async def test_undetermined_encoding_is_an_explicit_fail_closed_error():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "redirect_target",
+    [
+        "https://other.test/private",
+        "https://example.test:8443/private",
+    ],
+)
+async def test_domain_allowlist_blocks_redirect_before_external_request(
+    redirect_target,
+):
+    observed_hosts: list[str] = []
+
+    def handler(incoming: httpx.Request) -> httpx.Response:
+        observed_hosts.append(incoming.url.host)
+        if incoming.url.host == "example.test":
+            return httpx.Response(
+                302,
+                headers={"location": redirect_target},
+            )
+        raise AssertionError("cross-domain redirect was fetched")
+
+    pipeline = DocumentPipeline(
+        static_fetcher=StaticHttpFetcher(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(FetchError, match="domain allowlist"):
+        await pipeline.fetch(
+            request("https://example.test/start"),
+            FetchPolicy(
+                allowed_hosts=frozenset({"example.test"}),
+                allow_crawl4ai=False,
+                allow_browser=False,
+            ),
+        )
+
+    assert observed_hosts == ["example.test"]
+
+
+@pytest.mark.asyncio
 async def test_multiple_semantic_areas_header_footer_redirect_and_canonical_are_preserved():
     html = """
     <html>
@@ -425,9 +464,22 @@ async def test_concurrency_is_limited_to_two():
     maximum = 0
 
     class SlowStaticFetcher(StaticHttpFetcher):
-        async def fetch(self, url, *, timeout_seconds, max_bytes, max_redirects):
+        async def fetch(
+            self,
+            url,
+            *,
+            timeout_seconds,
+            max_bytes,
+            max_redirects,
+            allowed_hosts=frozenset(),
+        ):
             nonlocal active, maximum
-            del timeout_seconds, max_bytes, max_redirects
+            del (
+                timeout_seconds,
+                max_bytes,
+                max_redirects,
+                allowed_hosts,
+            )
             active += 1
             maximum = max(maximum, active)
             await asyncio.sleep(0.01)

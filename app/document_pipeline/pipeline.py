@@ -115,6 +115,10 @@ class DocumentPipeline:
         url: str,
         policy: FetchPolicy,
     ) -> RawDocument:
+        if policy.allowed_hosts:
+            raise FetchError(
+                "Динамическое извлечение заблокировано строгой domain policy"
+            )
         errors: list[FetchError] = []
         if policy.allow_crawl4ai and self._crawl4ai.configured:
             try:
@@ -190,6 +194,7 @@ class DocumentPipeline:
                     timeout_seconds=policy.timeout_seconds,
                     max_bytes=policy.max_bytes,
                     max_redirects=policy.max_redirects,
+                    allowed_hosts=policy.allowed_hosts,
                 )
                 extraction = extract_html(raw.html, base_url=raw.final_url)
                 fallback_used = self._needs_fallback(raw, extraction, policy)
@@ -201,6 +206,7 @@ class DocumentPipeline:
                     "перенаправ",
                     "не является разрешённым",
                     "encoding_undetermined",
+                    "domain allowlist",
                 )
                 if any(marker in str(exc).casefold() for marker in fail_closed_markers):
                     raise

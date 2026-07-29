@@ -243,6 +243,19 @@ class MissionOrchestrator:
                 raise KeyError(mission_id)
             return deepcopy(snapshot)
 
+    def validate_pending_plan(
+        self,
+        mission_id: str,
+        plan: NextActionPlan,
+    ) -> None:
+        with self._lock:
+            if mission_id not in self._missions:
+                raise KeyError(mission_id)
+            if plan.mission_id != mission_id:
+                raise ValueError("plan belongs to another mission")
+            if self._pending_plans.get(mission_id) != plan:
+                raise ValueError("plan was not issued by this orchestrator")
+
     def plan(
         self,
         mission_id: str,

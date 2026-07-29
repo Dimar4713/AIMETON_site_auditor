@@ -46,6 +46,7 @@ class FetchPolicy(PipelineModel):
     max_redirects: int = Field(default=8, ge=0, le=20)
     min_text_length: int = Field(default=80, ge=1, le=10_000)
     cache_ttl_seconds: int = Field(default=900, ge=0, le=86_400)
+    allowed_hosts: frozenset[str] = Field(default_factory=frozenset)
     allow_crawl4ai: bool = True
     allow_browser: bool = True
 
