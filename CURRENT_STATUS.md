@@ -20,9 +20,10 @@ _Last updated: 2026-07-29_
 - Регистрационные данные платных providers потребуются только после зелёного
   CI `#82`, перед live-проверкой stage. Значения секретов не передаются через
   чат, Issues, PR, код или логи.
-- Следующий активный шаг: `SA-SR-02 / #83`, Mission Orchestrator. Candidate
-  реализуется в ветке `agent/sa-sr-02-mission-orchestrator`; до merge/CI/deploy
-  это не факт stage.
+- `SA-SR-02 / #83`, Mission Orchestrator, слит PR `#92` в `main`: code merge
+  SHA `7b6602c98e02a982716112b34d225e66cebc4dad`, pre-merge Baseline CI
+  `#30470034095` — success. Это факт code baseline; stage подтверждается
+  отдельно exact deployment SHA и live `/api/health`.
 
 ## Текущее положение
 

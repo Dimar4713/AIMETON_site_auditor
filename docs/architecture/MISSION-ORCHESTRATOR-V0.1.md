@@ -1,7 +1,9 @@
 # AIMETON Mission Orchestrator v0.1
 
-Статус: candidate-реализация `SA-SR-02 / #83` в рабочей ветке. До merge,
-зелёного CI и stage deployment не является эксплуатационным фактом.
+Статус: code baseline `SA-SR-02 / #83` слит PR `#92` в `main`, merge SHA
+`7b6602c98e02a982716112b34d225e66cebc4dad`; pre-merge Baseline CI
+`#30470034095` — success. Эксплуатационный факт stage подтверждается отдельно
+exact deployment SHA и live `/api/health`.
 
 ## Назначение
 
