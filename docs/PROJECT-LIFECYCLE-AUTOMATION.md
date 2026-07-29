@@ -4,6 +4,13 @@
 
 Workflow `.github/workflows/project-status-sync.yml` синхронизирует Issues и Pull Requests с полем `Status` GitHub Project V2.
 
+Workflow также поддерживает безопасное восстановление плановых дат:
+
+- label `project:audit-roadmap` — dry-run без записи;
+- label `project:repair-roadmap` — применение только при отсутствии
+  конфликтов;
+- ручной `operation = repair_roadmap` с явным `dry_run`.
+
 Поддерживаемые состояния:
 
 - `Backlog`;

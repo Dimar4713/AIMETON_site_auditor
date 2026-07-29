@@ -11,7 +11,7 @@ For OPERATION=sync_item these are also required:
 - EVENT_NAME, EVENT_ACTION, ITEM_KIND, ITEM_STATE, ITEM_TITLE, ITEM_LABELS
 
 Optional:
-- OPERATION: sync_item (default) or ensure_schema
+- OPERATION: sync_item (default), ensure_schema, or repair_roadmap
 - MANUAL_STATUS: explicit target status from workflow_dispatch
 - DRY_RUN: report mutations without applying them
 - EVENT_AT, ITEM_CLOSED_AT, PR_MERGED_AT, PR_MERGED
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -48,12 +49,34 @@ STATUS_LABELS = {
     "status:validation": "Validation",
     "status:blocked": "Blocked",
 }
-DATE_FIELDS = (
+PLAN_DATE_FIELDS = (
+    "Start date",
+    "Target date",
     "Planned start",
     "Planned finish",
+)
+ACTUAL_DATE_FIELDS = (
     "Actual start",
     "Actual finish",
 )
+DATE_FIELDS = PLAN_DATE_FIELDS + ACTUAL_DATE_FIELDS
+PLAN_FIELD_PAIRS = (
+    ("Start date", "Planned start"),
+    ("Target date", "Planned finish"),
+)
+SEARCH_RECOVERY_SCHEDULE = {
+    80: ("2026-07-29", "2026-10-05"),
+    81: ("2026-07-29", "2026-07-30"),
+    82: ("2026-07-31", "2026-08-03"),
+    83: ("2026-08-04", "2026-08-10"),
+    84: ("2026-08-11", "2026-08-17"),
+    85: ("2026-08-18", "2026-08-31"),
+    86: ("2026-08-25", "2026-09-07"),
+    87: ("2026-09-01", "2026-09-07"),
+    88: ("2026-09-08", "2026-09-21"),
+    89: ("2026-09-15", "2026-09-28"),
+    90: ("2026-09-22", "2026-10-05"),
+}
 ROADMAP_VIEWS = {
     "Executive Roadmap": "",
     "Actual Delivery": "",
@@ -115,7 +138,7 @@ def load_context() -> Context:
         }.items()
         if not value
     ]
-    if operation not in {"sync_item", "ensure_schema"}:
+    if operation not in {"sync_item", "ensure_schema", "repair_roadmap"}:
         raise RuntimeError(f"Unsupported OPERATION: {operation}")
     if operation == "sync_item":
         for key in ("CONTENT_NODE_ID", "REPOSITORY", "ITEM_NUMBER"):
@@ -449,6 +472,186 @@ def find_or_add_item(
     return data["addProjectV2ItemById"]["item"]["id"], None, {}
 
 
+def list_project_items(
+    ctx: Context,
+    project_id: str,
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while True:
+        query = """
+        query($project:ID!, $cursor:String) {
+          node(id:$project) { ... on ProjectV2 {
+            items(first:100, after:$cursor) {
+              nodes {
+                id
+                content {
+                  ... on Issue {
+                    id number title body
+                    repository { nameWithOwner }
+                  }
+                  ... on PullRequest {
+                    id number title body
+                    repository { nameWithOwner }
+                  }
+                }
+                fieldValues(first:100) { nodes {
+                  ... on ProjectV2ItemFieldDateValue {
+                    date
+                    field { ... on ProjectV2Field { name } }
+                  }
+                } }
+              }
+              pageInfo { hasNextPage endCursor }
+            }
+          } }
+        }
+        """
+        data = graphql(
+            ctx,
+            query,
+            {"project": project_id, "cursor": cursor},
+        )
+        items = data["node"]["items"]
+        result.extend(items["nodes"])
+        if not items["pageInfo"]["hasNextPage"]:
+            return result
+        cursor = items["pageInfo"]["endCursor"]
+
+
+def _item_dates(item: dict[str, Any]) -> dict[str, str]:
+    dates: dict[str, str] = {}
+    for value in item.get("fieldValues", {}).get("nodes", []):
+        field = value.get("field") or {}
+        name = field.get("name")
+        date = value.get("date")
+        if name in DATE_FIELDS and date:
+            dates[name] = date
+    return dates
+
+
+def _declared_plan_dates(
+    content: dict[str, Any],
+    repository: str,
+) -> tuple[str, str] | None:
+    content_repository = (content.get("repository") or {}).get(
+        "nameWithOwner"
+    )
+    if content_repository != repository:
+        return None
+    number = content.get("number")
+    if number in SEARCH_RECOVERY_SCHEDULE:
+        return SEARCH_RECOVERY_SCHEDULE[number]
+
+    body = content.get("body") or ""
+    start = re.search(
+        r"Planned start:\s*\*\*(\d{4}-\d{2}-\d{2})\*\*",
+        body,
+    )
+    finish = re.search(
+        r"Planned finish:\s*\*\*(\d{4}-\d{2}-\d{2})\*\*",
+        body,
+    )
+    if bool(start) != bool(finish):
+        raise RuntimeError(
+            f"Item #{number} declares only one planned date"
+        )
+    if not start:
+        return None
+    return start.group(1), finish.group(1)
+
+
+def plan_roadmap_repairs(
+    ctx: Context,
+    items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    repairs: list[dict[str, Any]] = []
+    conflicts: list[dict[str, Any]] = []
+    for item in items:
+        content = item.get("content") or {}
+        dates = _item_dates(item)
+        declared = _declared_plan_dates(content, ctx.repository)
+        declared_by_pair = (
+            {
+                "Start date": declared[0],
+                "Target date": declared[1],
+            }
+            if declared
+            else {}
+        )
+        updates: dict[str, str] = {}
+        for canonical, mirror in PLAN_FIELD_PAIRS:
+            values = {
+                dates[name]
+                for name in (canonical, mirror)
+                if dates.get(name)
+            }
+            declared_value = declared_by_pair.get(canonical)
+            if declared_value:
+                values.add(declared_value)
+            if len(values) > 1:
+                conflicts.append(
+                    {
+                        "item": content.get("number"),
+                        "title": content.get("title"),
+                        "field_pair": [canonical, mirror],
+                        "values": sorted(values),
+                    }
+                )
+                continue
+            if not values:
+                continue
+            desired = next(iter(values))
+            if not dates.get(canonical):
+                updates[canonical] = desired
+            if not dates.get(mirror):
+                updates[mirror] = desired
+        if updates:
+            repairs.append(
+                {
+                    "item_id": item["id"],
+                    "number": content.get("number"),
+                    "title": content.get("title"),
+                    "updates": updates,
+                }
+            )
+    return repairs, conflicts
+
+
+def repair_roadmap_dates(
+    ctx: Context,
+    project: dict[str, Any],
+) -> dict[str, Any]:
+    items = list_project_items(ctx, project["id"])
+    repairs, conflicts = plan_roadmap_repairs(ctx, items)
+    if conflicts:
+        raise RuntimeError(
+            "Roadmap date conflicts detected; no dates were written: "
+            + json.dumps(conflicts, ensure_ascii=False)
+        )
+    for repair in repairs:
+        update_date_fields(
+            ctx,
+            project,
+            repair["item_id"],
+            repair["updates"],
+        )
+
+    coverage = {
+        name: sum(1 for item in items if _item_dates(item).get(name))
+        for name in PLAN_DATE_FIELDS
+    }
+    return {
+        "items_scanned": len(items),
+        "items_repaired": len(repairs),
+        "field_updates": sum(
+            len(repair["updates"]) for repair in repairs
+        ),
+        "repairs": repairs,
+        "coverage_before": coverage,
+    }
+
+
 def ensure_label(
     ctx: Context,
     name: str,
@@ -732,6 +935,21 @@ def main() -> int:
                     "dry_run": ctx.dry_run,
                     **schema_changes,
                     "roadmap_date_mapping": "one-time-ui-configuration",
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    if ctx.operation == "repair_roadmap":
+        result = repair_roadmap_dates(ctx, project)
+        print(
+            json.dumps(
+                {
+                    "project": project["title"],
+                    "operation": ctx.operation,
+                    "dry_run": ctx.dry_run,
+                    **schema_changes,
+                    **result,
                 },
                 ensure_ascii=False,
             )
