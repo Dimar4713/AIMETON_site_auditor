@@ -39,7 +39,7 @@ from app.models import (
 from app.osint_tools import get_osint_tools
 from app.runtime_core.api import router as runtime_router
 from app.scraper import FetchError, fetch_site
-from app.search_gateway import get_search_gateway
+from app.search_gateway import get_search_gateway, search_policy_from_env
 from app.sef.company_profile import (
     CompanyProfileBuildRequest,
     CompanyProfileV1,
@@ -74,7 +74,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.11.0",
+    version="0.12.0",
     lifespan=lifespan,
 )
 app.include_router(runtime_router)
@@ -147,12 +147,13 @@ def health():
 def search_health():
     providers = [
         item.model_dump(mode="json")
-        for item in get_search_gateway().health()
+        for item in get_search_gateway().health(search_policy_from_env())
     ]
-    configured = [item for item in providers if item["configured"]]
+    active = [item for item in providers if item["state"] == "active"]
     return {
-        "status": "ok" if configured else "degraded",
+        "status": "ok" if active else "degraded",
         "providers": providers,
+        "active_providers": [item["provider"] for item in active],
         "secrets_exposed": False,
     }
 

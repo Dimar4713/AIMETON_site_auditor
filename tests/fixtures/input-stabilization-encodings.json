@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "windows-1251-meta",
+      "content_type": "text/html",
+      "expected_encoding_source": "meta",
+      "expected_text": "Реквизиты ООО Пример",
+      "body_base64": "PGh0bWw+PGhlYWQ+PG1ldGEgY2hhcnNldD0id2luZG93cy0xMjUxIj48dGl0bGU+yu7s7+Dt6P88L3RpdGxlPjwvaGVhZD48Ym9keT48bWFpbj48cD7Q5eri6Ofo8vsgzs7OIM/w6Ozl8CDoIPLl6+X07u0gKzcgMzkxIDAwMC0wMC0wMC48L3A+PC9tYWluPjwvYm9keT48L2h0bWw+"
+    },
+    {
+      "id": "utf-8-http",
+      "content_type": "text/html; charset=utf-8",
+      "expected_encoding_source": "http",
+      "expected_text": "Реквизиты ООО Пример",
+      "body_base64": "PGh0bWw+PGhlYWQ+PG1ldGEgY2hhcnNldD0idXRmLTgiPjx0aXRsZT7QmtC+0LzQv9Cw0L3QuNGPPC90aXRsZT48L2hlYWQ+PGJvZHk+PG1haW4+PHA+0KDQtdC60LLQuNC30LjRgtGLINCe0J7QniDQn9GA0LjQvNC10YAg0Lgg0YLQtdC70LXRhNC+0L0gKzcgMzkxIDAwMC0wMC0wMC48L3A+PC9tYWluPjwvYm9keT48L2h0bWw+"
+    },
+    {
+      "id": "utf-8-bom-overrides-wrong-meta",
+      "content_type": "text/html; charset=windows-1251",
+      "expected_encoding_source": "bom",
+      "expected_text": "Реквизиты ООО Пример",
+      "body_base64": "77u/PGh0bWw+PGhlYWQ+PG1ldGEgY2hhcnNldD0id2luZG93cy0xMjUxIj48dGl0bGU+0JrQvtC80L/QsNC90LjRjzwvdGl0bGU+PC9oZWFkPjxib2R5PjxtYWluPjxwPtCg0LXQutCy0LjQt9C40YLRiyDQntCe0J4g0J/RgNC40LzQtdGAINC4INGC0LXQu9C10YTQvtC9ICs3IDM5MSAwMDAtMDAtMDAuPC9wPjwvbWFpbj48L2JvZHk+PC9odG1sPg=="
+    },
+    {
+      "id": "windows-1251-detector",
+      "content_type": "text/html",
+      "expected_encoding_source": "detector",
+      "expected_text": "Реквизиты ООО Пример",
+      "body_base64": "PGh0bWw+PGhlYWQ+PHRpdGxlPsru7O/g7ej/PC90aXRsZT48L2hlYWQ+PGJvZHk+PG1haW4+PHA+0OXq4ujn6PL7IM7OziDP8Ojs5fAg6CDy5evl9O7tICs3IDM5MSAwMDAtMDAtMDAuPC9wPjwvbWFpbj48L2JvZHk+PC9odG1sPg=="
+    }
+  ]
+}

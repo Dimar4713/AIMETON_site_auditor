@@ -27,6 +27,12 @@ class BlockKind(StrEnum):
     TABLE_CELL = "table_cell"
 
 
+class ContentRegion(StrEnum):
+    HEADER = "header"
+    BODY = "body"
+    FOOTER = "footer"
+
+
 class DocumentRequest(PipelineModel):
     mission_id: Identifier
     source_id: Identifier
@@ -47,18 +53,29 @@ class FetchPolicy(PipelineModel):
 class ExtractedBlock(PipelineModel):
     locator: str = Field(min_length=1, max_length=1_000)
     kind: BlockKind
+    region: ContentRegion = ContentRegion.BODY
     text: str = Field(min_length=1, max_length=20_000)
 
 
 class ExtractedLink(PipelineModel):
     locator: str = Field(min_length=1, max_length=1_000)
+    region: ContentRegion = ContentRegion.BODY
     text: str = Field(default="", max_length=2_000)
     url: AnyHttpUrl
 
 
 class ExtractedTable(PipelineModel):
     locator: str = Field(min_length=1, max_length=1_000)
+    region: ContentRegion = ContentRegion.BODY
     rows: list[list[str]]
+
+
+class RedirectHop(PipelineModel):
+    status_code: int = Field(ge=300, le=399)
+    from_origin: str = Field(min_length=1, max_length=300)
+    to_origin: str = Field(min_length=1, max_length=300)
+    from_url_digest: Digest
+    to_url_digest: Digest
 
 
 class DocumentDiagnostics(PipelineModel):
@@ -68,6 +85,9 @@ class DocumentDiagnostics(PipelineModel):
     fallback_used: bool = False
     raw_bytes: int = Field(ge=0)
     latency_ms: int = Field(ge=0)
+    detected_encoding: str | None = Field(default=None, max_length=100)
+    encoding_source: str | None = Field(default=None, max_length=50)
+    redirect_history: list[RedirectHop] = Field(default_factory=list)
 
 
 class FetchedDocument(PipelineModel):
@@ -76,8 +96,12 @@ class FetchedDocument(PipelineModel):
     normalized_content_digest: Digest
     normalized_text: str = Field(min_length=1)
     blocks: list[ExtractedBlock] = Field(min_length=1)
+    header_blocks: list[ExtractedBlock] = Field(default_factory=list)
+    footer_blocks: list[ExtractedBlock] = Field(default_factory=list)
     links: list[ExtractedLink] = Field(default_factory=list)
     tables: list[ExtractedTable] = Field(default_factory=list)
+    declared_canonical_url: AnyHttpUrl | None = None
+    canonical_same_origin: bool | None = None
     diagnostics: DocumentDiagnostics
 
 

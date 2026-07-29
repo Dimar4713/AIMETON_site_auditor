@@ -1,10 +1,31 @@
 # AIMETON Site Auditor · Current Status
 
-_Last updated: 2026-07-22_
+_Last updated: 2026-07-29_
+
+## Активный контур Search Recovery
+
+- `SR-G0 / #81` слит в `main` через PR
+  [#79](https://github.com/Dimar4713/AIMETON_site_auditor/pull/79);
+  merge SHA `1f3f2d6bbe9fc350dffcb58accd539ccf70f1a8e`.
+- `MissionReleaseControl` и fail-closed Report Gate являются фактом `main`, но
+  не доказывают восстановление самого поиска.
+- `SR-G1 / #82` реализуется в ветке
+  `agent/sa-sr-01-input-provider-stabilization`: кодировки, полнота смысловых
+  областей, URL/redirect/canonical identity и operational readiness providers.
+- Наблюдение stage после merge, до развёртывания нового `main`: версия `0.10.0`,
+  deployment SHA `9c304b695c7c807db1b6d155c5d6fe78ca502586`;
+  SearXNG настроен, Yandex и Tavily не настроены. Это снимок факта, а не
+  целевое состояние.
+- Регистрационные данные платных providers потребуются только после зелёного
+  CI `#82`, перед live-проверкой stage. Значения секретов не передаются через
+  чат, Issues, PR, код или логи.
 
 ## Текущее положение
 
-**Завершённая фаза:** SA-01 — стабилизация поискового и MCP-контура.
+Ниже сохранён исторический эксплуатационный baseline SA-01/SA-02. Он не
+заменяет активный контур Search Recovery выше.
+
+**Исторически завершённая фаза:** SA-01 — стабилизация поискового и MCP-контура.
 
 **Завершено:** SA-01.1–SA-01.8 / Issues #9–#16; Epic #7 закрыт.
 

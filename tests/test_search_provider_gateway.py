@@ -15,6 +15,7 @@ from app.search_gateway.models import (
     AttemptState,
     FallbackReason,
     GatewayState,
+    ProviderReadiness,
     SearchItem,
     SearchPolicy,
     SearchRequest,
@@ -270,7 +271,7 @@ async def test_paid_retry_cannot_exceed_mission_budget():
     )
 
     assert provider.calls == 1
-    assert response.diagnostics.attempts[0].reason == FallbackReason.BUDGET_EXCEEDED
+    assert response.diagnostics.attempts[0].reason == FallbackReason.BUDGET_BLOCKED
     assert response.diagnostics.total_cost_by_currency["USD"] == Decimal("1")
 
 
@@ -288,7 +289,7 @@ async def test_global_quota_blocks_calls_after_limit():
 
     assert first.results
     assert second.results == []
-    assert second.diagnostics.attempts[0].reason == FallbackReason.QUOTA_EXCEEDED
+    assert second.diagnostics.attempts[0].reason == FallbackReason.QUOTA_BLOCKED
     assert provider.calls == 1
 
 
@@ -296,6 +297,128 @@ def test_canonical_url_removes_tracking_and_preserves_semantic_query():
     assert canonical_url(
         "HTTPS://Example.RU:443/path/?utm_source=x&b=2&a=1#fragment"
     ) == "https://example.ru/path?a=1&b=2"
+
+
+@pytest.mark.asyncio
+async def test_url_dedupe_never_merges_different_schemes_or_hosts():
+    provider = StubProvider(
+        "safe-dedupe",
+        results=[
+            SearchItem(url="http://example.ru/about", provider="safe-dedupe"),
+            SearchItem(url="https://example.ru/about", provider="safe-dedupe"),
+            SearchItem(url="https://www.example.ru/about", provider="safe-dedupe"),
+            SearchItem(
+                url="https://example.ru/about?utm_source=duplicate",
+                provider="safe-dedupe",
+            ),
+        ],
+    )
+    gateway = SearchGateway([provider])
+
+    response = await gateway.search(
+        request("safe url identity"),
+        SearchPolicy(provider_order=("safe-dedupe",), cache_ttl_seconds=0),
+    )
+
+    assert [str(item.url) for item in response.results] == [
+        "http://example.ru/about",
+        "https://example.ru/about",
+        "https://www.example.ru/about",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_paid_provider_with_unknown_price_is_fail_closed():
+    provider = StubProvider(
+        "paid-unknown",
+        paid=True,
+        cost_amount=Decimal("0"),
+        results=[SearchItem(url="https://paid.example/", provider="paid-unknown")],
+    )
+    gateway = SearchGateway([provider])
+
+    response = await gateway.search(
+        request("unknown price"),
+        SearchPolicy(
+            provider_order=("paid-unknown",),
+            max_cost_by_currency={"USD": Decimal("100")},
+        ),
+    )
+
+    assert response.results == []
+    assert provider.calls == 0
+    assert response.diagnostics.attempts[0].reason == FallbackReason.PRICING_UNKNOWN
+
+
+def test_provider_health_reports_operational_readiness_not_only_configuration():
+    free = StubProvider("free")
+    price_unknown = StubProvider("price-unknown", paid=True)
+    budget_blocked = StubProvider(
+        "budget-blocked",
+        paid=True,
+        cost_amount=Decimal("2"),
+    )
+    quota_blocked = StubProvider("quota-blocked")
+    paid_active = StubProvider(
+        "paid-active",
+        paid=True,
+        cost_amount=Decimal("0.5"),
+    )
+    gateway = SearchGateway(
+        [free, price_unknown, budget_blocked, quota_blocked, paid_active],
+        global_quotas={"quota-blocked": 0},
+    )
+
+    health = {
+        item.provider: item
+        for item in gateway.health(
+            SearchPolicy(
+                provider_order=(
+                    "free",
+                    "price-unknown",
+                    "budget-blocked",
+                    "quota-blocked",
+                    "paid-active",
+                ),
+                max_cost_by_currency={"USD": Decimal("1")},
+            )
+        )
+    }
+
+    assert health["free"].state == ProviderReadiness.ACTIVE
+    assert health["free"].ready is True
+    assert health["price-unknown"].state == ProviderReadiness.PRICING_UNKNOWN
+    assert health["budget-blocked"].state == ProviderReadiness.BUDGET_BLOCKED
+    assert health["quota-blocked"].state == ProviderReadiness.QUOTA_BLOCKED
+    assert health["paid-active"].state == ProviderReadiness.ACTIVE
+    assert all(
+        item.ready == (item.state == ProviderReadiness.ACTIVE)
+        for item in health.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_provider_health_reports_not_configured_and_open_circuit():
+    not_configured = SearxngProvider(None)
+    failing = StubProvider(
+        "failing",
+        error=ProviderError("failed", retryable=False),
+    )
+    gateway = SearchGateway(
+        [not_configured, failing],
+        failure_threshold=1,
+        recovery_seconds=60,
+    )
+    await gateway.search(
+        request("open circuit"),
+        SearchPolicy(provider_order=("failing",), retries=0),
+    )
+
+    health = {item.provider: item for item in gateway.health()}
+
+    assert health["searxng"].state == ProviderReadiness.NOT_CONFIGURED
+    assert health["failing"].state == ProviderReadiness.CIRCUIT_OPEN
+    assert health["failing"].ready is False
 
 
 @pytest.mark.asyncio

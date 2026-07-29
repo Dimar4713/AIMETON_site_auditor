@@ -1,6 +1,7 @@
 # SEF Document Fetch/Extract v0.1
 
-Статус: реализованный P0-контракт `SA-SEF-03`.
+Статус: реализованный P0-контракт `SA-SEF-03`; расширение `SA-SR-01 / #82`
+реализуется в рабочей ветке и до merge/deploy не является фактом stage.
 
 ## Назначение
 
@@ -12,6 +13,7 @@ locator внутри этого документа.
 discovery_hint
 → URL/DNS/SSRF validation
 → static HTTP
+→ BOM / HTTP charset / meta charset / detector
 → Crawl4AI worker
 → bounded browser fallback
 → normalized document + digest
@@ -27,10 +29,10 @@ claim.
 | Компонент | Ответственность |
 |---|---|
 | `DocumentPipeline` | orchestration, concurrency=2, fallback и promotion |
-| `StaticHttpFetcher` | HTTP-first, redirect validation, MIME/size/timeout limits |
+| `StaticHttpFetcher` | HTTP-first, redirect validation, MIME/size/timeout limits и детерминированное декодирование |
 | `Crawl4AIHttpWorker` | заменяемый self-hosted dynamic worker |
 | `PlaywrightFallback` | последний ограниченный путь динамического рендеринга |
-| `extract_html()` | основной текст, заголовки, списки, таблицы, ссылки и locators |
+| `extract_html()` | header, все смысловые области body, footer, таблицы, ссылки, canonical и locators |
 | `MemoryDocumentCache` | TTL cache неизменившегося документа в P0 |
 
 Постоянное хранение оригиналов и PostgreSQL metadata входят в `SA-SEF-04` /
@@ -51,6 +53,14 @@ claim.
 9. Evidence ID детерминирован по document, locator и quote digest.
 10. Диагностика содержит fingerprint, path, latency, size и cache hit, но не
     текст документа, query string URL, headers или token.
+11. SHA-256 сырого содержимого считается по исходным байтам до декодирования.
+12. Кодировка определяется строго в порядке `BOM → HTTP → meta → detector`;
+    недостоверный результат завершается `encoding_undetermined`.
+13. Redirect history сохраняет status, origins и digest URL без query string.
+14. `rel=canonical` сохраняется как заявленная связь. Разные scheme или host
+    не склеиваются автоматически и требуют Entity Resolution.
+15. Header и footer извлекаются раздельно, чтобы контакты и реквизиты не
+    терялись и не смешивались с основным содержимым.
 
 ## Locator v0.1
 
@@ -58,15 +68,25 @@ Locator строится детерминированно:
 
 ```text
 head/title
+header/p[1]
 body/h1[1]
 body/p[3]
 body/li[2]
 body/table[1]/row[2]/cell[1]
 body/a[4]
+footer/p[1]
 ```
 
 Promotion отклоняется, если locator отсутствует или цитата не содержится в
 соответствующем блоке.
+
+## SR-G1 fixtures
+
+`tests/fixtures/input-stabilization-encodings.json` фиксирует Windows-1251,
+UTF-8, UTF-8 BOM и detector path. `tests/fixtures/cms-multi-area.html`
+фиксирует Tilda/Bitrix-подобную страницу с несколькими смысловыми областями,
+header, юридическим блоком и footer. SPA fallback продолжает проверяться
+отдельным dynamic fixture.
 
 ## Crawl4AI worker
 

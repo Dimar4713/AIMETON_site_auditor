@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from app.scraper import FetchError
 
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK = ROOT / "benchmarks" / "sef" / "document-fetch-5-v0.1.json"
+ENCODING_FIXTURES = ROOT / "tests" / "fixtures" / "input-stabilization-encodings.json"
 
 
 def request(url: str = "https://example.test/about") -> DocumentRequest:
@@ -119,6 +121,136 @@ async def test_static_document_has_digests_locators_tables_links_and_cache():
     assert second.diagnostics.path == FetchPath.CACHE
     assert second.diagnostics.cache_hit is True
     assert calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    json.loads(ENCODING_FIXTURES.read_text(encoding="utf-8"))["cases"],
+    ids=lambda case: case["id"],
+)
+async def test_encoding_chain_preserves_russian_text(case):
+    content = base64.b64decode(case["body_base64"])
+    pipeline = DocumentPipeline(
+        static_fetcher=StaticHttpFetcher(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    200,
+                    headers={"content-type": case["content_type"]},
+                    content=content,
+                )
+            )
+        ),
+    )
+
+    fetched = await pipeline.fetch(request(), FetchPolicy(min_text_length=20))
+
+    assert case["expected_text"] in fetched.normalized_text
+    assert fetched.diagnostics.encoding_source == case["expected_encoding_source"]
+    assert fetched.diagnostics.detected_encoding
+    assert fetched.diagnostics.raw_bytes == len(content)
+
+
+@pytest.mark.asyncio
+async def test_undetermined_encoding_is_an_explicit_fail_closed_error():
+    fetcher = StaticHttpFetcher(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                content=b"\x00\x01\x02\x03" * 100,
+            )
+        )
+    )
+
+    with pytest.raises(FetchError, match="encoding_undetermined"):
+        await fetcher.fetch(
+            "https://example.test/",
+            timeout_seconds=1,
+            max_bytes=1_024,
+            max_redirects=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_multiple_semantic_areas_header_footer_redirect_and_canonical_are_preserved():
+    html = """
+    <html>
+      <head>
+        <title>Группа компаний</title>
+        <link rel="canonical" href="https://www.example.test:443/company">
+      </head>
+      <body>
+        <header><p>Телефон +7 391 111-22-33</p></header>
+        <main><h1>Первая область</h1><p>Основное юридическое лицо ООО Альфа.</p></main>
+        <article><h2>Вторая область</h2><p>Бренд Бета и производственная площадка.</p></article>
+        <footer><p>ИНН 2400000000, адрес Красноярск.</p></footer>
+      </body>
+    </html>
+    """
+
+    def handler(incoming: httpx.Request) -> httpx.Response:
+        if incoming.url.host == "example.test":
+            return httpx.Response(
+                301,
+                headers={"location": "https://www.example.test/landing"},
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            text=html,
+        )
+
+    pipeline = DocumentPipeline(
+        static_fetcher=StaticHttpFetcher(transport=httpx.MockTransport(handler)),
+    )
+    fetched = await pipeline.fetch(request("https://example.test/start"))
+
+    assert "Первая область" in fetched.normalized_text
+    assert "Вторая область" in fetched.normalized_text
+    assert [block.text for block in fetched.header_blocks] == [
+        "Телефон +7 391 111-22-33"
+    ]
+    assert [block.text for block in fetched.footer_blocks] == [
+        "ИНН 2400000000, адрес Красноярск."
+    ]
+    assert str(fetched.document.url) == "https://www.example.test/landing"
+    assert str(fetched.declared_canonical_url) == "https://www.example.test/company"
+    assert fetched.canonical_same_origin is True
+    assert len(fetched.diagnostics.redirect_history) == 1
+    hop = fetched.diagnostics.redirect_history[0]
+    assert hop.from_origin == "https://example.test"
+    assert hop.to_origin == "https://www.example.test"
+    assert "start" not in hop.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_tilda_bitrix_style_fixture_keeps_all_sections_and_requisites():
+    html = (ROOT / "tests" / "fixtures" / "cms-multi-area.html").read_text(
+        encoding="utf-8"
+    )
+    pipeline = DocumentPipeline(
+        static_fetcher=StaticHttpFetcher(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    200,
+                    headers={"content-type": "text/html; charset=utf-8"},
+                    text=html,
+                )
+            )
+        ),
+    )
+
+    fetched = await pipeline.fetch(request("https://cms.example/"))
+
+    for expected in (
+        "Производство строительных конструкций",
+        "Технологии и оборудование",
+        "ООО «Пример», ИНН 2400000000.",
+    ):
+        assert expected in fetched.normalized_text
+    assert fetched.header_blocks[0].text.startswith("Отдел продаж")
+    assert fetched.footer_blocks[0].text.startswith("660000")
 
 
 @pytest.mark.asyncio

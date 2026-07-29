@@ -7,6 +7,7 @@ from app.search_gateway.gateway import SearchGateway
 from app.search_gateway.models import (
     FallbackReason,
     GatewayState,
+    ProviderReadiness,
     SearchDiagnostics,
     SearchItem,
     SearchPolicy,
@@ -17,6 +18,7 @@ from app.search_gateway.models import (
 __all__ = [
     "FallbackReason",
     "GatewayState",
+    "ProviderReadiness",
     "SearchDiagnostics",
     "SearchGateway",
     "SearchItem",

@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 
 from app.document_pipeline.models import (
     BlockKind,
+    ContentRegion,
     ExtractedBlock,
     ExtractedLink,
     ExtractedTable,
@@ -33,6 +34,19 @@ class Extraction:
     blocks: list[ExtractedBlock]
     links: list[ExtractedLink]
     tables: list[ExtractedTable]
+    declared_canonical_url: str | None
+
+
+def _region_for(element) -> ContentRegion:
+    if element.find_parent("header") is not None or element.name == "header":
+        return ContentRegion.HEADER
+    if element.find_parent("footer") is not None or element.name == "footer":
+        return ContentRegion.FOOTER
+    return ContentRegion.BODY
+
+
+def _region_prefix(region: ContentRegion) -> str:
+    return region.value
 
 
 def extract_html(html: str, *, base_url: str) -> Extraction:
@@ -45,14 +59,16 @@ def extract_html(html: str, *, base_url: str) -> Extraction:
     if title:
         blocks.append(ExtractedBlock(locator="head/title", kind=BlockKind.TITLE, text=title))
 
-    counters: dict[str, int] = {}
-    root = soup.select_one("main, article") or soup.body or soup
+    counters: dict[tuple[ContentRegion, str], int] = {}
+    root = soup.body or soup
     for element in root.select("h1, h2, h3, h4, p, li"):
         text = normalize_text(element.get_text(" ", strip=True))
         if not text:
             continue
         tag = element.name.lower()
-        counters[tag] = counters.get(tag, 0) + 1
+        region = _region_for(element)
+        counter_key = (region, tag)
+        counters[counter_key] = counters.get(counter_key, 0) + 1
         kind = (
             BlockKind.HEADING
             if tag.startswith("h")
@@ -62,14 +78,22 @@ def extract_html(html: str, *, base_url: str) -> Extraction:
         )
         blocks.append(
             ExtractedBlock(
-                locator=f"body/{tag}[{counters[tag]}]",
+                locator=(
+                    f"{_region_prefix(region)}/{tag}[{counters[counter_key]}]"
+                ),
                 kind=kind,
+                region=region,
                 text=text,
             )
         )
 
     tables: list[ExtractedTable] = []
-    for table_index, table in enumerate(root.select("table"), start=1):
+    table_counters: dict[ContentRegion, int] = {}
+    for table in root.select("table"):
+        region = _region_for(table)
+        table_counters[region] = table_counters.get(region, 0) + 1
+        table_index = table_counters[region]
+        prefix = _region_prefix(region)
         rows: list[list[str]] = []
         for row_index, row in enumerate(table.select("tr"), start=1):
             cells: list[str] = []
@@ -80,10 +104,11 @@ def extract_html(html: str, *, base_url: str) -> Extraction:
                     blocks.append(
                         ExtractedBlock(
                             locator=(
-                                f"body/table[{table_index}]/row[{row_index}]"
+                                f"{prefix}/table[{table_index}]/row[{row_index}]"
                                 f"/cell[{cell_index}]"
                             ),
                             kind=BlockKind.TABLE_CELL,
+                            region=region,
                             text=value,
                         )
                     )
@@ -91,36 +116,54 @@ def extract_html(html: str, *, base_url: str) -> Extraction:
                 rows.append(cells)
         if rows:
             tables.append(
-                ExtractedTable(locator=f"body/table[{table_index}]", rows=rows)
+                ExtractedTable(
+                    locator=f"{prefix}/table[{table_index}]",
+                    region=region,
+                    rows=rows,
+                )
             )
 
     links: list[ExtractedLink] = []
-    for link_index, anchor in enumerate(root.select("a[href]"), start=1):
+    link_counters: dict[ContentRegion, int] = {}
+    for anchor in root.select("a[href]"):
         absolute = urljoin(base_url, str(anchor.get("href") or "").strip())
         if not absolute.startswith(("http://", "https://")):
             continue
+        region = _region_for(anchor)
+        link_counters[region] = link_counters.get(region, 0) + 1
         links.append(
             ExtractedLink(
-                locator=f"body/a[{link_index}]",
+                locator=(
+                    f"{_region_prefix(region)}/a[{link_counters[region]}]"
+                ),
+                region=region,
                 text=normalize_text(anchor.get_text(" ", strip=True)),
                 url=absolute,
             )
         )
 
     unique_blocks: list[ExtractedBlock] = []
-    seen: set[tuple[BlockKind, str]] = set()
+    seen: set[tuple[ContentRegion, BlockKind, str]] = set()
     for block in blocks:
-        key = (block.kind, block.text)
+        key = (block.region, block.kind, block.text)
         if key in seen:
             continue
         seen.add(key)
         unique_blocks.append(block)
 
     text = "\n".join(block.text for block in unique_blocks)
+    canonical = soup.select_one("link[rel~='canonical'][href]")
+    declared_canonical_url = None
+    if canonical is not None:
+        candidate = urljoin(base_url, str(canonical.get("href") or "").strip())
+        if candidate.startswith(("http://", "https://")):
+            declared_canonical_url = candidate
+
     return Extraction(
         title=title or (unique_blocks[0].text[:1_000] if unique_blocks else "Документ"),
         text=text,
         blocks=unique_blocks,
         links=links,
         tables=tables,
+        declared_canonical_url=declared_canonical_url,
     )

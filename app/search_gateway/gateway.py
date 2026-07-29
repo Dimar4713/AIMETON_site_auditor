@@ -15,6 +15,7 @@ from app.search_gateway.models import (
     GatewayState,
     ProviderAttempt,
     ProviderHealth,
+    ProviderReadiness,
     SearchDiagnostics,
     SearchItem,
     SearchPolicy,
@@ -121,16 +122,16 @@ class SearchGateway:
         if provider.paid and fallback and not policy.allow_paid_fallback:
             return FallbackReason.POLICY_BLOCKED
         if provider.paid and provider.cost_amount <= 0:
-            return FallbackReason.BUDGET_EXCEEDED
+            return FallbackReason.PRICING_UNKNOWN
         async with self._lock:
             quota = self._global_quotas.get(provider.name)
             if quota is not None and self._global_usage[provider.name] >= quota:
-                return FallbackReason.QUOTA_EXCEEDED
+                return FallbackReason.QUOTA_BLOCKED
             costs = self._mission_costs.setdefault(request.mission_id, {})
             current = costs.get(provider.cost_currency, Decimal("0"))
             maximum = policy.max_cost_by_currency.get(provider.cost_currency)
             if provider.cost_amount > 0 and (maximum is None or current + provider.cost_amount > maximum):
-                return FallbackReason.BUDGET_EXCEEDED
+                return FallbackReason.BUDGET_BLOCKED
             self._global_usage[provider.name] += 1
             costs[provider.cost_currency] = current + provider.cost_amount
         return None
@@ -336,17 +337,36 @@ class SearchGateway:
             ),
         )
 
-    def health(self) -> list[ProviderHealth]:
+    def health(self, policy: SearchPolicy | None = None) -> list[ProviderHealth]:
+        policy = policy or SearchPolicy()
         health: list[ProviderHealth] = []
         for name, provider in self._providers.items():
             quota = self._global_quotas.get(name)
             remaining = None if quota is None else max(0, quota - self._global_usage[name])
+            circuit_state = self._circuit_state(name)
+            maximum = policy.max_cost_by_currency.get(provider.cost_currency)
+            if not provider.configured:
+                state = ProviderReadiness.NOT_CONFIGURED
+            elif circuit_state == "open":
+                state = ProviderReadiness.CIRCUIT_OPEN
+            elif remaining == 0:
+                state = ProviderReadiness.QUOTA_BLOCKED
+            elif provider.paid and provider.cost_amount <= 0:
+                state = ProviderReadiness.PRICING_UNKNOWN
+            elif provider.paid and (
+                maximum is None or maximum < provider.cost_amount
+            ):
+                state = ProviderReadiness.BUDGET_BLOCKED
+            else:
+                state = ProviderReadiness.ACTIVE
             health.append(
                 ProviderHealth(
                     provider=name,
+                    state=state,
+                    ready=state == ProviderReadiness.ACTIVE,
                     configured=provider.configured,
                     paid=provider.paid,
-                    circuit_state=self._circuit_state(name),
+                    circuit_state=circuit_state,
                     quota_remaining=remaining,
                 )
             )

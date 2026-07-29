@@ -17,6 +17,7 @@ from app.document_pipeline.fetchers import (
     StaticHttpFetcher,
 )
 from app.document_pipeline.models import (
+    ContentRegion,
     DocumentDiagnostics,
     DocumentRequest,
     FetchPath,
@@ -66,6 +67,30 @@ def _request_fingerprint(request: DocumentRequest) -> str:
     }
     return _sha256(
         json.dumps(safe_shape, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+
+
+def _same_origin(left: str, right: str) -> bool:
+    left_parsed = urlsplit(left)
+    right_parsed = urlsplit(right)
+
+    def effective_port(parsed) -> int | None:
+        if parsed.port is not None:
+            return parsed.port
+        if parsed.scheme.lower() == "https":
+            return 443
+        if parsed.scheme.lower() == "http":
+            return 80
+        return None
+
+    return (
+        left_parsed.scheme.lower(),
+        (left_parsed.hostname or "").lower(),
+        effective_port(left_parsed),
+    ) == (
+        right_parsed.scheme.lower(),
+        (right_parsed.hostname or "").lower(),
+        effective_port(right_parsed),
     )
 
 
@@ -148,6 +173,9 @@ class DocumentPipeline:
                         fallback_used=cached.diagnostics.fallback_used,
                         raw_bytes=cached.diagnostics.raw_bytes,
                         latency_ms=0,
+                        detected_encoding=cached.diagnostics.detected_encoding,
+                        encoding_source=cached.diagnostics.encoding_source,
+                        redirect_history=cached.diagnostics.redirect_history,
                     )
                 },
                 deep=True,
@@ -172,6 +200,7 @@ class DocumentPipeline:
                     "размер",
                     "перенаправ",
                     "не является разрешённым",
+                    "encoding_undetermined",
                 )
                 if any(marker in str(exc).casefold() for marker in fail_closed_markers):
                     raise
@@ -190,7 +219,7 @@ class DocumentPipeline:
         normalized = "\n".join(
             normalize_text(block.text) for block in extraction.blocks if block.text.strip()
         )
-        raw_bytes = raw.html.encode("utf-8")
+        raw_bytes = raw.raw_content or raw.html.encode("utf-8")
         raw_digest = _sha256(raw_bytes)
         normalized_digest = digest_text(normalized)
         accessed_at = datetime.now(UTC)
@@ -219,8 +248,24 @@ class DocumentPipeline:
             normalized_content_digest=normalized_digest,
             normalized_text=normalized,
             blocks=extraction.blocks,
+            header_blocks=[
+                block
+                for block in extraction.blocks
+                if block.region == ContentRegion.HEADER
+            ],
+            footer_blocks=[
+                block
+                for block in extraction.blocks
+                if block.region == ContentRegion.FOOTER
+            ],
             links=extraction.links,
             tables=extraction.tables,
+            declared_canonical_url=extraction.declared_canonical_url,
+            canonical_same_origin=(
+                _same_origin(raw.final_url, extraction.declared_canonical_url)
+                if extraction.declared_canonical_url
+                else None
+            ),
             diagnostics=DocumentDiagnostics(
                 request_fingerprint=fingerprint,
                 path=path,
@@ -228,6 +273,9 @@ class DocumentPipeline:
                 fallback_used=fallback_used,
                 raw_bytes=len(raw_bytes),
                 latency_ms=max(0, round((time.perf_counter() - started) * 1_000)),
+                detected_encoding=raw.detected_encoding,
+                encoding_source=raw.encoding_source,
+                redirect_history=list(raw.redirect_history),
             ),
         )
         await self._cache.set(cache_key, result, policy.cache_ttl_seconds)
