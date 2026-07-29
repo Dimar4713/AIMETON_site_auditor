@@ -5,7 +5,7 @@ import re
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
@@ -39,6 +39,16 @@ from app.sef.company_profile import (
     CompanyProfileV1,
     build_company_profile_from_request,
 )
+from app.sef.report import (
+    HumanReviewedReportV1,
+    ReportBuildRequest,
+    ReportReleaseError,
+    ReportReviewPackage,
+    ReportReviewPackageRequest,
+    build_human_reviewed_report,
+    build_review_package_from_request,
+    render_report_html,
+)
 
 
 @asynccontextmanager
@@ -49,7 +59,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.9.0",
+    version="0.10.0",
     lifespan=lifespan,
 )
 app.include_router(runtime_router)
@@ -106,6 +116,8 @@ def health():
         "runtime_core": "/api/runtime",
         "search_gateway": "/api/search/health",
         "sef_company_profile": "/api/sef/company-profile",
+        "sef_report_review_package": "/api/sef/report/review-package",
+        "sef_report": "/api/sef/report",
     }
     if identity:
         payload["deployment_sha"] = identity
@@ -168,6 +180,50 @@ def sef_company_profile(req: CompanyProfileBuildRequest):
         return build_company_profile_from_request(req)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/sef/report/review-package",
+    response_model=ReportReviewPackage,
+)
+def sef_report_review_package(req: ReportReviewPackageRequest):
+    try:
+        return build_review_package_from_request(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _build_report_or_http_error(
+    req: ReportBuildRequest,
+) -> HumanReviewedReportV1:
+    try:
+        return build_human_reviewed_report(req)
+    except ReportReleaseError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "report_release_blocked",
+                "blockers": exc.blockers,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/sef/report",
+    response_model=HumanReviewedReportV1,
+)
+def sef_report(req: ReportBuildRequest):
+    return _build_report_or_http_error(req)
+
+
+@app.post(
+    "/api/sef/report.html",
+    response_class=HTMLResponse,
+)
+def sef_report_html(req: ReportBuildRequest):
+    return HTMLResponse(render_report_html(_build_report_or_http_error(req)))
 
 
 @app.post("/api/hunt")

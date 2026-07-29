@@ -95,8 +95,27 @@ Content-Type: application/json
 
 Endpoint сам пересчитывает Ledger snapshot и возвращает 14 секций, шесть
 critical-gap assessment и приложение документных доказательств. Успешный
-`profile_gate_passed` не разрешает выдачу клиенту: подписанный report и
-финальный human review добавляются в `SA-SEF-06`.
+`profile_gate_passed` сам по себе не разрешает выдачу клиенту.
+
+### Human Review и Report v1
+
+Выпуск выполняется в два шага:
+
+```http
+POST /api/sef/report/review-package
+POST /api/sef/report
+POST /api/sef/report.html
+```
+
+Первый endpoint пересчитывает Ledger и Company Profile и возвращает точные
+`profile_digest` и `evidence_appendix_digest` для проверки человеком. Два
+следующих принимают human sign-off, привязанный к этим digest, повторно
+пересчитывают snapshot и выпускают JSON либо печатный HTML только при
+прохождении fail-closed шлюза. Клиент не может передать готовый профиль,
+Ledger snapshot или `client_release_ready=true`.
+
+Контракт, reason codes и границы P0 описаны в
+[`docs/architecture/SEF_HUMAN_REVIEW_REPORT_V1.md`](docs/architecture/SEF_HUMAN_REVIEW_REPORT_V1.md).
 
 ### Запрос на охоту
 
