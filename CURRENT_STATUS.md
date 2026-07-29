@@ -22,8 +22,9 @@ _Last updated: 2026-07-29_
   чат, Issues, PR, код или логи.
 - `SA-SR-02 / #83`, Mission Orchestrator, слит PR `#92` в `main`: code merge
   SHA `7b6602c98e02a982716112b34d225e66cebc4dad`, pre-merge Baseline CI
-  `#30470034095` — success. Это факт code baseline; stage подтверждается
-  отдельно exact deployment SHA и live `/api/health`.
+  `#30470034095` — success. Live stage `/api/health` подтверждает версию
+  `0.13.0` и exact deployment SHA `7b6602c98e02a982716112b34d225e66cebc4dad`.
+  Yandex/Tavily остаются `not_configured`, SearXNG — `active`.
 
 ## Текущее положение
 
