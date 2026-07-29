@@ -90,12 +90,19 @@ POST /api/missions
 GET /api/missions/{mission_id}
 POST /api/missions/{mission_id}/plan
 POST /api/missions/{mission_id}/turns
+POST /api/missions/{mission_id}/bootstrap-crawl
 ```
 
 UI/REST/MCP используют один builder контракта. `/api/analyze` сохранён как
 backward-compatible adapter: он создаёт изолированные `mission_id` и
 `analysis_id`, записывает preliminary turn и не может объявить L0-результат
 завершённой поисковой миссией.
+
+Bootstrap crawler исполняет только выданный `crawl_url` plan. Перед запросом
+он проверяет robots, SSRF и domain allowlist, затем ограниченно получает
+главную, релевантные same-domain страницы и sitemap hints. Identity signals
+остаются `candidate`, а ссылки на PDF/DOCX — `discovery_hint`, пока документ не
+загружен и не прошёл Evidence Guard.
 
 ### Проверяемый Company Profile v1
 

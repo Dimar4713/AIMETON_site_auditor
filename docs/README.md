@@ -14,6 +14,7 @@
 - [SEF Provider Gateway v0.1 → SR-G1](architecture/SEF-PROVIDER-GATEWAY-V0.1.md) — единый контракт Yandex/SearXNG/Tavily, operational readiness, fail-closed pricing/budget/quota, fallback и безопасная телеметрия.
 - [SEF Document Fetch/Extract v0.1 → SR-G1](architecture/SEF-DOCUMENT-FETCH-EXTRACT-V0.1.md) — HTTP-first загрузка, каскад кодировок, multi-area/header/footer extraction, redirect/canonical identity, digest, locators и строгий переход `hint → document → evidence`.
 - [Mission Orchestrator v0.1](architecture/MISSION-ORCHESTRATOR-V0.1.md) — единый Mission Contract для UI/REST/MCP, типизированный `NextActionPlan`, детерминированный Policy Guard, lifecycle и trace оборотов.
+- [Evidence Crawler Bootstrap v0.1](architecture/EVIDENCE-CRAWLER-BOOTSTRAP-V0.1.md) — исполнимый bootstrap-оборот `#85`: robots/sitemap, bounded same-domain fetch, identity signals, document hints и outcome для следующего плана.
 - [SEF Claim & Evidence Ledger v0.1](architecture/SEF-CLAIM-EVIDENCE-LEDGER-V0.1.md) — evidence tiers, freshness, conflict groups, effective review и fail-closed client eligibility.
 - [SEF Company Profile v1](architecture/SEF-COMPANY-PROFILE-V0.1.md) — 14 секций, шесть критических пробелов и evidence-only проекция Ledger.
 

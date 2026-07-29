@@ -23,6 +23,7 @@ class NoCacheStaticFiles(StaticFiles):
 
 from app.company_intelligence_runtime import run_company_intelligence
 from app.discovery import run_hunt
+from app.evidence_crawler.api import router as evidence_crawler_router
 from app.external_sources import run_enriched_site_analysis
 from app.hunter_handbook import handbook
 from app.hunter_sources import get_hunter_sources
@@ -81,11 +82,12 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.13.0",
+    version="0.14.0",
     lifespan=lifespan,
 )
 app.include_router(runtime_router)
 app.include_router(mission_router)
+app.include_router(evidence_crawler_router)
 
 
 @app.middleware("http")
@@ -138,6 +140,7 @@ def health():
         "mcp_security": "public-rate-limited-admin-authenticated",
         "runtime_core": "/api/runtime",
         "mission_orchestrator": "/api/missions",
+        "bootstrap_crawler": "/api/missions/{mission_id}/bootstrap-crawl",
         "search_gateway": "/api/search/health",
         "sef_company_profile": "/api/sef/company-profile",
         "sef_report_review_package": "/api/sef/report/review-package",

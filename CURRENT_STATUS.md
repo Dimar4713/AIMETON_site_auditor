@@ -25,6 +25,10 @@ _Last updated: 2026-07-29_
   `#30470034095` — success. Live stage `/api/health` подтверждает версию
   `0.13.0` и exact deployment SHA `7b6602c98e02a982716112b34d225e66cebc4dad`.
   Yandex/Tavily остаются `not_configured`, SearXNG — `active`.
+- Активный candidate-срез `SA-SR-04 / #85`: bootstrap evidence crawler
+  реализуется в ветке `agent/sa-sr-04-evidence-crawler-bootstrap` как версия
+  `0.14.0`. До merge, CI и stage read-back это не факт stage и не завершение
+  всей `#85`.
 
 ## Текущее положение
 
