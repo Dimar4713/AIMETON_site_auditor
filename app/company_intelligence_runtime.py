@@ -124,6 +124,12 @@ async def _analyze_site_with_sources(
         )
     except Exception as exc:
         analysis = heuristic_analysis(page["final_url"], page["title"], page["text"])
+        analysis.readiness.provider_states["routerai"] = (
+            "not_configured"
+            if isinstance(exc, RuntimeError)
+            and "ROUTERAI_API_KEY" in str(exc)
+            else "failed"
+        )
         analysis.risks_and_assumptions.append(
             f"Использован резервный локальный анализ: {type(exc).__name__}."
         )

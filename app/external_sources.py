@@ -233,6 +233,12 @@ async def run_enriched_site_analysis(url: str, title: str, text: str) -> SiteAna
         analysis = await analyze_with_routerai(url, title, text, to_llm_sources(external_sources))
     except Exception as exc:
         analysis = heuristic_analysis(url, title, text)
+        analysis.readiness.provider_states["routerai"] = (
+            "not_configured"
+            if isinstance(exc, RuntimeError)
+            and "ROUTERAI_API_KEY" in str(exc)
+            else "failed"
+        )
         analysis.risks_and_assumptions.append(f"Использован резервный локальный анализ: {type(exc).__name__}.")
     analysis.risks_and_assumptions.append(
         f"Внешний поиск дал discovery_hint={len(external_sources)}; поисковые сниппеты не включены в evidence до проверки первичных документов."

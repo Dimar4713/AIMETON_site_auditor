@@ -73,6 +73,11 @@ def test_preliminary_markdown_is_structured_and_has_no_raw_html_or_chat():
     assert "<script>" not in rendered
     assert "&lt;script&gt;" in rendered
     assert "Диалог с консультантом в файл не включён." in rendered
+    assert "Client release: false" in rendered
+    assert "Analysis state: preliminary_hypothesis" in rendered
+    assert "УДП: L0" in rendered
+    assert "routerai=not_attempted" in rendered
+    assert "identity=not_searched" in rendered
 
 
 def test_preliminary_docx_is_native_editable_word_content():
@@ -85,6 +90,10 @@ def test_preliminary_docx_is_native_editable_word_content():
     assert "Официальный сайт" in text
     assert "Диалог с консультантом" in text
     assert "<script>" in text
+    assert "Client release" in text
+    assert "preliminary_hypothesis" in text
+    assert "УДП" in text
+    assert "routerai=not_attempted" in text
 
 
 def test_preliminary_export_endpoints_return_attachments():
@@ -119,4 +128,9 @@ def test_ui_exports_and_chat_are_scoped_to_active_analysis():
     assert "replacedIds.forEach(id => delete sessions[id])" in script
     assert "/api/export/analysis.md" in script
     assert "/api/export/analysis.docx" in script
+    assert "Состояние допустимости результата" in script
+    assert "client_release_eligible" in script
+    assert "legacy_result_without_release_state" in script
+    assert "Обязательные вертикали" in script
+    assert "provider_states" in script
     assert "msgNodes" not in script

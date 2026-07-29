@@ -15,6 +15,10 @@ from app.sef.ledger import (
     require_client_eligible_claims,
 )
 from app.sef.models import SEF_SCHEMA_VERSION, SefBundle
+from app.sef.release_control import (
+    MissionReleaseControl,
+    release_control_blockers,
+)
 from app.sef.exports import (
     render_report_docx,
     render_report_markdown,
@@ -42,6 +46,7 @@ __all__ = [
     "HumanReviewedReportV1",
     "LedgerRequest",
     "LedgerSnapshot",
+    "MissionReleaseControl",
     "ReportBuildRequest",
     "ReportReviewPackage",
     "ReportReviewPackageRequest",
@@ -56,5 +61,6 @@ __all__ = [
     "render_report_markdown",
     "render_site_analysis_docx",
     "render_site_analysis_markdown",
+    "release_control_blockers",
     "require_client_eligible_claims",
 ]

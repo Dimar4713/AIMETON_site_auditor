@@ -117,6 +117,27 @@ def render_site_analysis_markdown(analysis: SiteAnalysis) -> str:
         f"**Компания:** {_md_text(analysis.company_name)}  ",
         f"**Сайт:** {_markdown_url(analysis.url)}",
         "",
+        "## Состояние допустимости",
+        "",
+        f"- Analysis state: {analysis.readiness.analysis_state}",
+        f"- Client release: "
+        f"{str(analysis.readiness.client_release_eligible).lower()}",
+        f"- УДП: {analysis.readiness.sufficiency_level}",
+        f"- Identity: {analysis.readiness.identity_state}",
+        f"- Полнота профиля: "
+        f"{analysis.readiness.profile_completeness:.0%}",
+        f"- Качество evidence: "
+        f"{analysis.readiness.evidence_quality:.0%}",
+        f"- Коммерческий приоритет: "
+        f"{analysis.readiness.commercial_priority}/100",
+        f"- Budget: {analysis.readiness.budget_state}",
+        f"- Providers: "
+        f"{', '.join(f'{key}={value}' for key, value in sorted(analysis.readiness.provider_states.items())) or 'not_reported'}",
+        f"- Обязательные вертикали: "
+        f"{', '.join(f'{item.code}={item.state}' for item in analysis.readiness.required_verticals) or 'not_reported'}",
+        f"- Блокеры: "
+        f"{', '.join(analysis.readiness.release_blockers) or '—'}",
+        "",
         _md_text(analysis.business_summary),
         "",
         "## Коммерческая возможность",
@@ -276,6 +297,15 @@ def render_report_markdown(report: HumanReviewedReportV1) -> str:
         f"- Элементов доказательств: {report.summary.evidence_items}",
         f"- Закрыто критических пробелов: "
         f"{report.summary.closed_critical_gaps}/6",
+        f"- УДП: {report.summary.achieved_sufficiency.value} "
+        f"(target {report.summary.target_sufficiency.value})",
+        f"- Идентичность: {report.summary.identity_state.value}",
+        f"- Целостность исполнения: "
+        f"{report.summary.execution_integrity.value}",
+        f"- Полнота профиля: {report.summary.profile_completeness:.0%}",
+        f"- Качество evidence: {report.summary.evidence_quality:.0%}",
+        f"- Коммерческий приоритет: "
+        f"{report.summary.commercial_priority}/100",
         "",
     ]
     for section in report.sections:
@@ -364,6 +394,8 @@ def render_report_markdown(report: HumanReviewedReportV1) -> str:
             f"- Profile: `{report.integrity.profile_digest}`",
             f"- Evidence appendix: "
             f"`{report.integrity.evidence_appendix_digest}`",
+            f"- Release control: "
+            f"`{report.integrity.release_control_digest}`",
             f"- Sign-off: `{report.integrity.sign_off_digest}`",
             f"- Report: `{report.integrity.report_content_digest}`",
             "",
@@ -750,6 +782,57 @@ def render_site_analysis_docx(analysis: SiteAnalysis) -> bytes:
     _add_hyperlink(url_paragraph, analysis.url)
     document.add_paragraph(analysis.business_summary)
 
+    document.add_heading("Состояние допустимости", level=1)
+    _add_table(
+        document,
+        ("Показатель", "Значение"),
+        (
+            ("Analysis state", analysis.readiness.analysis_state),
+            (
+                "Client release",
+                str(analysis.readiness.client_release_eligible).lower(),
+            ),
+            ("УДП", analysis.readiness.sufficiency_level),
+            ("Identity", analysis.readiness.identity_state),
+            (
+                "Полнота профиля",
+                f"{analysis.readiness.profile_completeness:.0%}",
+            ),
+            (
+                "Качество evidence",
+                f"{analysis.readiness.evidence_quality:.0%}",
+            ),
+            (
+                "Коммерческий приоритет",
+                f"{analysis.readiness.commercial_priority}/100",
+            ),
+            ("Budget", analysis.readiness.budget_state),
+            (
+                "Providers",
+                ", ".join(
+                    f"{key}={value}"
+                    for key, value in sorted(
+                        analysis.readiness.provider_states.items()
+                    )
+                )
+                or "not_reported",
+            ),
+            (
+                "Обязательные вертикали",
+                ", ".join(
+                    f"{item.code}={item.state}"
+                    for item in analysis.readiness.required_verticals
+                )
+                or "not_reported",
+            ),
+            (
+                "Блокеры",
+                ", ".join(analysis.readiness.release_blockers) or "—",
+            ),
+        ),
+        (2700, 6660),
+    )
+
     opportunity = analysis.commercial_opportunity
     document.add_heading("Коммерческая возможность", level=1)
     _add_table(
@@ -940,6 +1023,28 @@ def render_report_docx(report: HumanReviewedReportV1) -> bytes:
                 "Закрыто критических пробелов",
                 f"{report.summary.closed_critical_gaps}/6",
             ),
+            (
+                "УДП",
+                f"{report.summary.achieved_sufficiency.value} "
+                f"(target {report.summary.target_sufficiency.value})",
+            ),
+            ("Идентичность", report.summary.identity_state.value),
+            (
+                "Целостность исполнения",
+                report.summary.execution_integrity.value,
+            ),
+            (
+                "Полнота профиля",
+                f"{report.summary.profile_completeness:.0%}",
+            ),
+            (
+                "Качество evidence",
+                f"{report.summary.evidence_quality:.0%}",
+            ),
+            (
+                "Коммерческий приоритет",
+                f"{report.summary.commercial_priority}/100",
+            ),
         ),
         (4700, 4660),
     )
@@ -1056,6 +1161,12 @@ def render_report_docx(report: HumanReviewedReportV1) -> bytes:
         document,
         "Evidence appendix",
         report.integrity.evidence_appendix_digest,
+        code=True,
+    )
+    _add_key_value(
+        document,
+        "Release control",
+        report.integrity.release_control_digest,
         code=True,
     )
     _add_key_value(

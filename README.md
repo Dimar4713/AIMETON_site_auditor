@@ -110,8 +110,10 @@ POST /api/sef/report.docx
 ```
 
 Первый endpoint пересчитывает Ledger и Company Profile и возвращает точные
-`profile_digest` и `evidence_appendix_digest` для проверки человеком. Два
-следующие принимают human sign-off, привязанный к этим digest, повторно
+`profile_digest`, `evidence_appendix_digest` и `release_control_digest` для
+проверки человеком. Release control показывает фактические УДП, identity,
+execution integrity, обязательные вертикали, providers и budget. Следующие
+endpoints принимают human sign-off, привязанный к этим digest, повторно
 пересчитывают snapshot и выпускают JSON, печатный HTML, Markdown или
 редактируемый Word `.docx` только при прохождении fail-closed шлюза. Клиент не
 может передать готовый профиль, Ledger snapshot или
@@ -122,7 +124,9 @@ Word. PDF больше не включает диалог с консульта�
 из структурированного объекта анализа и явно помечаются как предварительные;
 они не заменяют подписанный Report v1. Диалог хранится отдельно для каждого
 `analysis_id`, поэтому переключение истории не смешивает сообщения разных
-компаний.
+компаний. Эвристический fallback маркируется как `preliminary_hypothesis`, а
+UI/API/экспорт раздельно показывают УДП, identity, полноту профиля, качество
+evidence, коммерческий приоритет, budget и физические блокеры выпуска.
 
 Контракт, reason codes и границы P0 описаны в
 [`docs/architecture/SEF_HUMAN_REVIEW_REPORT_V1.md`](docs/architecture/SEF_HUMAN_REVIEW_REPORT_V1.md).

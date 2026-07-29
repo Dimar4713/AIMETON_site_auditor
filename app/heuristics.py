@@ -3,6 +3,7 @@ from app.models import (
     AgentRecommendation,
     CommercialOpportunity,
     EconomicSignal,
+    PreliminaryResultReadiness,
     SiteAnalysis,
 )
 
@@ -131,4 +132,18 @@ def heuristic_analysis(url: str, title: str, text: str) -> SiteAnalysis:
             "Коммерческие потери являются гипотезой до подтверждения интервью или данными компании.",
             "Контакт допускается только по публичным деловым каналам без массового спама.",
         ],
+        readiness=PreliminaryResultReadiness(
+            analysis_state="preliminary_hypothesis",
+            commercial_priority=score,
+            release_blockers=[
+                "preliminary_result",
+                "analysis_preliminary_hypothesis",
+                "identity_unresolved",
+                "sufficiency_below_l4",
+                "mandatory_verticals_not_searched",
+                "provider_state_unknown",
+                "budget_unknown",
+                "human_review_and_signed_report_required",
+            ],
+        ),
     )

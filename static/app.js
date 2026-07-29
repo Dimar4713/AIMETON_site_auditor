@@ -326,6 +326,19 @@ function render() {
   const facts = analysis.company_facts || [];
   const machine = analysis.business_machine_4x4 || [];
   const sources = analysis.sources || [];
+  const readiness = analysis.readiness || {
+    analysis_state: 'preliminary_hypothesis',
+    client_release_eligible: false,
+    sufficiency_level: 'L0',
+    identity_state: 'unresolved',
+    profile_completeness: 0,
+    evidence_quality: 0,
+    commercial_priority: o.score || 0,
+    budget_state: 'unknown',
+    provider_states: {},
+    required_verticals: [],
+    release_blockers: ['legacy_result_without_release_state']
+  };
 
   const score = Number(o.score) || 0;
   const scoreClass = score >= 70 ? 'high' : score >= 40 ? 'mid' : 'low';
@@ -349,6 +362,25 @@ function render() {
         Этот анализ ещё не является подписанным Report v1 и не прошёл human sign-off.
         Диалог консультанта хранится отдельно и в экспорт не включается.
       </div>
+
+      <section class="panel">
+        <h3>Состояние допустимости результата</h3>
+        <p>
+          <strong>Выпуск клиенту:</strong> ${readiness.client_release_eligible ? 'разрешён' : 'заблокирован'} ·
+          <strong>AI-анализ:</strong> ${esc(readiness.analysis_state)} ·
+          <strong>УДП:</strong> ${esc(readiness.sufficiency_level)} ·
+          <strong>Identity:</strong> ${esc(readiness.identity_state)}
+        </p>
+        <p>
+          <strong>Полнота профиля:</strong> ${Math.round((Number(readiness.profile_completeness) || 0) * 100)}% ·
+          <strong>Качество evidence:</strong> ${Math.round((Number(readiness.evidence_quality) || 0) * 100)}% ·
+          <strong>Коммерческий приоритет:</strong> ${esc(readiness.commercial_priority)}/100 ·
+          <strong>Budget:</strong> ${esc(readiness.budget_state)}
+        </p>
+        <p><strong>Providers:</strong> ${esc(Object.entries(readiness.provider_states || {}).map(([key, value]) => `${key}=${value}`).join(', ') || 'not_reported')}</p>
+        <p><strong>Обязательные вертикали:</strong> ${esc((readiness.required_verticals || []).map(item => `${item.code}=${item.state}`).join(', ') || 'not_reported')}</p>
+        <p><strong>Блокеры:</strong> ${esc((readiness.release_blockers || []).join(', ') || '—')}</p>
+      </section>
 
       <!-- Company card -->
       <div class="company-card">
