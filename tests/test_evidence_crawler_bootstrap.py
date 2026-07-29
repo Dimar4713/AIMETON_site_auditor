@@ -184,6 +184,10 @@ async def test_bootstrap_turn_respects_robots_and_feeds_identity_replan(
     assert [str(url) for url in result.blocked_urls] == [
         "https://example.test/private"
     ]
+    assert all(page.accessed_at for page in result.pages)
+    assert all(page.media_type == "text/html" for page in result.pages)
+    assert all(page.fetch_path == "static" for page in result.pages)
+    assert all(page.title for page in result.pages)
     values = {(signal.kind, signal.value) for signal in result.identity_signals}
     assert ("inn", "2400000000") in values
     assert ("ogrn", "1022400000000") in values

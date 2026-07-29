@@ -555,8 +555,15 @@ class BootstrapEvidenceCrawler:
                     depth=depth,
                     page_type=page_type,
                     document_id=fetched.document.id,
+                    title=fetched.document.title,
+                    accessed_at=fetched.document.accessed_at,
+                    media_type=fetched.document.media_type,
+                    fetch_path=fetched.diagnostics.path,
                     raw_content_digest=fetched.raw_content_digest,
                     normalized_content_digest=fetched.normalized_content_digest,
+                    declared_canonical_url=fetched.declared_canonical_url,
+                    canonical_same_origin=fetched.canonical_same_origin,
+                    redirect_history=fetched.diagnostics.redirect_history,
                     link_count=len(fetched.links),
                 )
             )

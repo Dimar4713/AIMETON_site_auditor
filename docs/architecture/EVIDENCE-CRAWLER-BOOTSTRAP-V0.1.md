@@ -44,8 +44,9 @@ POST /api/missions/{mission_id}/bootstrap-crawl
 
 - связь `mission_id / analysis_id / correlation_id`;
 - состояние robots и обработанные sitemap URL;
-- страницы с requested/final URL, depth, page type, document ID,
-  raw/normalized digest;
+- страницы с requested/final/canonical URL, depth, page type, document ID,
+  title, accessed_at, media type, fetch path, redirect trace и raw/normalized
+  digest;
 - identity signals с document ID и locator;
 - ссылки на первичные документы с исходным документом и locator;
 - blocked/failed/discovered URL;

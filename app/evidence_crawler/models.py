@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
+from app.document_pipeline.models import FetchPath, RedirectHop
 from app.mission_orchestrator.models import (
     ActionCandidate,
     ActionOutcome,
@@ -71,8 +73,15 @@ class CrawledPage(CrawlerModel):
     depth: int = Field(ge=0)
     page_type: PageType
     document_id: Identifier
+    title: str = Field(min_length=1, max_length=1_000)
+    accessed_at: datetime
+    media_type: str = Field(min_length=1, max_length=200)
+    fetch_path: FetchPath
     raw_content_digest: Digest
     normalized_content_digest: Digest
+    declared_canonical_url: AnyHttpUrl | None = None
+    canonical_same_origin: bool | None = None
+    redirect_history: list[RedirectHop] = Field(default_factory=list)
     link_count: int = Field(ge=0)
 
 
