@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import os
 import unittest
 from unittest.mock import patch
 
@@ -54,6 +55,22 @@ def project() -> dict:
 
 
 class ProjectStatusDateTests(unittest.TestCase):
+    def test_repair_context_accepts_empty_event_item_number(self):
+        environment = {
+            "GH_TOKEN": "token",
+            "PROJECT_OWNER": "owner",
+            "PROJECT_NUMBER": "1",
+            "OPERATION": "repair_roadmap",
+            "DRY_RUN": "true",
+            "ITEM_NUMBER": "",
+        }
+
+        with patch.dict(os.environ, environment, clear=True):
+            ctx = sync.load_context()
+
+        self.assertEqual(ctx.operation, "repair_roadmap")
+        self.assertEqual(ctx.item_number, 0)
+
     def test_first_in_progress_transition_sets_actual_start_once(self):
         ctx = context()
         first = sync.determine_actual_date_updates(
