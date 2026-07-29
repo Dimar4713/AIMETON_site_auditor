@@ -25,9 +25,16 @@ from app.sef.models import (
     ReviewDecisionValue,
     SefBundle,
 )
+from app.sef.release_control import (
+    ExecutionIntegrityState,
+    IdentityResolutionState,
+    MissionReleaseControl,
+    SufficiencyLevel,
+    release_control_blockers,
+)
 
 
-REPORT_SCHEMA_VERSION = "1.0.0"
+REPORT_SCHEMA_VERSION = "1.1.0"
 
 
 class ReportModel(BaseModel):
@@ -38,6 +45,7 @@ class ReportReviewPackageRequest(ReportModel):
     bundle: SefBundle
     ledger_request: LedgerRequest
     entity_id: Identifier
+    release_control: MissionReleaseControl
 
 
 class HumanReviewInput(ReportModel):
@@ -48,6 +56,7 @@ class HumanReviewInput(ReportModel):
     attested: bool
     reviewed_profile_digest: Digest
     reviewed_evidence_appendix_digest: Digest
+    reviewed_release_control_digest: Digest
 
     @model_validator(mode="after")
     def decided_at_is_timezone_aware(self) -> HumanReviewInput:
@@ -70,10 +79,12 @@ class ReportBuildRequest(ReportReviewPackageRequest):
 
 
 class ReportReviewPackage(ReportModel):
-    schema_version: Literal["1.0.0"] = REPORT_SCHEMA_VERSION
+    schema_version: Literal["1.1.0"] = REPORT_SCHEMA_VERSION
     profile: CompanyProfileV1
     profile_digest: Digest
     evidence_appendix_digest: Digest
+    release_control: MissionReleaseControl
+    release_control_digest: Digest
     reviewable: bool
     blockers: list[str] = Field(default_factory=list)
 
@@ -86,6 +97,7 @@ class HumanSignOff(ReportModel):
     attested: Literal[True]
     reviewed_profile_digest: Digest
     reviewed_evidence_appendix_digest: Digest
+    reviewed_release_control_digest: Digest
     sign_off_digest: Digest
 
 
@@ -99,6 +111,7 @@ class ReportIntegrity(ReportModel):
     canonicalization: Literal["json-sort-keys-utf8-v1"] = "json-sort-keys-utf8-v1"
     profile_digest: Digest
     evidence_appendix_digest: Digest
+    release_control_digest: Digest
     sign_off_digest: Digest
     report_content_digest: Digest
 
@@ -108,6 +121,13 @@ class ReportReleaseSummary(ReportModel):
     human_review_approved: Literal[True] = True
     review_bound_to_snapshot: Literal[True] = True
     client_release_ready: Literal[True] = True
+    target_sufficiency: SufficiencyLevel
+    achieved_sufficiency: SufficiencyLevel
+    identity_state: IdentityResolutionState
+    execution_integrity: ExecutionIntegrityState
+    profile_completeness: float = Field(ge=0, le=1)
+    evidence_quality: float = Field(ge=0, le=1)
+    commercial_priority: int = Field(ge=0, le=100)
     released_claims: int = Field(ge=1)
     evidence_items: int = Field(ge=1)
     closed_critical_gaps: int = Field(ge=6, le=6)
@@ -122,7 +142,7 @@ class HumanReviewedReportV1(ReportModel):
         },
     )
 
-    schema_version: Literal["1.0.0"] = REPORT_SCHEMA_VERSION
+    schema_version: Literal["1.1.0"] = REPORT_SCHEMA_VERSION
     id: Identifier
     version: int = Field(ge=1)
     mission_id: Identifier
@@ -188,8 +208,12 @@ def canonical_digest(value: Any) -> str:
 
 def build_review_package(
     profile: CompanyProfileV1,
+    release_control: MissionReleaseControl,
 ) -> ReportReviewPackage:
-    blockers: list[str] = []
+    blockers = release_control_blockers(
+        release_control,
+        mission_id=profile.mission_id,
+    )
     if not profile.summary.profile_gate_passed:
         blockers.append("company_profile_gate_not_passed")
     if profile.summary.hypothesis_fields:
@@ -202,6 +226,8 @@ def build_review_package(
         profile=profile,
         profile_digest=canonical_digest(profile),
         evidence_appendix_digest=canonical_digest(profile.evidence_appendix),
+        release_control=release_control,
+        release_control_digest=canonical_digest(release_control),
         reviewable=not blockers,
         blockers=sorted(blockers),
     )
@@ -217,7 +243,7 @@ def build_review_package_from_request(
             entity_id=request.entity_id,
         )
     )
-    return build_review_package(profile)
+    return build_review_package(profile, request.release_control)
 
 
 def _release_blockers(
@@ -238,6 +264,11 @@ def _release_blockers(
         != package.evidence_appendix_digest
     ):
         blockers.append("review_evidence_appendix_digest_mismatch")
+    if (
+        review.reviewed_release_control_digest
+        != package.release_control_digest
+    ):
+        blockers.append("review_release_control_digest_mismatch")
     if request.generated_at < profile.as_of:
         blockers.append("report_generated_before_profile_snapshot")
     if review.decided_at < profile.as_of:
@@ -313,6 +344,9 @@ def build_human_reviewed_report(
         "reviewed_evidence_appendix_digest": (
             request.review.reviewed_evidence_appendix_digest
         ),
+        "reviewed_release_control_digest": (
+            request.review.reviewed_release_control_digest
+        ),
     }
     sign_off_digest = canonical_digest(sign_off_payload)
     sign_off = HumanSignOff(
@@ -341,6 +375,7 @@ def build_human_reviewed_report(
             item.model_dump(mode="json") for item in appendix
         ],
         "human_sign_off": sign_off.model_dump(mode="json"),
+        "release_control": package.release_control.model_dump(mode="json"),
     }
     report_content_digest = canonical_digest(content)
     report_id = f"report_{report_content_digest.removeprefix('sha256:')[:24]}"
@@ -364,10 +399,18 @@ def build_human_reviewed_report(
         integrity=ReportIntegrity(
             profile_digest=package.profile_digest,
             evidence_appendix_digest=package.evidence_appendix_digest,
+            release_control_digest=package.release_control_digest,
             sign_off_digest=sign_off_digest,
             report_content_digest=report_content_digest,
         ),
         summary=ReportReleaseSummary(
+            target_sufficiency=package.release_control.target_sufficiency,
+            achieved_sufficiency=package.release_control.achieved_sufficiency,
+            identity_state=package.release_control.identity_state,
+            execution_integrity=package.release_control.execution_integrity,
+            profile_completeness=package.release_control.profile_completeness,
+            evidence_quality=package.release_control.evidence_quality,
+            commercial_priority=package.release_control.commercial_priority,
             released_claims=len(claim_ids),
             evidence_items=len(appendix),
             closed_critical_gaps=sum(
@@ -445,6 +488,9 @@ code {{ overflow-wrap: anywhere; }}
 <p><strong>Компания:</strong> {html.escape(report.canonical_name)}</p>
 <p><strong>Версия:</strong> {report.version}; <strong>Report ID:</strong> <code>{html.escape(report.id)}</code></p>
 <p><strong>Snapshot:</strong> {html.escape(report.as_of.isoformat())}; <strong>Сформирован:</strong> {html.escape(report.generated_at.isoformat())}</p>
+<p><strong>УДП:</strong> {html.escape(report.summary.achieved_sufficiency.value)} / target {html.escape(report.summary.target_sufficiency.value)}</p>
+<p><strong>Идентичность:</strong> {html.escape(report.summary.identity_state.value)}; <strong>исполнение:</strong> {html.escape(report.summary.execution_integrity.value)}</p>
+<p><strong>Полнота профиля:</strong> {report.summary.profile_completeness:.0%}; <strong>качество evidence:</strong> {report.summary.evidence_quality:.0%}; <strong>коммерческий приоритет:</strong> {report.summary.commercial_priority}/100</p>
 </div>
 {''.join(section_html)}
 <section>
@@ -462,6 +508,7 @@ code {{ overflow-wrap: anywhere; }}
 <h2>Контроль целостности</h2>
 <p><strong>Profile:</strong> <code>{html.escape(report.integrity.profile_digest)}</code></p>
 <p><strong>Evidence appendix:</strong> <code>{html.escape(report.integrity.evidence_appendix_digest)}</code></p>
+<p><strong>Release control:</strong> <code>{html.escape(report.integrity.release_control_digest)}</code></p>
 <p><strong>Report:</strong> <code>{html.escape(report.integrity.report_content_digest)}</code></p>
 </div>
 </body>

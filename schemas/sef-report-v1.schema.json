@@ -1,5 +1,23 @@
 {
   "$defs": {
+    "AnalysisState": {
+      "enum": [
+        "schema_validated",
+        "preliminary_hypothesis",
+        "validation_error"
+      ],
+      "title": "AnalysisState",
+      "type": "string"
+    },
+    "BudgetState": {
+      "enum": [
+        "within_budget",
+        "unknown",
+        "exhausted"
+      ],
+      "title": "BudgetState",
+      "type": "string"
+    },
     "Claim": {
       "additionalProperties": false,
       "properties": {
@@ -1020,6 +1038,16 @@
       "title": "EvidenceTier",
       "type": "string"
     },
+    "ExecutionIntegrityState": {
+      "enum": [
+        "validated",
+        "degraded",
+        "blocked",
+        "validation_error"
+      ],
+      "title": "ExecutionIntegrityState",
+      "type": "string"
+    },
     "FreshnessState": {
       "enum": [
         "current",
@@ -1061,6 +1089,11 @@
           "title": "Reviewed Profile Digest",
           "type": "string"
         },
+        "reviewed_release_control_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Reviewed Release Control Digest",
+          "type": "string"
+        },
         "reviewer_ref": {
           "maxLength": 200,
           "minLength": 1,
@@ -1075,7 +1108,8 @@
         "decided_at",
         "attested",
         "reviewed_profile_digest",
-        "reviewed_evidence_appendix_digest"
+        "reviewed_evidence_appendix_digest",
+        "reviewed_release_control_digest"
       ],
       "title": "HumanReviewInput",
       "type": "object"
@@ -1163,8 +1197,8 @@
           "type": "string"
         },
         "schema_version": {
-          "const": "1.0.0",
-          "default": "1.0.0",
+          "const": "1.1.0",
+          "default": "1.1.0",
           "title": "Schema Version",
           "type": "string"
         },
@@ -1246,6 +1280,11 @@
           "title": "Reviewed Profile Digest",
           "type": "string"
         },
+        "reviewed_release_control_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Reviewed Release Control Digest",
+          "type": "string"
+        },
         "reviewer_ref": {
           "maxLength": 200,
           "minLength": 1,
@@ -1266,10 +1305,21 @@
         "attested",
         "reviewed_profile_digest",
         "reviewed_evidence_appendix_digest",
+        "reviewed_release_control_digest",
         "sign_off_digest"
       ],
       "title": "HumanSignOff",
       "type": "object"
+    },
+    "IdentityResolutionState": {
+      "enum": [
+        "resolved",
+        "provisional",
+        "unresolved",
+        "conflicting"
+      ],
+      "title": "IdentityResolutionState",
+      "type": "string"
     },
     "LedgerPolicy": {
       "additionalProperties": false,
@@ -1406,6 +1456,109 @@
         "updated_at"
       ],
       "title": "Mission",
+      "type": "object"
+    },
+    "MissionReleaseControl": {
+      "additionalProperties": false,
+      "description": "Fail-closed release snapshot produced by the mission runtime.\n\nSA-SR-00 introduces this server-owned boundary before the full Mission\nOrchestrator and sufficiency evaluator exist. Later stages populate the same\ncontract; Report v1 never infers readiness from profile completeness.",
+      "properties": {
+        "achieved_sufficiency": {
+          "$ref": "#/$defs/SufficiencyLevel"
+        },
+        "analysis_state": {
+          "$ref": "#/$defs/AnalysisState"
+        },
+        "budget_state": {
+          "$ref": "#/$defs/BudgetState"
+        },
+        "commercial_priority": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Commercial Priority",
+          "type": "integer"
+        },
+        "evaluated_at": {
+          "format": "date-time",
+          "title": "Evaluated At",
+          "type": "string"
+        },
+        "evidence_quality": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Evidence Quality",
+          "type": "number"
+        },
+        "execution_integrity": {
+          "$ref": "#/$defs/ExecutionIntegrityState"
+        },
+        "identity_state": {
+          "$ref": "#/$defs/IdentityResolutionState"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "profile_completeness": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Profile Completeness",
+          "type": "number"
+        },
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/ProviderReadiness"
+          },
+          "title": "Providers",
+          "type": "array"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "required_verticals": {
+          "items": {
+            "$ref": "#/$defs/RequiredVerticalStatus"
+          },
+          "minItems": 1,
+          "title": "Required Verticals",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "target_sufficiency": {
+          "$ref": "#/$defs/SufficiencyLevel"
+        },
+        "unresolved_critical_conflicts": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unresolved Critical Conflicts",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mission_id",
+        "evaluated_at",
+        "target_sufficiency",
+        "achieved_sufficiency",
+        "identity_state",
+        "execution_integrity",
+        "analysis_state",
+        "required_verticals",
+        "budget_state",
+        "profile_completeness",
+        "evidence_quality",
+        "commercial_priority"
+      ],
+      "title": "MissionReleaseControl",
       "type": "object"
     },
     "MissionState": {
@@ -1684,6 +1837,51 @@
       "title": "ProviderCallState",
       "type": "string"
     },
+    "ProviderReadiness": {
+      "additionalProperties": false,
+      "properties": {
+        "provider_ref": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Provider Ref",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/ProviderReadinessState"
+        }
+      },
+      "required": [
+        "provider_ref",
+        "state"
+      ],
+      "title": "ProviderReadiness",
+      "type": "object"
+    },
+    "ProviderReadinessState": {
+      "enum": [
+        "active",
+        "not_configured",
+        "pricing_unknown",
+        "budget_blocked",
+        "quota_blocked",
+        "circuit_open",
+        "failed"
+      ],
+      "title": "ProviderReadinessState",
+      "type": "string"
+    },
     "Report": {
       "additionalProperties": false,
       "properties": {
@@ -1762,6 +1960,9 @@
         "ledger_request": {
           "$ref": "#/$defs/LedgerRequest"
         },
+        "release_control": {
+          "$ref": "#/$defs/MissionReleaseControl"
+        },
         "review": {
           "$ref": "#/$defs/HumanReviewInput"
         },
@@ -1782,6 +1983,7 @@
         "bundle",
         "ledger_request",
         "entity_id",
+        "release_control",
         "review",
         "generated_at",
         "title"
@@ -1808,6 +2010,11 @@
           "title": "Profile Digest",
           "type": "string"
         },
+        "release_control_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Release Control Digest",
+          "type": "string"
+        },
         "report_content_digest": {
           "pattern": "^sha256:[0-9a-f]{64}$",
           "title": "Report Content Digest",
@@ -1822,6 +2029,7 @@
       "required": [
         "profile_digest",
         "evidence_appendix_digest",
+        "release_control_digest",
         "sign_off_digest",
         "report_content_digest"
       ],
@@ -1831,6 +2039,9 @@
     "ReportReleaseSummary": {
       "additionalProperties": false,
       "properties": {
+        "achieved_sufficiency": {
+          "$ref": "#/$defs/SufficiencyLevel"
+        },
         "client_release_ready": {
           "const": true,
           "default": true,
@@ -1843,16 +2054,40 @@
           "title": "Closed Critical Gaps",
           "type": "integer"
         },
+        "commercial_priority": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Commercial Priority",
+          "type": "integer"
+        },
         "evidence_items": {
           "minimum": 1,
           "title": "Evidence Items",
           "type": "integer"
+        },
+        "evidence_quality": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Evidence Quality",
+          "type": "number"
+        },
+        "execution_integrity": {
+          "$ref": "#/$defs/ExecutionIntegrityState"
         },
         "human_review_approved": {
           "const": true,
           "default": true,
           "title": "Human Review Approved",
           "type": "boolean"
+        },
+        "identity_state": {
+          "$ref": "#/$defs/IdentityResolutionState"
+        },
+        "profile_completeness": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Profile Completeness",
+          "type": "number"
         },
         "profile_gate_passed": {
           "const": true,
@@ -1870,9 +2105,19 @@
           "default": true,
           "title": "Review Bound To Snapshot",
           "type": "boolean"
+        },
+        "target_sufficiency": {
+          "$ref": "#/$defs/SufficiencyLevel"
         }
       },
       "required": [
+        "target_sufficiency",
+        "achieved_sufficiency",
+        "identity_state",
+        "execution_integrity",
+        "profile_completeness",
+        "evidence_quality",
+        "commercial_priority",
         "released_claims",
         "evidence_items",
         "closed_critical_gaps"
@@ -1903,13 +2148,21 @@
           "title": "Profile Digest",
           "type": "string"
         },
+        "release_control": {
+          "$ref": "#/$defs/MissionReleaseControl"
+        },
+        "release_control_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Release Control Digest",
+          "type": "string"
+        },
         "reviewable": {
           "title": "Reviewable",
           "type": "boolean"
         },
         "schema_version": {
-          "const": "1.0.0",
-          "default": "1.0.0",
+          "const": "1.1.0",
+          "default": "1.1.0",
           "title": "Schema Version",
           "type": "string"
         }
@@ -1918,6 +2171,8 @@
         "profile",
         "profile_digest",
         "evidence_appendix_digest",
+        "release_control",
+        "release_control_digest",
         "reviewable"
       ],
       "title": "ReportReviewPackage",
@@ -1937,12 +2192,16 @@
         },
         "ledger_request": {
           "$ref": "#/$defs/LedgerRequest"
+        },
+        "release_control": {
+          "$ref": "#/$defs/MissionReleaseControl"
         }
       },
       "required": [
         "bundle",
         "ledger_request",
-        "entity_id"
+        "entity_id",
+        "release_control"
       ],
       "title": "ReportReviewPackageRequest",
       "type": "object"
@@ -1970,6 +2229,38 @@
         "title"
       ],
       "title": "ReportSection",
+      "type": "object"
+    },
+    "RequiredVerticalStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/VerticalState"
+        }
+      },
+      "required": [
+        "code",
+        "state"
+      ],
+      "title": "RequiredVerticalStatus",
       "type": "object"
     },
     "ReviewDecision": {
@@ -2298,6 +2589,31 @@
         "manual"
       ],
       "title": "SourceKind",
+      "type": "string"
+    },
+    "SufficiencyLevel": {
+      "enum": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5"
+      ],
+      "title": "SufficiencyLevel",
+      "type": "string"
+    },
+    "VerticalState": {
+      "enum": [
+        "verified",
+        "partially_verified",
+        "conflicting",
+        "not_found_after_sufficient_search",
+        "not_searched",
+        "blocked",
+        "degraded"
+      ],
+      "title": "VerticalState",
       "type": "string"
     }
   },

@@ -107,6 +107,63 @@ class ActionPackage(BaseModel):
     next_action: str
 
 
+class PreliminaryVerticalStatus(BaseModel):
+    code: str
+    state: Literal[
+        "verified",
+        "partially_verified",
+        "not_found_after_sufficient_search",
+        "not_searched",
+        "blocked",
+        "degraded",
+    ] = "not_searched"
+
+
+class PreliminaryResultReadiness(BaseModel):
+    result_status: Literal["preliminary"] = "preliminary"
+    analysis_state: Literal[
+        "schema_validated",
+        "preliminary_hypothesis",
+        "validation_error",
+    ] = "preliminary_hypothesis"
+    client_release_eligible: Literal[False] = False
+    sufficiency_level: Literal["L0", "L1", "L2", "L3", "L4", "L5"] = "L0"
+    identity_state: Literal[
+        "resolved",
+        "provisional",
+        "unresolved",
+        "conflicting",
+    ] = "unresolved"
+    profile_completeness: float = Field(default=0, ge=0, le=1)
+    evidence_quality: float = Field(default=0, ge=0, le=1)
+    commercial_priority: int = Field(default=0, ge=0, le=100)
+    required_verticals: list[PreliminaryVerticalStatus] = Field(
+        default_factory=lambda: [
+            PreliminaryVerticalStatus(code=code)
+            for code in (
+                "identity",
+                "contacts",
+                "workforce",
+                "financials",
+                "ownership",
+                "legal_events",
+            )
+        ]
+    )
+    provider_states: dict[str, str] = Field(
+        default_factory=lambda: {"routerai": "not_attempted"}
+    )
+    budget_state: Literal["within_budget", "unknown", "exhausted"] = "unknown"
+    release_blockers: list[str] = Field(
+        default_factory=lambda: [
+            "preliminary_result",
+            "identity_unresolved",
+            "sufficiency_below_l4",
+            "human_review_and_signed_report_required",
+        ]
+    )
+
+
 class SiteAnalysis(BaseModel):
     url: str
     company_name: str
@@ -120,6 +177,9 @@ class SiteAnalysis(BaseModel):
     agents: list[AgentRecommendation] = Field(min_length=3, max_length=10)
     action_package: ActionPackage
     risks_and_assumptions: list[str] = Field(default_factory=list)
+    readiness: PreliminaryResultReadiness = Field(
+        default_factory=PreliminaryResultReadiness
+    )
 
 
 class AnalyzeRequest(BaseModel):

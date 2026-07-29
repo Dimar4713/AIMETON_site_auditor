@@ -85,8 +85,14 @@ async def analyze_site(url: str) -> dict:
     page = await fetch_site(url)
     try:
         result = await analyze_with_routerai(page["final_url"], page["title"], page["text"])
-    except Exception:
+    except Exception as exc:
         result = heuristic_analysis(page["final_url"], page["title"], page["text"])
+        result.readiness.provider_states["routerai"] = (
+            "not_configured"
+            if isinstance(exc, RuntimeError)
+            and "ROUTERAI_API_KEY" in str(exc)
+            else "failed"
+        )
         result.risks_and_assumptions.append(
             "Used fallback local analysis because the LLM was unavailable or returned invalid output."
         )

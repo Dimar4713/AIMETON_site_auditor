@@ -1,5 +1,6 @@
 /* ── State ── */
 let analysis = null;
+let activeAnalysisId = null;
 
 /* ── DOM refs ── */
 const f           = document.querySelector('#form');
@@ -20,6 +21,15 @@ function esc(v) {
     ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
 }
 
+function safeHref(v) {
+  try {
+    const url = new URL(String(v ?? ''));
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '#';
+  } catch {
+    return '#';
+  }
+}
+
 function setStatus(msg, loading) {
   statusEl.innerHTML = loading
     ? `<span class="spinner"></span>${esc(msg)}`
@@ -28,6 +38,39 @@ function setStatus(msg, loading) {
 
 /* ── History (localStorage) ── */
 const HIST_KEY = 'aimeton_history';
+const CHAT_KEY = 'aimeton_chat_sessions';
+
+function newAnalysisId() {
+  if (globalThis.crypto?.randomUUID) return `analysis_${crypto.randomUUID()}`;
+  return `analysis_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function ensureAnalysisId(data) {
+  if (!data.ui_analysis_id) data.ui_analysis_id = newAnalysisId();
+  return data.ui_analysis_id;
+}
+
+function getChatSessions() {
+  try { return JSON.parse(localStorage.getItem(CHAT_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function setChatSession(session) {
+  if (!activeAnalysisId) return;
+  const sessions = getChatSessions();
+  sessions[activeAnalysisId] = session.slice(-40);
+  localStorage.setItem(CHAT_KEY, JSON.stringify(sessions));
+}
+
+function currentChatSession() {
+  if (!activeAnalysisId) return [];
+  return getChatSessions()[activeAnalysisId] || [];
+}
+
+function renderChatSession() {
+  messages.innerHTML = '';
+  currentChatSession().forEach(item => addMessage(item.content, item.role, false));
+}
 
 function getHistory() {
   try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); }
@@ -35,12 +78,22 @@ function getHistory() {
 }
 
 function saveToHistory(data) {
+  ensureAnalysisId(data);
   let h = getHistory();
   // replace if same URL already exists
+  const replacedIds = h
+    .filter(x => x.url === data.url && x.ui_analysis_id !== data.ui_analysis_id)
+    .map(x => x.ui_analysis_id)
+    .filter(Boolean);
   h = h.filter(x => x.url !== data.url);
   h.unshift({ saved_at: new Date().toISOString(), ...data });
   if (h.length > 30) h.length = 30;
   localStorage.setItem(HIST_KEY, JSON.stringify(h));
+  if (replacedIds.length) {
+    const sessions = getChatSessions();
+    replacedIds.forEach(id => delete sessions[id]);
+    localStorage.setItem(CHAT_KEY, JSON.stringify(sessions));
+  }
   renderHistory();
 }
 
@@ -68,67 +121,112 @@ function renderHistory() {
 }
 
 function loadFromHistory(i) {
-  analysis = getHistory()[i];
+  const h = getHistory();
+  analysis = h[i];
+  activeAnalysisId = ensureAnalysisId(analysis);
+  h[i] = analysis;
+  localStorage.setItem(HIST_KEY, JSON.stringify(h));
   render();
+  renderChatSession();
   setStatus('Загружено из истории: ' + analysis.company_name);
   resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function deleteHistory(i) {
   const h = getHistory();
-  h.splice(i, 1);
+  const [deleted] = h.splice(i, 1);
   localStorage.setItem(HIST_KEY, JSON.stringify(h));
+  if (deleted?.ui_analysis_id) {
+    const sessions = getChatSessions();
+    delete sessions[deleted.ui_analysis_id];
+    localStorage.setItem(CHAT_KEY, JSON.stringify(sessions));
+    if (activeAnalysisId === deleted.ui_analysis_id) {
+      activeAnalysisId = null;
+      messages.innerHTML = '';
+      chatEl.classList.add('hidden');
+    }
+  }
   renderHistory();
 }
 
 document.querySelector('#clearHistoryBtn').onclick = () => {
   if (confirm('Очистить всю историю?')) {
     localStorage.removeItem(HIST_KEY);
+    localStorage.removeItem(CHAT_KEY);
+    activeAnalysisId = null;
+    messages.innerHTML = '';
     renderHistory();
   }
 };
 
-/* ── PDF export ── */
+/* ── Structured export ── */
+function exportName(extension) {
+  const name = (analysis?.company_name || 'report')
+    .replace(/[^а-яёa-z0-9\s_-]/gi, '').trim().replace(/\s+/g, '_') || 'report';
+  return `AIMETON_${name}.${extension}`;
+}
+
+async function exportStructured(format) {
+  if (!analysis) return;
+  const config = {
+    md: {
+      endpoint: '/api/export/analysis.md',
+      extension: 'md',
+      buttonId: 'exportMdBtn',
+      pending: '⏳ Формирую Markdown…',
+      ready: '⬇ Markdown',
+    },
+    docx: {
+      endpoint: '/api/export/analysis.docx',
+      extension: 'docx',
+      buttonId: 'exportDocxBtn',
+      pending: '⏳ Формирую Word…',
+      ready: '⬇ Word (.docx)',
+    },
+  }[format];
+  if (!config) return;
+  const btn = document.querySelector(`#${config.buttonId}`);
+  btn.disabled = true;
+  btn.textContent = config.pending;
+  try {
+    const response = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(analysis),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || `HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = exportName(config.extension);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(href);
+  } catch (err) {
+    alert(`Не удалось сформировать ${format.toUpperCase()}: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = config.ready;
+  }
+}
+
+/* ── PDF export (preliminary report only; chat is isolated) ── */
 function exportPDF() {
   const btn = document.querySelector('#exportBtn');
   btn.disabled = true;
   btn.textContent = '⏳ Формирую PDF…';
 
-  const name = (analysis?.company_name || 'report')
-    .replace(/[^а-яёa-z0-9\s_-]/gi, '').trim().replace(/\s+/g, '_') || 'report';
-
-  // Build a temporary container: analysis + chat (if any)
+  // Build a temporary container from the active analysis only.
   const container = document.createElement('div');
   container.style.cssText = 'font-family:Inter,system-ui,sans-serif;color:#152033;padding:4px';
 
-  // 1. Main report
   const reportClone = document.querySelector('#resultInner').cloneNode(true);
   container.appendChild(reportClone);
-
-  // 2. Chat dialog (only if messages exist)
-  const msgNodes = document.querySelectorAll('#messages .msg:not(.thinking)');
-  if (msgNodes.length) {
-    const sep = document.createElement('div');
-    sep.style.cssText = 'margin:24px 0 12px;border-top:2px solid #dce3ee;padding-top:16px';
-    sep.innerHTML = '<h2 style="margin:0 0 12px;font-size:16px;color:#152033">Диалог с консультантом</h2>';
-    container.appendChild(sep);
-
-    msgNodes.forEach(node => {
-      const clone = node.cloneNode(true);
-      // Flatten bubble styles for PDF readability
-      clone.style.cssText = [
-        'margin:8px 0',
-        'padding:10px 14px',
-        'border-radius:10px',
-        'font-size:13px',
-        'line-height:1.6',
-        node.classList.contains('user')
-          ? 'background:#e9eaff;text-align:right'
-          : 'background:#f0f3f8'
-      ].join(';');
-      container.appendChild(clone);
-    });
-  }
 
   // The container MUST be rendered inside the real document in normal flow:
   //  - position:fixed/absolute -> html2pdf 0.10.1 produces a 0-height (blank) canvas.
@@ -168,14 +266,14 @@ function exportPDF() {
     overlay.remove();
     window.scrollTo(0, prevScroll);
     btn.disabled = false;
-    btn.innerHTML = '⬇ Скачать PDF';
+    btn.innerHTML = '⬇ PDF';
   };
 
   try {
   html2pdf()
     .set({
       margin: [10, 10, 10, 10],
-      filename: `AIMETON_${name}.pdf`,
+      filename: exportName('pdf'),
       image: { type: 'jpeg', quality: 0.95 },
       html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
@@ -208,6 +306,9 @@ f.onsubmit = async (e) => {
     });
     if (!r.ok) throw new Error((await r.json()).detail || 'Ошибка сервера');
     analysis = await r.json();
+    activeAnalysisId = ensureAnalysisId(analysis);
+    setChatSession([]);
+    renderChatSession();
     render();
     saveToHistory(analysis);
     setStatus('Коммерческая возможность подготовлена');
@@ -222,6 +323,22 @@ f.onsubmit = async (e) => {
 function render() {
   const o = analysis.commercial_opportunity;
   const p = analysis.action_package;
+  const facts = analysis.company_facts || [];
+  const machine = analysis.business_machine_4x4 || [];
+  const sources = analysis.sources || [];
+  const readiness = analysis.readiness || {
+    analysis_state: 'preliminary_hypothesis',
+    client_release_eligible: false,
+    sufficiency_level: 'L0',
+    identity_state: 'unresolved',
+    profile_completeness: 0,
+    evidence_quality: 0,
+    commercial_priority: o.score || 0,
+    budget_state: 'unknown',
+    provider_states: {},
+    required_verticals: [],
+    release_blockers: ['legacy_result_without_release_state']
+  };
 
   const score = Number(o.score) || 0;
   const scoreClass = score >= 70 ? 'high' : score >= 40 ? 'mid' : 'low';
@@ -229,16 +346,47 @@ function render() {
   resultEl.innerHTML = `
     <div class="export-row">
       <button class="btn-export" id="exportBtn" onclick="exportPDF()">
-        ⬇ Скачать PDF
+        ⬇ PDF
+      </button>
+      <button class="btn-export" id="exportMdBtn" onclick="exportStructured('md')">
+        ⬇ Markdown
+      </button>
+      <button class="btn-export" id="exportDocxBtn" onclick="exportStructured('docx')">
+        ⬇ Word (.docx)
       </button>
     </div>
 
     <div id="resultInner">
+      <div class="notice notice-warning">
+        <strong>Предварительный результат.</strong>
+        Этот анализ ещё не является подписанным Report v1 и не прошёл human sign-off.
+        Диалог консультанта хранится отдельно и в экспорт не включается.
+      </div>
+
+      <section class="panel">
+        <h3>Состояние допустимости результата</h3>
+        <p>
+          <strong>Выпуск клиенту:</strong> ${readiness.client_release_eligible ? 'разрешён' : 'заблокирован'} ·
+          <strong>AI-анализ:</strong> ${esc(readiness.analysis_state)} ·
+          <strong>УДП:</strong> ${esc(readiness.sufficiency_level)} ·
+          <strong>Identity:</strong> ${esc(readiness.identity_state)}
+        </p>
+        <p>
+          <strong>Полнота профиля:</strong> ${Math.round((Number(readiness.profile_completeness) || 0) * 100)}% ·
+          <strong>Качество evidence:</strong> ${Math.round((Number(readiness.evidence_quality) || 0) * 100)}% ·
+          <strong>Коммерческий приоритет:</strong> ${esc(readiness.commercial_priority)}/100 ·
+          <strong>Budget:</strong> ${esc(readiness.budget_state)}
+        </p>
+        <p><strong>Providers:</strong> ${esc(Object.entries(readiness.provider_states || {}).map(([key, value]) => `${key}=${value}`).join(', ') || 'not_reported')}</p>
+        <p><strong>Обязательные вертикали:</strong> ${esc((readiness.required_verticals || []).map(item => `${item.code}=${item.state}`).join(', ') || 'not_reported')}</p>
+        <p><strong>Блокеры:</strong> ${esc((readiness.release_blockers || []).join(', ') || '—')}</p>
+      </section>
+
       <!-- Company card -->
       <div class="company-card">
         <div class="company-card-body">
           <h2>${esc(analysis.company_name)}</h2>
-          <a class="company-url" href="${esc(analysis.url)}" target="_blank" rel="noopener">${esc(analysis.url)}</a>
+          <a class="company-url" href="${esc(safeHref(analysis.url))}" target="_blank" rel="noopener">${esc(analysis.url)}</a>
           <p class="company-summary">${esc(analysis.business_summary)}</p>
         </div>
         <div class="company-card-score">
@@ -255,6 +403,24 @@ function render() {
         <p><strong>Ожидаемая ценность</strong><br>${esc(o.expected_value)}</p>
       </section>
 
+      <!-- Company facts -->
+      <h3>Факты о компании</h3>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Поле</th><th>Значение</th><th>Период</th><th>Уверенность</th><th>Источники</th></tr></thead>
+          <tbody>
+            ${facts.length ? facts.map(item => `
+              <tr>
+                <td>${esc(item.field)}</td>
+                <td>${esc(item.value)}</td>
+                <td>${esc(item.period || '—')}</td>
+                <td>${esc(item.confidence)}</td>
+                <td>${esc((item.source_ids || []).join(', ') || '—')}</td>
+              </tr>`).join('') : '<tr><td colspan="5">Проверенных фактов нет.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+
       <!-- Economic signals -->
       <h3>Экономические сигналы</h3>
       <div class="grid">
@@ -265,6 +431,20 @@ function render() {
             <p><strong>Основание</strong><br>${esc(s.evidence)}</p>
             <p><strong>Возможный эффект</strong><br>${esc(s.business_effect)}</p>
           </article>`).join('')}
+      </div>
+
+      <!-- KM business machine -->
+      <h3>Бизнес-машина AIMETON 4×4</h3>
+      <div class="grid">
+        ${machine.length ? machine.map(item => `
+          <article class="card">
+            <span class="tag">${esc(item.code)} · ${esc(item.status)}</span>
+            <h3>${esc(item.vertex)}</h3>
+            <p class="muted">${esc(item.detail_operator)}</p>
+            <p>${esc(item.finding)}</p>
+            <p><strong>Источники</strong><br>${esc((item.source_ids || []).join(', ') || '—')}</p>
+            <p><strong>Значение для продажи</strong><br>${esc(item.sales_relevance || '—')}</p>
+          </article>`).join('') : '<p>Нет данных.</p>'}
       </div>
 
       <!-- AI agents -->
@@ -292,6 +472,21 @@ function render() {
         <p><strong>Следующий шаг</strong><br>${esc(p.next_action)}</p>
       </section>
 
+      <!-- Sources -->
+      <h3>Источники</h3>
+      <div class="source-list">
+        ${sources.length ? sources.map(source => `
+          <article class="source-card">
+            <div>
+              <span class="tag">${esc(source.id)} · ${esc(source.evidence_level)}</span>
+              <h3>${esc(source.title)}</h3>
+              <a href="${esc(safeHref(source.url))}" target="_blank" rel="noopener">${esc(source.url)}</a>
+            </div>
+            <p><strong>Цитата</strong><br>${esc(source.evidence_quote)}</p>
+            <p class="muted">Проверено: ${esc(source.accessed_at)} · Тип: ${esc(source.source_type)}</p>
+          </article>`).join('') : '<p>Источники не представлены.</p>'}
+      </div>
+
       <!-- Assumptions -->
       <h3>Ограничения и предположения</h3>
       <ul>${analysis.risks_and_assumptions.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
@@ -303,7 +498,7 @@ function render() {
 }
 
 /* ── Chat ── */
-function addMessage(text, role) {
+function addMessage(text, role, persist = true) {
   const d = document.createElement('div');
   d.className = 'msg ' + role;
   if (role === 'assistant') {
@@ -313,6 +508,11 @@ function addMessage(text, role) {
   }
   messages.append(d);
   messages.scrollTop = messages.scrollHeight;
+  if (persist) {
+    const session = currentChatSession();
+    session.push({ role, content: text });
+    setChatSession(session);
+  }
   return d;
 }
 
@@ -337,7 +537,10 @@ document.querySelector('#chatForm').onsubmit = async (e) => {
     const r = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ analysis, messages: [{ role: 'user', content: text }] })
+      body: JSON.stringify({
+        analysis,
+        messages: currentChatSession().slice(-12),
+      })
     });
     const data = await r.json();
     thinking.remove();

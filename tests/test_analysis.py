@@ -11,3 +11,7 @@ def test_three_sites(name, expected):
     assert expected in result.business_summary
     assert 5 <= len(result.agents) <= 10
     assert all(a.name and a.purpose and a.benefit for a in result.agents)
+    assert result.readiness.analysis_state == "preliminary_hypothesis"
+    assert result.readiness.client_release_eligible is False
+    assert result.readiness.sufficiency_level == "L0"
+    assert "analysis_preliminary_hypothesis" in result.readiness.release_blockers

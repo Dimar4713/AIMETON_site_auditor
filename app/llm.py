@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 
 import httpx
 
-from app.models import EvidenceSource, SiteAnalysis
+from app.models import (
+    EvidenceSource,
+    PreliminaryResultReadiness,
+    PreliminaryVerticalStatus,
+    SiteAnalysis,
+)
 
 BASE_URL = os.getenv("ROUTERAI_BASE_URL", "https://routerai.ru/api/v1")
 MODEL = os.getenv("ROUTERAI_MODEL", "openai/gpt-4o-mini")
@@ -172,6 +177,62 @@ JSON SCHEMA:
         fact.source_ids = [source_id for source_id in fact.source_ids if source_id in known_ids]
     for cell in result.business_machine_4x4:
         cell.source_ids = [source_id for source_id in cell.source_ids if source_id in known_ids]
+    fact_fields = {item.field for item in result.company_facts if item.source_ids}
+    vertical_fields = {
+        "identity": {
+            "legal_name",
+            "brand_name",
+            "inn",
+            "ogrn",
+            "registration_status",
+            "address",
+        },
+        "contacts": {"phones", "emails", "website", "social_accounts"},
+        "workforce": {"headcount"},
+        "financials": {"revenue", "profit", "assets", "taxes"},
+        "ownership": {
+            "founders",
+            "executives",
+            "beneficial_owners",
+            "affiliates",
+        },
+        "legal_events": set(),
+    }
+    confirmed_sources = sum(
+        source.evidence_level in {"confirmed_fact", "corroborated_signal"}
+        and source.document_digest is not None
+        and source.evidence_digest is not None
+        for source in result.sources
+    )
+    result.readiness = PreliminaryResultReadiness(
+        analysis_state="schema_validated",
+        profile_completeness=min(len(fact_fields) / 25, 1),
+        evidence_quality=(
+            confirmed_sources / len(result.sources) if result.sources else 0
+        ),
+        commercial_priority=result.commercial_opportunity.score,
+        required_verticals=[
+            PreliminaryVerticalStatus(
+                code=code,
+                state=(
+                    "partially_verified"
+                    if fields and fact_fields.intersection(fields)
+                    else "not_searched"
+                ),
+            )
+            for code, fields in vertical_fields.items()
+        ],
+        provider_states={"routerai": "active"},
+        release_blockers=[
+            "preliminary_result",
+            "identity_unresolved",
+            "sufficiency_below_l4",
+            "mandatory_verticals_incomplete",
+            "provider_state_unknown",
+            "budget_unknown",
+            "human_review_and_signed_report_required",
+        ],
+    )
     return result
 
 
