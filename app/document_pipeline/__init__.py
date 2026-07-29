@@ -8,17 +8,20 @@ from app.document_pipeline.fetchers import (
 )
 from app.document_pipeline.factory import get_document_pipeline
 from app.document_pipeline.models import (
+    ContentRegion,
     DocumentDiagnostics,
     DocumentRequest,
     FetchPath,
     FetchPolicy,
     FetchedDocument,
     PromotionResult,
+    RedirectHop,
 )
 from app.document_pipeline.pipeline import DocumentPipeline
 
 __all__ = [
     "Crawl4AIHttpWorker",
+    "ContentRegion",
     "DocumentDiagnostics",
     "DocumentPipeline",
     "DocumentRequest",
@@ -31,5 +34,6 @@ __all__ = [
     "PlaywrightFallback",
     "PromotionResult",
     "RawDocument",
+    "RedirectHop",
     "StaticHttpFetcher",
 ]

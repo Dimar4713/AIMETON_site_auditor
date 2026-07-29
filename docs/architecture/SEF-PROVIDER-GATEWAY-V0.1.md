@@ -1,7 +1,10 @@
 # AIMETON SEF Provider Gateway v0.1
 
-**Статус:** исполняемый контракт SA-SEF-02  
-**Версия:** 0.1.0  
+**Статус:** исполняемый контракт SA-SEF-02; operational-readiness расширение
+`SA-SR-01 / #82` реализуется в рабочей ветке и до merge/deploy не является
+фактом stage.
+
+**Версия:** 0.2.0 candidate
 **Назначение:** отделить бизнес-логику Site Auditor от конкретных поисковых сервисов и сделать fallback, стоимость и деградацию наблюдаемыми.
 
 ## 1. Канонический маршрут
@@ -64,12 +67,19 @@ Reason codes:
 
 - `not_configured`;
 - `policy_blocked`;
+- `pricing_unknown`;
+- `budget_blocked`;
+- `quota_blocked`;
 - `budget_exceeded`;
 - `quota_exceeded`;
 - `circuit_open`;
 - `timeout`;
 - `provider_error`;
 - `empty_results`.
+
+`budget_exceeded` и `quota_exceeded` сохраняются как legacy-значения схемы для
+совместимости, но новый SR-G1-контур выдаёт типизированные
+`budget_blocked`/`quota_blocked`.
 
 Отказ одного провайдера не завершает миссию. После порога последовательных ошибок circuit открывается, а по истечении recovery interval допускает пробный вызов.
 
@@ -96,16 +106,27 @@ SEARCH_MISSION_BUDGET_USD=...
 SEARCH_QUOTA_TAVILY=...
 ```
 
-Ненастроенные адаптеры пропускаются. При текущем stage-наборе без платных ключей Gateway продолжает работать через SearXNG.
+Ненастроенные адаптеры пропускаются. `cost_amount=0` для платного provider
+означает `pricing_unknown`, а не бесплатный или разрешённый вызов.
+
+Фактическое наблюдение stage 29.07.2026 до развёртывания `#82`: SearXNG
+настроен; Yandex и Tavily не настроены. Секреты при проверке не извлекались и
+не публиковались.
 
 ## 7. Наблюдаемость
 
 `GET /api/search/health` возвращает только:
 
+- operational state: `active`, `not_configured`, `pricing_unknown`,
+  `budget_blocked`, `quota_blocked` или `circuit_open`;
+- готов ли provider к реальному вызову;
 - настроен ли провайдер;
 - платный ли он;
 - состояние circuit breaker;
 - остаток локальной глобальной квоты.
+
+`configured=true` само по себе не означает готовность. Для платного provider
+`active` требует известной положительной цены и достаточного mission budget.
 
 Ответы `/api/hunt` и `/api/company-intelligence` включают машинно-читаемое поле `search`.
 

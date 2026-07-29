@@ -25,9 +25,21 @@ class AttemptState(StrEnum):
     CACHE_HIT = "cache_hit"
 
 
+class ProviderReadiness(StrEnum):
+    ACTIVE = "active"
+    NOT_CONFIGURED = "not_configured"
+    PRICING_UNKNOWN = "pricing_unknown"
+    BUDGET_BLOCKED = "budget_blocked"
+    QUOTA_BLOCKED = "quota_blocked"
+    CIRCUIT_OPEN = "circuit_open"
+
+
 class FallbackReason(StrEnum):
     NOT_CONFIGURED = "not_configured"
     POLICY_BLOCKED = "policy_blocked"
+    PRICING_UNKNOWN = "pricing_unknown"
+    BUDGET_BLOCKED = "budget_blocked"
+    QUOTA_BLOCKED = "quota_blocked"
     BUDGET_EXCEEDED = "budget_exceeded"
     QUOTA_EXCEEDED = "quota_exceeded"
     CIRCUIT_OPEN = "circuit_open"
@@ -123,6 +135,8 @@ class SearchResponse(GatewayModel):
 
 class ProviderHealth(GatewayModel):
     provider: str
+    state: ProviderReadiness
+    ready: bool
     configured: bool
     paid: bool
     circuit_state: Literal["closed", "open", "half_open"]

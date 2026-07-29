@@ -75,6 +75,12 @@ Content-Type: application/json
 Company Profile v1 строится отдельным SEF endpoint ниже.
 Поле `search` показывает состояние Provider Gateway, fallback, задержку и оценочную стоимость без раскрытия запроса или ключей.
 
+`GET /api/search/health` различает настройку и реальную готовность provider.
+Возможные состояния: `active`, `not_configured`, `pricing_unknown`,
+`budget_blocked`, `quota_blocked`, `circuit_open`. Для платного provider
+нулевая или неизвестная цена закрывает вызов; `configured=true` само по себе
+не означает `active`.
+
 ### Проверяемый Company Profile v1
 
 ```http
