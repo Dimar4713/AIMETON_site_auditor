@@ -1,9 +1,9 @@
 # AIMETON Evidence Crawler — Bootstrap v0.1
 
-Статус: candidate-срез `SA-SR-04 / #85` в ветке
-`agent/sa-sr-04-evidence-crawler-bootstrap`. До merge, зелёного CI и stage
-read-back не является эксплуатационным фактом. Полная `#85` этим срезом не
-закрывается.
+Статус: bootstrap-срез `SA-SR-04 / #85` слит PR `#93` и развёрнут на stage:
+версия `0.14.0`, exact deployment SHA
+`80ac7c045e4300c991aa167208786596dd53c2b0`, pre-merge Baseline CI
+`#30471814480` — success. Полная `#85` этим срезом не закрывается.
 
 ## Назначение
 
