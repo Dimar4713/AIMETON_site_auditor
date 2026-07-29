@@ -9,13 +9,14 @@ _Last updated: 2026-07-29_
   merge SHA `1f3f2d6bbe9fc350dffcb58accd539ccf70f1a8e`.
 - `MissionReleaseControl` и fail-closed Report Gate являются фактом `main`, но
   не доказывают восстановление самого поиска.
-- `SR-G1 / #82` реализуется в ветке
-  `agent/sa-sr-01-input-provider-stabilization`: кодировки, полнота смысловых
-  областей, URL/redirect/canonical identity и operational readiness providers.
-- Наблюдение stage после merge, до развёртывания нового `main`: версия `0.10.0`,
-  deployment SHA `9c304b695c7c807db1b6d155c5d6fe78ca502586`;
-  SearXNG настроен, Yandex и Tavily не настроены. Это снимок факта, а не
-  целевое состояние.
+- `SR-G1 / #82` слит через PR
+  [#91](https://github.com/Dimar4713/AIMETON_site_auditor/pull/91) и
+  развёрнут на stage: версия `0.12.0`, deployment SHA
+  `5b6a65d0d26b64087b0e90d3f040668c7d7cdfce`.
+- Live provider readiness: SearXNG — `active`, `ready=true`; Yandex и Tavily —
+  `not_configured`, `ready=false`; `secrets_exposed=false`.
+- Кодировки, полнота смысловых областей, URL/redirect/canonical identity и
+  operational readiness providers являются фактом `main` и stage.
 - Регистрационные данные платных providers потребуются только после зелёного
   CI `#82`, перед live-проверкой stage. Значения секретов не передаются через
   чат, Issues, PR, код или логи.

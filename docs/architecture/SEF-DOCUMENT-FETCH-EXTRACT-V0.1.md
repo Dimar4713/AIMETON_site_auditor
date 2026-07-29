@@ -1,7 +1,8 @@
 # SEF Document Fetch/Extract v0.1
 
 Статус: реализованный P0-контракт `SA-SEF-03`; расширение `SA-SR-01 / #82`
-реализуется в рабочей ветке и до merge/deploy не является фактом stage.
+слито PR #91 и подтверждено на stage `0.12.0`, deployment SHA
+`5b6a65d0d26b64087b0e90d3f040668c7d7cdfce`.
 
 ## Назначение
 
