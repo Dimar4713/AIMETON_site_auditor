@@ -69,6 +69,18 @@ def _text(node: ET.Element | None, path: str) -> str:
     return "" if found is None else "".join(found.itertext()).strip()
 
 
+def _short_upstream_error(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return f"status_{response.status_code}"
+    if isinstance(payload, dict):
+        message = payload.get("message") or payload.get("error") or payload.get("code")
+        if message:
+            return f"status_{response.status_code}:{str(message)[:240]}"
+    return f"status_{response.status_code}"
+
+
 class YandexWebSearchProvider:
     def __init__(self, *, api_key: str | None = None, folder_id: str | None = None, client: httpx.Client | None = None) -> None:
         self._api_key = (api_key or os.getenv("YANDEX_SEARCH_API_KEY", "")).strip()
@@ -93,22 +105,29 @@ class YandexWebSearchProvider:
         query = query.strip()
         if not query:
             raise ValueError("Yandex search query must not be empty")
+        if len(query) > 400:
+            raise ValueError("Yandex search query exceeds 400 characters")
         if not self._api_key or not self._folder_id:
             return YandexSearchResult(state="unavailable", query=query, gaps=["yandex_search_not_configured"])
         query_text = f"site:{site} {query}" if site else query
         payload = {
             "query": {
-                "searchType": self._search_type.removeprefix("SEARCH_TYPE_").lower(),
+                "searchType": self._search_type,
                 "queryText": query_text,
-                "familyMode": self._family_mode.removeprefix("FAMILY_MODE_").lower(),
+                "familyMode": self._family_mode,
                 "page": str(page),
-                "fixTypoMode": "on",
+                "fixTypoMode": "FIX_TYPO_MODE_ON",
             },
-            "groupSpec": {"groupsOnPage": str(self._results_per_page), "docsInGroup": "1"},
+            "groupSpec": {
+                "groupMode": "GROUP_MODE_DEEP",
+                "groupsOnPage": str(self._results_per_page),
+                "docsInGroup": "1",
+            },
+            "maxPassages": "4",
             "region": "225",
-            "l10N": "ru",
+            "l10N": "LOCALIZATION_RU",
             "folderId": self._folder_id,
-            "responseFormat": "XML",
+            "responseFormat": "FORMAT_XML",
         }
         owns_client = self._client is None
         client = self._client or httpx.Client(timeout=30.0)
@@ -118,10 +137,13 @@ class YandexWebSearchProvider:
                 headers={"Authorization": f"Api-Key {self._api_key}", "Content-Type": "application/json"},
                 json=payload,
             )
-            response.raise_for_status()
+            if response.is_error:
+                raise RuntimeError(f"yandex_web_search_upstream_{_short_upstream_error(response)}")
             envelope: dict[str, Any] = response.json()
             xml_bytes = base64.b64decode(envelope["rawData"])
             root = ET.fromstring(xml_bytes)
+        except RuntimeError:
+            raise
         except (httpx.HTTPError, ValueError, KeyError, ET.ParseError) as exc:
             raise RuntimeError("yandex_web_search_request_failed") from exc
         finally:
