@@ -136,7 +136,7 @@ class YandexWebSearchProvider:
             "region": "225",
             "l10N": "ru",
             "folderId": self._folder_id,
-            "responseFormat": "XML",
+            "responseFormat": "FORMAT_XML",
         }
         owns_client = self._client is None
         client = self._client or httpx.Client(timeout=30.0)
