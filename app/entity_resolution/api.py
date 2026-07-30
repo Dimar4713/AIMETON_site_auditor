@@ -13,11 +13,13 @@ from app.mission_orchestrator import (
     NextActionPlan,
     get_mission_orchestrator,
 )
+from app.search_providers.yandex_api import router as yandex_search_router
 
 
 router = APIRouter(prefix="/api/missions", tags=["entity-resolution"])
 router.include_router(registry_router)
 router.include_router(dadata_router)
+router.include_router(yandex_search_router)
 
 
 class ApiModel(BaseModel):
