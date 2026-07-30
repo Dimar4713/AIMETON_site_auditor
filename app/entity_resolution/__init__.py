@@ -13,11 +13,24 @@ from app.entity_resolution.models import (
     IdentitySignalRef,
     SignalValidationState,
 )
+from app.entity_resolution.registry import (
+    EntityRelationshipRole,
+    HumanReviewRequest,
+    IdentifierVerification,
+    OfficialRegistryVerifier,
+    RegistryAuthority,
+    RegistryEvidence,
+    RegistryVerificationResult,
+    RegistryVerificationState,
+)
 from app.entity_resolution.service import ProvisionalEntityResolver
 
 __all__ = [
     "CandidateIdentifier",
+    "EntityRelationshipRole",
     "get_entity_resolver",
+    "HumanReviewRequest",
+    "IdentifierVerification",
     "IdentityCandidate",
     "IdentityCandidateState",
     "IdentityConflict",
@@ -25,7 +38,12 @@ __all__ = [
     "IdentityResolutionResult",
     "IdentityResolutionState",
     "IdentitySignalRef",
+    "OfficialRegistryVerifier",
     "ProvisionalEntityResolver",
+    "RegistryAuthority",
+    "RegistryEvidence",
+    "RegistryVerificationResult",
+    "RegistryVerificationState",
     "reset_entity_resolver",
     "SignalValidationState",
 ]
