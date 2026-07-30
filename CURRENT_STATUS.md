@@ -30,13 +30,15 @@ _Last updated: 2026-07-29_
   `80ac7c045e4300c991aa167208786596dd53c2b0`, pre-merge Baseline CI
   `#30471814480` — success. Вся `#85` остаётся открытой; следующий активный
   шаг — provisional Entity Resolution `#84` на provenance-bearing signals.
-- Candidate-срез `SA-SR-03 / #84` опубликован в draft PR `#99` для версии
-  `0.15.0`; первый remote head `a8cbd9cafb16af8b763b8e8c07de9926b3050782`.
-  Реализованы provenance validation, checksum validation ИНН/ОГРН, competing
-  candidates, provisional/conflicting/unresolved outcomes, revision history и
-  targeted search pivots. Он ещё не является фактом `main` или stage;
-  `accepted identity links`, registry verification, human review и Benchmark
-  identity остаются последующими срезами `#84`.
+- Provisional-срез `SA-SR-03 / #84` слит PR `#99` и развёрнут на stage:
+  версия `0.15.0`, merge/deployment SHA
+  `de9f864b10b1cb1c340f0d8429273e4e908d650a`; PR Baseline CI
+  `#30503294900`, main Baseline CI `#30503376185` и Deploy Stage
+  `#30503427439` — success. Live HTTP-цикл подтвердил
+  `plan → resolve_identity → identity_history`: state `provisional`, одна
+  ревизия, `accepted_identifier_links=[]`, следующий `query_provider` остался
+  только candidate и не выполнялся. Registry verification, accepted identity
+  links, human review и Benchmark identity остаются следующими срезами `#84`.
 
 ## Текущее положение
 

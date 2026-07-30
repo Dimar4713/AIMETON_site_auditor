@@ -1,8 +1,14 @@
 # AIMETON Provisional Entity Resolution v0.1
 
-Статус: candidate-срез `SA-SR-03 / #84`, draft PR `#99`. До merge, зелёного CI
-и exact stage read-back он не является фактом `main` или stage. Версия
-приложения-кандидата: `0.15.0`.
+Статус: provisional-срез `SA-SR-03 / #84` слит PR `#99` и развёрнут на stage.
+Версия `0.15.0`, merge/deployment SHA
+`de9f864b10b1cb1c340f0d8429273e4e908d650a`; PR Baseline CI `#30503294900`,
+main Baseline CI `#30503376185` и Deploy Stage `#30503427439` — success.
+
+Live HTTP-цикл на exact stage подтвердил создание process-local mission,
+исполнение выданного `resolve_identity`, результат `provisional`, одну ревизию
+history и пустой `accepted_identifier_links`. Provider action был только
+сформирован как candidate и не выполнялся.
 
 ## Назначение
 
