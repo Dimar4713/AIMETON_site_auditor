@@ -91,6 +91,8 @@ GET /api/missions/{mission_id}
 POST /api/missions/{mission_id}/plan
 POST /api/missions/{mission_id}/turns
 POST /api/missions/{mission_id}/bootstrap-crawl
+POST /api/missions/{mission_id}/resolve-identity
+GET  /api/missions/{mission_id}/identity-history
 ```
 
 UI/REST/MCP используют один builder контракта. `/api/analyze` сохранён как
@@ -103,6 +105,12 @@ Bootstrap crawler исполняет только выданный `crawl_url` p
 главную, релевантные same-domain страницы и sitemap hints. Identity signals
 остаются `candidate`, а ссылки на PDF/DOCX — `discovery_hint`, пока документ не
 загружен и не прошёл Evidence Guard.
+
+Provisional Entity Resolution исполняет только выданный `resolve_identity`
+plan. Он перепроверяет mission/document provenance, контрольные разряды
+ИНН/ОГРН, сохраняет competing candidates и конфликты, а затем возвращает
+targeted search pivots. Даже выбранный provisional-кандидат не содержит
+accepted identity links и не открывает клиентский выпуск.
 
 ### Проверяемый Company Profile v1
 

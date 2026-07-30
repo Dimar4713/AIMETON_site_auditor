@@ -1,0 +1,711 @@
+{
+  "$defs": {
+    "ActionCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "action_type": {
+          "$ref": "#/$defs/ActionType"
+        },
+        "ai_priority": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Ai Priority",
+          "type": "number"
+        },
+        "deficit_code": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Deficit Code",
+          "type": "string"
+        },
+        "error_risk": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Error Risk",
+          "type": "number"
+        },
+        "estimated_cost_by_currency": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Estimated Cost By Currency",
+          "type": "object"
+        },
+        "estimated_latency_ms": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Estimated Latency Ms",
+          "type": "integer"
+        },
+        "expected_sufficiency_gain": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Expected Sufficiency Gain",
+          "type": "number"
+        },
+        "rate_limit_allowed": {
+          "default": true,
+          "title": "Rate Limit Allowed",
+          "type": "boolean"
+        },
+        "rights_allowed": {
+          "default": true,
+          "title": "Rights Allowed",
+          "type": "boolean"
+        },
+        "robots_allowed": {
+          "default": true,
+          "title": "Robots Allowed",
+          "type": "boolean"
+        },
+        "ssrf_validated": {
+          "default": true,
+          "title": "Ssrf Validated",
+          "type": "boolean"
+        },
+        "target": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action_type"
+      ],
+      "title": "ActionCandidate",
+      "type": "object"
+    },
+    "ActionDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "admissible": {
+          "title": "Admissible",
+          "type": "boolean"
+        },
+        "candidate": {
+          "$ref": "#/$defs/ActionCandidate"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "candidate",
+        "admissible"
+      ],
+      "title": "ActionDecision",
+      "type": "object"
+    },
+    "ActionOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_cost_by_currency": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Actual Cost By Currency",
+          "type": "object"
+        },
+        "artifact_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifact Refs",
+          "type": "array"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/$defs/ActionOutcomeState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "ActionOutcome",
+      "type": "object"
+    },
+    "ActionOutcomeState": {
+      "enum": [
+        "succeeded",
+        "partial",
+        "failed",
+        "blocked"
+      ],
+      "title": "ActionOutcomeState",
+      "type": "string"
+    },
+    "ActionType": {
+      "enum": [
+        "crawl_url",
+        "fetch_document",
+        "query_provider",
+        "resolve_identity",
+        "review_conflict",
+        "stop"
+      ],
+      "title": "ActionType",
+      "type": "string"
+    },
+    "CandidateIdentifier": {
+      "additionalProperties": false,
+      "properties": {
+        "lifecycle_state": {
+          "default": "candidate",
+          "title": "Lifecycle State",
+          "type": "string"
+        },
+        "normalized_value": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Normalized Value",
+          "type": "string"
+        },
+        "scheme": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Scheme",
+          "type": "string"
+        },
+        "signal_refs": {
+          "items": {
+            "$ref": "#/$defs/IdentitySignalRef"
+          },
+          "minItems": 1,
+          "title": "Signal Refs",
+          "type": "array"
+        },
+        "value": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scheme",
+        "value",
+        "normalized_value",
+        "signal_refs"
+      ],
+      "title": "CandidateIdentifier",
+      "type": "object"
+    },
+    "IdentityCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_identifier_links": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Accepted Identifier Links",
+          "type": "array"
+        },
+        "canonical_name": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Canonical Name",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 0.99,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "entity_type": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Entity Type",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/CandidateIdentifier"
+          },
+          "title": "Identifiers",
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/$defs/IdentityCandidateState"
+        },
+        "supporting_document_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Supporting Document Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "entity_type",
+        "canonical_name",
+        "confidence",
+        "state"
+      ],
+      "title": "IdentityCandidate",
+      "type": "object"
+    },
+    "IdentityCandidateState": {
+      "enum": [
+        "provisional",
+        "competing"
+      ],
+      "title": "IdentityCandidateState",
+      "type": "string"
+    },
+    "IdentityConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Candidate Ids",
+          "type": "array"
+        },
+        "code": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "document_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Document Ids",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "requires_human_review": {
+          "default": true,
+          "title": "Requires Human Review",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "code",
+        "detail"
+      ],
+      "title": "IdentityConflict",
+      "type": "object"
+    },
+    "IdentityResolutionState": {
+      "enum": [
+        "provisional",
+        "conflicting",
+        "unresolved"
+      ],
+      "title": "IdentityResolutionState",
+      "type": "string"
+    },
+    "IdentitySignalRef": {
+      "additionalProperties": false,
+      "properties": {
+        "accessed_at": {
+          "format": "date-time",
+          "title": "Accessed At",
+          "type": "string"
+        },
+        "document_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Document Digest",
+          "type": "string"
+        },
+        "document_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Document Id",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "locator": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "normalized_value": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Normalized Value",
+          "type": "string"
+        },
+        "source_url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Source Url",
+          "type": "string"
+        },
+        "validation_reason": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validation Reason"
+        },
+        "validation_state": {
+          "$ref": "#/$defs/SignalValidationState"
+        },
+        "value": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value",
+        "normalized_value",
+        "validation_state",
+        "document_id",
+        "source_url",
+        "locator",
+        "accessed_at",
+        "document_digest"
+      ],
+      "title": "IdentitySignalRef",
+      "type": "object"
+    },
+    "NextActionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/ActionDecision"
+          },
+          "title": "Decisions",
+          "type": "array"
+        },
+        "input_deficits": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Deficits",
+          "type": "array"
+        },
+        "mission_id": {
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "selected_action": {
+          "$ref": "#/$defs/ActionCandidate"
+        },
+        "selection_reason": {
+          "title": "Selection Reason",
+          "type": "string"
+        },
+        "turn_number": {
+          "minimum": 1,
+          "title": "Turn Number",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mission_id",
+        "turn_number",
+        "input_deficits",
+        "decisions",
+        "selected_action",
+        "selection_reason"
+      ],
+      "title": "NextActionPlan",
+      "type": "object"
+    },
+    "QuestionState": {
+      "enum": [
+        "verified",
+        "partially_verified",
+        "conflicting",
+        "not_found_after_sufficient_search",
+        "not_searched",
+        "blocked",
+        "degraded"
+      ],
+      "title": "QuestionState",
+      "type": "string"
+    },
+    "SignalValidationState": {
+      "enum": [
+        "valid",
+        "invalid"
+      ],
+      "title": "SignalValidationState",
+      "type": "string"
+    },
+    "StopReason": {
+      "enum": [
+        "sufficiency_reached",
+        "source_space_exhausted",
+        "budget_exhausted",
+        "critical_source_blocked",
+        "identity_unresolved",
+        "unresolved_conflict",
+        "technical_failure",
+        "policy_no_admissible_action",
+        "invalid_completion"
+      ],
+      "title": "StopReason",
+      "type": "string"
+    },
+    "SufficiencyFeedback": {
+      "additionalProperties": false,
+      "properties": {
+        "achieved": {
+          "$ref": "#/$defs/SufficiencyLevel",
+          "default": "L0"
+        },
+        "critical_gaps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Critical Gaps",
+          "type": "array"
+        },
+        "question_states": {
+          "additionalProperties": {
+            "$ref": "#/$defs/QuestionState"
+          },
+          "title": "Question States",
+          "type": "object"
+        },
+        "stop_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "question_states"
+      ],
+      "title": "SufficiencyFeedback",
+      "type": "object"
+    },
+    "SufficiencyLevel": {
+      "enum": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5"
+      ],
+      "title": "SufficiencyLevel",
+      "type": "string"
+    }
+  },
+  "$id": "https://aimeton.ru/schemas/identity-resolution-v0.1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "analysis_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Analysis Id",
+      "type": "string"
+    },
+    "candidates": {
+      "items": {
+        "$ref": "#/$defs/IdentityCandidate"
+      },
+      "title": "Candidates",
+      "type": "array"
+    },
+    "conflicts": {
+      "items": {
+        "$ref": "#/$defs/IdentityConflict"
+      },
+      "title": "Conflicts",
+      "type": "array"
+    },
+    "correlation_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "gaps": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Gaps",
+      "type": "array"
+    },
+    "id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "input_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Input Digest",
+      "type": "string"
+    },
+    "invalid_signals": {
+      "items": {
+        "$ref": "#/$defs/IdentitySignalRef"
+      },
+      "title": "Invalid Signals",
+      "type": "array"
+    },
+    "mission_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Mission Id",
+      "type": "string"
+    },
+    "next_action_candidates": {
+      "items": {
+        "$ref": "#/$defs/ActionCandidate"
+      },
+      "title": "Next Action Candidates",
+      "type": "array"
+    },
+    "outcome": {
+      "$ref": "#/$defs/ActionOutcome"
+    },
+    "plan": {
+      "$ref": "#/$defs/NextActionPlan"
+    },
+    "recommended_feedback": {
+      "$ref": "#/$defs/SufficiencyFeedback"
+    },
+    "revision_number": {
+      "minimum": 1,
+      "title": "Revision Number",
+      "type": "integer"
+    },
+    "schema_version": {
+      "default": "0.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "selected_candidate_id": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selected Candidate Id"
+    },
+    "state": {
+      "$ref": "#/$defs/IdentityResolutionState"
+    },
+    "supersedes_result_id": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supersedes Result Id"
+    }
+  },
+  "required": [
+    "id",
+    "mission_id",
+    "analysis_id",
+    "correlation_id",
+    "revision_number",
+    "input_digest",
+    "created_at",
+    "plan",
+    "state",
+    "outcome",
+    "recommended_feedback"
+  ],
+  "title": "IdentityResolutionResult",
+  "type": "object"
+}
