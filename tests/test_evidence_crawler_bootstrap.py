@@ -17,6 +17,10 @@ from app.evidence_crawler import (
     MetadataResponse,
     RobotsState,
 )
+from app.entity_resolution import (
+    IdentityResolutionState,
+    ProvisionalEntityResolver,
+)
 from app.mission_orchestrator import (
     ActionCandidate,
     ActionOutcomeState,
@@ -250,6 +254,132 @@ async def test_bootstrap_turn_respects_robots_and_feeds_identity_replan(
     )
     assert next_plan.turn_number == 2
     assert next_plan.selected_action.action_type == ActionType.RESOLVE_IDENTITY
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_name", "expected_inn", "expected_ogrn"),
+    [
+        (
+            "realworld_selectel_sanitized.html",
+            "Акционерное общество «Селектел»",
+            "7810962785",
+            "1247800067790",
+        ),
+        (
+            "realworld_sendy_sanitized.html",
+            "Общество с ограниченной ответственностью «СЭНДИ»",
+            "7720644026",
+            "1207700230638",
+        ),
+        (
+            "realworld_bsk_sanitized.html",
+            "Общество с ограниченной ответственностью «Анатомика»",
+            "2308284006",
+            "1222300007225",
+        ),
+    ],
+)
+async def test_realworld_requisites_normalize_to_one_provisional_target(
+    monkeypatch,
+    fixture_name,
+    expected_name,
+    expected_inn,
+    expected_ogrn,
+):
+    monkeypatch.setattr(
+        "app.document_pipeline.fetchers._validate_public_url",
+        lambda _url: None,
+    )
+    html = (FIXTURES / fixture_name).read_text(encoding="utf-8")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/":
+            return httpx.Response(404)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            text=html,
+        )
+
+    crawler = BootstrapEvidenceCrawler(
+        document_pipeline=DocumentPipeline(
+            static_fetcher=StaticHttpFetcher(
+                transport=httpx.MockTransport(handler),
+            )
+        ),
+        metadata_fetcher=FakeMetadataFetcher(),
+    )
+    orchestrator = MissionOrchestrator()
+    mission, crawl_plan = _mission_and_plan(orchestrator)
+    batch = await crawler.run_mission(
+        orchestrator,
+        mission.contract.mission_id,
+        plan=crawl_plan,
+        policy=BootstrapCrawlPolicy(
+            max_pages=1,
+            max_depth=0,
+            min_request_interval_ms=0,
+            allow_crawl4ai=False,
+            allow_browser=False,
+        ),
+    )
+    assert not any(
+        signal.kind == "address"
+        and signal.value.casefold() in {"а и контакты", "и контакты"}
+        for signal in batch.identity_signals
+    )
+
+    after_crawl = orchestrator.record_turn(
+        mission.contract.mission_id,
+        plan=crawl_plan,
+        outcome=batch.outcome,
+        feedback=SufficiencyFeedback(
+            achieved=SufficiencyLevel.L1,
+            question_states={"identity": QuestionState.PARTIALLY_VERIFIED},
+            critical_gaps=["identity"],
+        ),
+    )
+    resolution_plan = orchestrator.plan(
+        mission.contract.mission_id,
+        deficits=after_crawl.turns[-1].resulting_gaps,
+        candidates=batch.next_action_candidates,
+        policy=PolicySnapshot(remaining_actions=4),
+    )
+    resolver = ProvisionalEntityResolver()
+    result = resolver.resolve(
+        orchestrator,
+        mission.contract.mission_id,
+        plan=resolution_plan,
+        bootstrap_results=[batch],
+    )
+
+    assert result.state == IdentityResolutionState.PROVISIONAL
+    assert result.selected_candidate_id is not None
+    selected = next(
+        candidate
+        for candidate in result.candidates
+        if candidate.id == result.selected_candidate_id
+    )
+    assert selected.canonical_name == expected_name
+    assert {
+        (identifier.scheme, identifier.normalized_value)
+        for identifier in selected.identifiers
+    } >= {
+        ("inn", expected_inn),
+        ("ogrn", expected_ogrn),
+    }
+    assert all(
+        "банк" not in candidate.canonical_name.casefold()
+        for candidate in result.candidates
+        if candidate.id == result.selected_candidate_id
+    )
+    for candidate in result.candidates:
+        if "банк" not in candidate.canonical_name.casefold():
+            continue
+        assert {
+            identifier.scheme for identifier in candidate.identifiers
+        } == {"legal_name"}
 
 
 @pytest.mark.asyncio

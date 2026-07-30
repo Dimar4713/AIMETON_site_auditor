@@ -289,6 +289,48 @@ def test_same_name_with_different_identifiers_stays_competing():
     assert result.next_action_candidates[0].action_type == ActionType.REVIEW_CONFLICT
 
 
+def test_two_non_bank_names_in_one_document_remain_fail_closed():
+    orchestrator = MissionOrchestrator()
+    resolver = ProvisionalEntityResolver()
+    mission, crawl_plan = _crawl_plan(orchestrator)
+    batch = _batch(mission, crawl_plan)
+    batch.identity_signals.append(
+        _signal(
+            IdentitySignalKind.LEGAL_NAME,
+            'ООО "Дедал Плюс"',
+            "document_requisites",
+            "requisites",
+        )
+    )
+    batch.identity_signals.append(
+        _signal(
+            IdentitySignalKind.LEGAL_NAME,
+            'АО "Банк Проверка"',
+            "document_requisites",
+            "requisites",
+        )
+    )
+    resolution_plan = _record_crawl_and_plan_resolution(
+        orchestrator,
+        mission,
+        crawl_plan,
+    )
+
+    result = resolver.resolve(
+        orchestrator,
+        mission.contract.mission_id,
+        plan=resolution_plan,
+        bootstrap_results=[batch],
+    )
+
+    assert result.state == IdentityResolutionState.CONFLICTING
+    assert result.selected_candidate_id is None
+    assert any(
+        conflict.code == "ambiguous_document_attribution"
+        for conflict in result.conflicts
+    )
+
+
 def test_invalid_identifier_is_not_promoted_and_requires_more_search():
     orchestrator = MissionOrchestrator()
     resolver = ProvisionalEntityResolver()

@@ -42,9 +42,17 @@ _Last updated: 2026-07-30_
 - После добавления repository secret `TAVILY_TOKEN` подготовлен локальный
   candidate следующего среза `#84`: `query_provider → DiscoveryHint →
   fetch_document → Evidence Guard → accepted_identifier_links → targeted
-  crawl candidate`. Версия candidate `0.16.0`. До merge, зелёного CI, Deploy
-  Stage и live read-back фактическим состоянием остаётся `0.15.0`; сам secret
-  и его значение в документации, диагностике и логах не фиксируются.
+  crawl candidate`. PR `#101` слит и Deploy Stage `#30516485317` подтверждён:
+  stage работает на `0.16.0 / 1ed2376…`, Tavily имеет `state=active` и
+  `ready=true`; сам secret и его значение в документации, диагностике и логах
+  не фиксируются.
+- Первый live-проход на страницах Selectel, Sendy и БСК остановился до Tavily:
+  Entity Resolution корректно вернул conflict, но причиной оказалась ложная
+  атрибуция вариантов имени и банковских контрагентов. Подготовлен candidate
+  `0.16.1`: точные границы legal name/address, канонизация правовых форм и
+  кавычек, label-value extraction и безопасная document-local атрибуция
+  реквизитов единственному небанковскому target. До merge, CI, deployment и
+  повторного live-smoke это не является фактом stage.
 
 ## Текущее положение
 
