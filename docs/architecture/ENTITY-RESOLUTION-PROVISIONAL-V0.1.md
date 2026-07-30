@@ -154,7 +154,7 @@ recovery относятся к `#88`.
 - официальный registry/source verification;
 - distinguishing brand, branch, owner и affiliated entity;
 - human-review decision;
-- Benchmark identity fixtures для «Дедала» и контрольного набора;
+- расширение Identity Benchmark-5 за пределы Golden-5;
 - интеграция с targeted crawler `#85` и УДП Evaluator `#86`.
 
 Реализация повышения identity link после Evidence Guard описана в

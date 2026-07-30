@@ -1,5 +1,10 @@
 # Identity Benchmark-5 v0.1
 
+Статус: слит PR `#105`, развёрнут на stage как `0.16.2 /
+45b38b81079bd13a1690bf84283ebeb7b101087f`. PR Baseline CI
+`#30540392356`, main Baseline CI `#30540507493` и Deploy Stage
+`#30540595302` — success.
+
 ## Назначение
 
 `IDENTITY-BENCHMARK-5` проверяет детерминированный путь:
