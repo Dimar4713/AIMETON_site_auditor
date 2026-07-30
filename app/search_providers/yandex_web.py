@@ -128,7 +128,7 @@ class YandexWebSearchProvider:
                 "queryText": query_text,
                 "familyMode": _wire_enum(self._family_mode, "FAMILY_MODE_"),
                 "page": str(page),
-                "fixTypoMode": "on",
+                "fixTypoMode": "FIX_TYPO_MODE_ON",
             },
             "groupSpec": {
                 "groupsOnPage": str(self._results_per_page),
