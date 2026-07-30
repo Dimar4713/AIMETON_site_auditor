@@ -69,15 +69,25 @@ def _text(node: ET.Element | None, path: str) -> str:
     return "" if found is None else "".join(found.itertext()).strip()
 
 
+def _wire_enum(value: str, prefix: str) -> str:
+    value = value.strip()
+    if value.startswith(prefix):
+        value = value.removeprefix(prefix)
+    return value.lower()
+
+
 def _short_upstream_error(response: httpx.Response) -> str:
     try:
         payload = response.json()
     except ValueError:
-        return f"status_{response.status_code}"
+        text = " ".join(response.text.split())[:240]
+        return f"status_{response.status_code}:{text}" if text else f"status_{response.status_code}"
     if isinstance(payload, dict):
-        message = payload.get("message") or payload.get("error") or payload.get("code")
-        if message:
-            return f"status_{response.status_code}:{str(message)[:240]}"
+        code = payload.get("code")
+        message = payload.get("message") or payload.get("error") or payload.get("details")
+        parts = [str(item) for item in (code, message) if item not in (None, "")]
+        if parts:
+            return f"status_{response.status_code}:{':'.join(parts)[:500]}"
     return f"status_{response.status_code}"
 
 
@@ -110,24 +120,23 @@ class YandexWebSearchProvider:
         if not self._api_key or not self._folder_id:
             return YandexSearchResult(state="unavailable", query=query, gaps=["yandex_search_not_configured"])
         query_text = f"site:{site} {query}" if site else query
+        if len(query_text) > 400:
+            raise ValueError("Yandex search query with site filter exceeds 400 characters")
         payload = {
             "query": {
-                "searchType": self._search_type,
+                "searchType": _wire_enum(self._search_type, "SEARCH_TYPE_"),
                 "queryText": query_text,
-                "familyMode": self._family_mode,
+                "familyMode": _wire_enum(self._family_mode, "FAMILY_MODE_"),
                 "page": str(page),
-                "fixTypoMode": "FIX_TYPO_MODE_ON",
+                "fixTypoMode": "on",
             },
             "groupSpec": {
-                "groupMode": "GROUP_MODE_DEEP",
                 "groupsOnPage": str(self._results_per_page),
-                "docsInGroup": "1",
             },
-            "maxPassages": "4",
             "region": "225",
-            "l10N": "LOCALIZATION_RU",
+            "l10N": "ru",
             "folderId": self._folder_id,
-            "responseFormat": "FORMAT_XML",
+            "responseFormat": "XML",
         }
         owns_client = self._client is None
         client = self._client or httpx.Client(timeout=30.0)
