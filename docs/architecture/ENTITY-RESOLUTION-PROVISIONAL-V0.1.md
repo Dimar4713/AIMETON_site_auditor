@@ -1,8 +1,8 @@
 # AIMETON Provisional Entity Resolution v0.1
 
-Статус: candidate-срез `SA-SR-03 / #84`. До merge, зелёного CI и exact stage
-read-back он не является фактом `main` или stage. Версия приложения-кандидата:
-`0.15.0`.
+Статус: candidate-срез `SA-SR-03 / #84`, draft PR `#99`. До merge, зелёного CI
+и exact stage read-back он не является фактом `main` или stage. Версия
+приложения-кандидата: `0.15.0`.
 
 ## Назначение
 
