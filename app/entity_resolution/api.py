@@ -6,6 +6,7 @@ from app.entity_resolution.models import (
     IdentityResolutionHistory,
     IdentityResolutionResult,
 )
+from app.entity_resolution.registry_api import router as registry_router
 from app.evidence_crawler.models import BootstrapCrawlResult
 from app.mission_orchestrator import (
     NextActionPlan,
@@ -14,6 +15,7 @@ from app.mission_orchestrator import (
 
 
 router = APIRouter(prefix="/api/missions", tags=["entity-resolution"])
+router.include_router(registry_router)
 
 
 class ApiModel(BaseModel):
