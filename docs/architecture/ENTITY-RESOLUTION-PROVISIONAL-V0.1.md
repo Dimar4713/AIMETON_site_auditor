@@ -70,7 +70,7 @@ POST принимает:
 Невалидный сигнал сохраняется в `invalid_signals` вместе с документом,
 locator, временем наблюдения и digest, но не входит в candidate identifier.
 
-После live-контрпримеров 30.07.2026 candidate `0.16.1` дополнительно:
+После live-контрпримеров 30.07.2026 версия `0.16.1` дополнительно:
 
 - приводит полную и сокращённую правовую форму к одному ключу (`Общество с
   ограниченной ответственностью` → `ООО`, `Акционерное общество` → `АО`);
@@ -158,9 +158,10 @@ recovery относятся к `#88`.
 - интеграция с targeted crawler `#85` и УДП Evaluator `#86`.
 
 Реализация повышения identity link после Evidence Guard описана в
-`IDENTITY-EVIDENCE-GUARD-V0.1.md` и развёрнута как `0.16.0 / 1ed2376…`.
-Candidate `0.16.1` с исправлением real-world attribution до merge/deployment
-не считается фактом stage.
+`IDENTITY-EVIDENCE-GUARD-V0.1.md`. Исправление real-world attribution
+развёрнуто как `0.16.1 / 5d7cb748…`; повторный live-цикл подтвердил
+provisional target, Evidence Guard, две identity revisions и targeted crawl
+candidate.
 
 ## Проверка
 

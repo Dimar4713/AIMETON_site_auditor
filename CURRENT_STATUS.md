@@ -48,11 +48,15 @@ _Last updated: 2026-07-30_
   не фиксируются.
 - Первый live-проход на страницах Selectel, Sendy и БСК остановился до Tavily:
   Entity Resolution корректно вернул conflict, но причиной оказалась ложная
-  атрибуция вариантов имени и банковских контрагентов. Подготовлен candidate
-  `0.16.1`: точные границы legal name/address, канонизация правовых форм и
-  кавычек, label-value extraction и безопасная document-local атрибуция
-  реквизитов единственному небанковскому target. До merge, CI, deployment и
-  повторного live-smoke это не является фактом stage.
+  атрибуция вариантов имени и банковских контрагентов. Исправление слито PR
+  `#102` и развёрнуто как `0.16.1 / 5d7cb748…`; Baseline CI
+  `#30521415347` и Deploy Stage `#30521495457` — success.
+- Повторный live HTTP-цикл на БСК подтвердил provisional ООО «Анатомика»,
+  корректные ИНН/ОГРН, locator-bound accepted links, две identity revisions и
+  targeted crawl candidate. Tavily Basic был вызван один раз (`quota 10 → 9`),
+  но не вернул usable result; SearXNG fallback дал пять discovery hints.
+  Продолжение на cache завершило Evidence Guard с дополнительной стоимостью
+  `$0`. Official registry verification остаётся открытым дефицитом.
 
 ## Текущее положение
 
