@@ -1,0 +1,74 @@
+name: Configure Yandex Search Stage
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aimeton-auditor-stage-yandex-search
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: YANDEX_SEARCH
+    timeout-minutes: 15
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      STAGE_URL: https://stage-auditor.aimeton.ru
+      YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
+      YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
+      YANDEX_SEARCH_TYPE: ${{ vars.YANDEX_SEARCH_TYPE || 'SEARCH_TYPE_RU' }}
+      YANDEX_SEARCH_FAMILY_MODE: ${{ vars.YANDEX_SEARCH_FAMILY_MODE || 'FAMILY_MODE_MODERATE' }}
+      YANDEX_SEARCH_RESULTS_PER_PAGE: ${{ vars.YANDEX_SEARCH_RESULTS_PER_PAGE || '10' }}
+      YANDEX_SEARCH_SMOKE_QUERY: ${{ vars.YANDEX_SEARCH_SMOKE_QUERY || 'AIMETON искусственный интеллект для бизнеса' }}
+    steps:
+      - name: Checkout main runtime tooling
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Validate Yandex Search credential contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$YANDEX_SEARCH_API_KEY"
+          test -n "$YANDEX_CLOUD_FOLDER_ID"
+          [[ "$YANDEX_SEARCH_API_KEY" != *$'\n'* ]]
+          [[ "$YANDEX_CLOUD_FOLDER_ID" != *$'\n'* ]]
+          echo "Yandex Search environment contract present"
+
+      - name: Configure runtime and run live smoke
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p deployment-evidence
+          chmod +x scripts/configure_yandex_search_stage.sh
+          scripts/configure_yandex_search_stage.sh 2>&1 | tee deployment-evidence/yandex-search-stage.log
+
+      - name: Record redacted final state
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p deployment-evidence
+          {
+            echo "workflow_run_id=$GITHUB_RUN_ID"
+            echo "workflow_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "bundle_sha=$(cat "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
+            docker ps --filter name=aimeton-auditor --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
+            curl -sS "$STAGE_URL/api/missions/search/yandex/health" || true
+          } | tee deployment-evidence/yandex-search-final-state.txt
+
+      - name: Upload Yandex Search deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yandex-search-stage-${{ github.run_id }}
+          path: deployment-evidence/
+          if-no-files-found: error
+          retention-days: 30
