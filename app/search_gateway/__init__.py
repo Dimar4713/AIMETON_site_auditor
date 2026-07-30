@@ -1,5 +1,6 @@
 from app.search_gateway.factory import (
     get_search_gateway,
+    identity_search_policy_from_env,
     reset_search_gateway,
     search_policy_from_env,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "SearchRequest",
     "SearchResponse",
     "get_search_gateway",
+    "identity_search_policy_from_env",
     "reset_search_gateway",
     "search_policy_from_env",
 ]

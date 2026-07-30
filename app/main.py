@@ -25,6 +25,7 @@ from app.company_intelligence_runtime import run_company_intelligence
 from app.discovery import run_hunt
 from app.entity_resolution.api import router as entity_resolution_router
 from app.evidence_crawler.api import router as evidence_crawler_router
+from app.identity_evidence.api import router as identity_evidence_router
 from app.external_sources import run_enriched_site_analysis
 from app.hunter_handbook import handbook
 from app.hunter_sources import get_hunter_sources
@@ -83,13 +84,14 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.15.0",
+    version="0.16.0",
     lifespan=lifespan,
 )
 app.include_router(runtime_router)
 app.include_router(mission_router)
 app.include_router(evidence_crawler_router)
 app.include_router(entity_resolution_router)
+app.include_router(identity_evidence_router)
 
 
 @app.middleware("http")
@@ -145,6 +147,8 @@ def health():
         "bootstrap_crawler": "/api/missions/{mission_id}/bootstrap-crawl",
         "entity_resolution": "/api/missions/{mission_id}/resolve-identity",
         "identity_history": "/api/missions/{mission_id}/identity-history",
+        "identity_search": "/api/missions/{mission_id}/identity-search",
+        "identity_evidence": "/api/missions/{mission_id}/identity-evidence",
         "search_gateway": "/api/search/health",
         "sef_company_profile": "/api/sef/company-profile",
         "sef_report_review_package": "/api/sef/report/review-package",

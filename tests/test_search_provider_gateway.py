@@ -27,6 +27,7 @@ from app.search_gateway.providers import (
     TavilyProvider,
     YandexProvider,
 )
+from app.search_gateway.factory import get_search_gateway, reset_search_gateway
 
 
 def request(query: str = "тестовая компания") -> SearchRequest:
@@ -484,3 +485,19 @@ def test_health_never_exposes_provider_credentials():
     assert "secret-yandex" not in payload
     assert "secret-tavily" not in payload
     assert all("configured" in item.model_dump() for item in gateway.health())
+
+
+def test_repository_secret_name_tavily_token_configures_adapter(monkeypatch):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setenv("TAVILY_TOKEN", "repo-secret-token")
+    monkeypatch.setenv("TAVILY_SEARCH_COST_USD", "0.008")
+    monkeypatch.setenv("SEARCH_MISSION_BUDGET_USD", "0.008")
+    reset_search_gateway()
+    try:
+        health = {
+            item.provider: item
+            for item in get_search_gateway().health()
+        }
+        assert health["tavily"].configured is True
+    finally:
+        reset_search_gateway()

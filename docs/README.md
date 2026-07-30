@@ -16,6 +16,7 @@
 - [Mission Orchestrator v0.1](architecture/MISSION-ORCHESTRATOR-V0.1.md) — единый Mission Contract для UI/REST/MCP, типизированный `NextActionPlan`, детерминированный Policy Guard, lifecycle и trace оборотов.
 - [Evidence Crawler Bootstrap v0.1](architecture/EVIDENCE-CRAWLER-BOOTSTRAP-V0.1.md) — исполнимый bootstrap-оборот `#85`: robots/sitemap, bounded same-domain fetch, identity signals, document hints и outcome для следующего плана.
 - [Provisional Entity Resolution v0.1](architecture/ENTITY-RESOLUTION-PROVISIONAL-V0.1.md) — candidate-срез `#84`: проверка provenance, competing candidates, explicit conflicts/unresolved, история ревизий и targeted search pivots без повышения bootstrap hints до accepted identity.
+- [Identity Search & Evidence Guard v0.1](architecture/IDENTITY-EVIDENCE-GUARD-V0.1.md) — следующий candidate-срез `#84`: Tavily discovery, отдельный fetch первичного документа, fail-closed promotion в evidence-backed `EntityIdentifier` и открытие targeted crawl без ложного `resolved`.
 - [SEF Claim & Evidence Ledger v0.1](architecture/SEF-CLAIM-EVIDENCE-LEDGER-V0.1.md) — evidence tiers, freshness, conflict groups, effective review и fail-closed client eligibility.
 - [SEF Company Profile v1](architecture/SEF-COMPANY-PROFILE-V0.1.md) — 14 секций, шесть критических пробелов и evidence-only проекция Ledger.
 

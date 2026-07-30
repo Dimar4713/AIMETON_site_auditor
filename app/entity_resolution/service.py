@@ -5,6 +5,7 @@ import json
 import re
 from copy import deepcopy
 from datetime import UTC, datetime
+from decimal import Decimal
 from functools import wraps
 from threading import RLock
 from typing import Callable, ParamSpec, TypeVar
@@ -207,6 +208,10 @@ class ProvisionalEntityResolver:
     def __init__(self) -> None:
         self._history: dict[str, list[IdentityResolutionResult]] = {}
         self._execution_cache: dict[
+            tuple[str, int],
+            tuple[str, IdentityResolutionResult],
+        ] = {}
+        self._promotion_cache: dict[
             tuple[str, int],
             tuple[str, IdentityResolutionResult],
         ] = {}
@@ -616,6 +621,7 @@ class ProvisionalEntityResolver:
                 ),
                 expected_sufficiency_gain=0.6,
                 ai_priority=0.8,
+                estimated_cost_by_currency={"USD": Decimal("0.008")},
             )
         )
         document_urls = sorted(
@@ -743,6 +749,156 @@ class ProvisionalEntityResolver:
             self._history.setdefault(mission_id, []).append(result)
             self._execution_cache[cache_key] = (input_digest, result)
             return deepcopy(result)
+
+    @_serialized
+    def promote_identifier_links(
+        self,
+        orchestrator: MissionOrchestrator,
+        mission_id: str,
+        *,
+        plan: NextActionPlan,
+        base_result_id: str,
+        accepted_identifier_ids: list[str],
+        artifact_ids: list[str],
+        authority_verified: bool,
+    ) -> IdentityResolutionResult:
+        orchestrator.validate_pending_plan(mission_id, plan)
+        if plan.selected_action.action_type != ActionType.FETCH_DOCUMENT:
+            raise ValueError("identity promotion requires a fetch_document plan")
+        if not accepted_identifier_ids:
+            raise ValueError("identity promotion requires accepted identifier links")
+        payload = {
+            "base_result_id": base_result_id,
+            "accepted_identifier_ids": sorted(set(accepted_identifier_ids)),
+            "artifact_ids": sorted(set(artifact_ids)),
+            "authority_verified": authority_verified,
+        }
+        promotion_bytes = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        promotion_digest = f"sha256:{hashlib.sha256(promotion_bytes).hexdigest()}"
+        cache_key = (mission_id, plan.turn_number)
+        cached = self._promotion_cache.get(cache_key)
+        if cached is not None:
+            if cached[0] != promotion_digest:
+                raise ValueError("identity promotion plan already executed with different input")
+            return deepcopy(cached[1])
+
+        history = self._history.get(mission_id)
+        if not history:
+            raise ValueError("identity history is empty")
+        base = next(
+            (item for item in history if item.id == base_result_id),
+            None,
+        )
+        if base is None:
+            raise ValueError("base identity result is not present in history")
+        if history[-1].id != base_result_id:
+            raise ValueError("identity promotion requires the latest revision")
+        if base.selected_candidate_id is None:
+            raise ValueError("base identity result has no selected candidate")
+
+        snapshot = orchestrator.get(mission_id)
+        candidates = deepcopy(base.candidates)
+        selected = next(
+            item
+            for item in candidates
+            if item.id == base.selected_candidate_id
+        )
+        selected.accepted_identifier_links = sorted(
+            set(selected.accepted_identifier_links)
+            | set(accepted_identifier_ids)
+        )
+        query_parts = [
+            f'"{identifier.value}"'
+            for identifier in selected.identifiers
+            if identifier.scheme in {"inn", "ogrn", "legal_name"}
+        ]
+        next_actions = [
+            ActionCandidate(
+                action_type=ActionType.CRAWL_URL,
+                target=str(snapshot.contract.target_url),
+                deficit_code="targeted_company_profile",
+                expected_sufficiency_gain=0.8,
+                ai_priority=0.9,
+            )
+        ]
+        if not authority_verified:
+            next_actions.append(
+                ActionCandidate(
+                    action_type=ActionType.QUERY_PROVIDER,
+                    target=" OR ".join(dict.fromkeys(query_parts)),
+                    deficit_code="official_registry_verification",
+                    expected_sufficiency_gain=0.65,
+                    ai_priority=0.75,
+                    estimated_cost_by_currency={"USD": Decimal("0.008")},
+                )
+            )
+        gaps = ["identity_relationship_scope"]
+        if not authority_verified:
+            gaps.insert(0, "official_registry_verification")
+        revision_number = len(history) + 1
+        result_id = _stable_id(
+            "identity_result",
+            mission_id,
+            revision_number,
+            promotion_digest,
+        )
+        result = IdentityResolutionResult(
+            id=result_id,
+            mission_id=mission_id,
+            analysis_id=snapshot.contract.analysis_id,
+            correlation_id=snapshot.contract.correlation_id,
+            revision_number=revision_number,
+            supersedes_result_id=base.id,
+            input_digest=promotion_digest,
+            created_at=datetime.now(UTC),
+            plan=plan,
+            state=IdentityResolutionState.PROVISIONAL,
+            selected_candidate_id=base.selected_candidate_id,
+            candidates=candidates,
+            conflicts=deepcopy(base.conflicts),
+            invalid_signals=deepcopy(base.invalid_signals),
+            gaps=gaps,
+            outcome=ActionOutcome(
+                state=ActionOutcomeState.SUCCEEDED,
+                artifact_refs=[
+                    result_id,
+                    *sorted(set(artifact_ids)),
+                    *sorted(set(accepted_identifier_ids)),
+                ],
+                reason_codes=[
+                    "identity_identifier_link_accepted",
+                    *(
+                        []
+                        if authority_verified
+                        else ["official_registry_verification_pending"]
+                    ),
+                ],
+            ),
+            recommended_feedback=SufficiencyFeedback(
+                achieved=max(
+                    snapshot.achieved_sufficiency,
+                    SufficiencyLevel.L2,
+                    key=lambda item: int(item.value[1:]),
+                ),
+                question_states={
+                    "identity": (
+                        QuestionState.VERIFIED
+                        if authority_verified
+                        else QuestionState.PARTIALLY_VERIFIED
+                    )
+                },
+                critical_gaps=gaps,
+            ),
+            next_action_candidates=next_actions,
+        )
+        self._history[mission_id].append(result)
+        self._promotion_cache[cache_key] = (promotion_digest, result)
+        return deepcopy(result)
 
     def history(self, mission_id: str) -> IdentityResolutionHistory:
         with self._lock:

@@ -8,8 +8,9 @@
 GitHub main + green Baseline CI
   → self-hosted runner on aimeton-main-server
   → exact checkout by full commit SHA
+  → protected runtime-secret materialization
   → transactional app-source switch
-  → docker compose build/up
+  → docker compose base + runtime-secret override build/up
   → container health
   → external health and MCP smoke
   → evidence artifact
@@ -24,6 +25,15 @@ OpenStack API immers.cloud в этот процесс не входит. Он з
 - `/opt/aimeton/auditor-stack` — постоянный deployment stack на VPS;
 - `/opt/aimeton/auditor-stack/app-source-sha.txt` — фактически развёрнутый SHA;
 - `/opt/aimeton/auditor-stack/.deployments/` — резервные и неуспешные bundle.
+- `/opt/aimeton/auditor-stack/.runtime-secrets.env` — runtime secrets с
+  правами `0600`, не входящие в source bundle;
+- `/opt/aimeton/auditor-stack/docker-compose.runtime-secrets.yml` —
+  несекретный Compose override, подключающий runtime secret file и
+  provider-policy.
+
+Repository/environment secret `TAVILY_TOKEN` обязателен для deployment
+версии `0.16.0+`. Workflow проверяет только наличие; значение не печатается,
+не попадает в source bundle и deployment artifacts.
 
 ## Предусловия runner
 
@@ -54,16 +64,19 @@ Checkout выполняется именно по этому SHA, после ч�
 2. проверяет полный 40-символьный SHA и обязательные файлы;
 3. формирует новый bundle во временном каталоге на том же файловом разделе;
 4. проверяет наличие stage MCP allowlist и относительного redirect;
-5. перемещает прежний `app-source` в timestamped backup;
-6. атомарно переименовывает подготовленный bundle в `app-source`;
-7. записывает `app-source-sha.txt`;
-8. запускает `docker compose build auditor`;
-9. выполняет `docker compose up -d --force-recreate auditor`;
-10. ожидает Docker status `healthy`;
-11. проверяет `/api/health`;
-12. проверяет `/mcp → 307 Location: /mcp/`;
-13. выполняет MCP `initialize` через `POST /mcp/`;
-14. сохраняет deployment evidence как GitHub Actions artifact.
+5. атомарно материализует `TAVILY_TOKEN` в отдельный файл `0600` и создаёт
+   Compose override без значения секрета;
+6. перемещает прежний `app-source` в timestamped backup;
+7. атомарно переименовывает подготовленный bundle в `app-source`;
+8. записывает `app-source-sha.txt`;
+9. запускает `docker compose -f docker-compose.yml -f
+   docker-compose.runtime-secrets.yml build auditor`;
+10. выполняет тот же compose stack с `up -d --force-recreate auditor`;
+11. ожидает Docker status `healthy`;
+12. проверяет `/api/health`;
+13. проверяет `/mcp → 307 Location: /mcp/`;
+14. выполняет MCP `initialize` через `POST /mcp/`;
+15. сохраняет deployment evidence как GitHub Actions artifact.
 
 ## Автоматический rollback
 
@@ -112,8 +125,14 @@ mv "$BACKUP" app-source
 # Записать полный SHA восстановленного bundle:
 printf '%s\n' '<FULL_PREVIOUS_SHA>' > app-source-sha.txt
 
-docker compose build auditor
-docker compose up -d --force-recreate auditor
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.runtime-secrets.yml \
+  build auditor
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.runtime-secrets.yml \
+  up -d --force-recreate auditor
 docker ps --filter name=aimeton-auditor
 docker logs --tail 200 aimeton-auditor
 ```
@@ -138,3 +157,10 @@ curl -sS -D - -o /dev/null --max-redirs 0 https://stage-auditor.aimeton.ru/mcp
 - MCP initialize: `200`;
 - artifact `stage-deployment-<sha>-<run_id>`;
 - контролируемый rollback test.
+
+Дополнительно для provider-secret слоя:
+
+- `.runtime-secrets.env` имеет mode `0600`;
+- Compose override не содержит значение token;
+- `/api/search/health` возвращает `secrets_exposed=false`;
+- deployment log и artifact не содержат token.

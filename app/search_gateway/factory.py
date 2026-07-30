@@ -9,9 +9,9 @@ from app.search_gateway.models import SearchPolicy
 from app.search_gateway.providers import SearxngProvider, TavilyProvider, YandexProvider
 
 
-def _decimal_env(name: str) -> Decimal:
+def _decimal_env(name: str, default: str = "0") -> Decimal:
     try:
-        return Decimal(os.getenv(name, "0").strip() or "0")
+        return Decimal(os.getenv(name, default).strip() or default)
     except InvalidOperation:
         return Decimal("0")
 
@@ -61,6 +61,26 @@ def search_policy_from_env() -> SearchPolicy:
     )
 
 
+def identity_search_policy_from_env() -> SearchPolicy:
+    base = search_policy_from_env()
+    order = tuple(
+        item.strip()
+        for item in os.getenv(
+            "IDENTITY_SEARCH_PROVIDER_ORDER",
+            "tavily,searxng",
+        ).split(",")
+        if item.strip()
+    )
+    return base.model_copy(
+        update={
+            "provider_order": order,
+            "allowed_providers": frozenset(order),
+            "allow_paid_fallback": False,
+            "retries": 0,
+        }
+    )
+
+
 @lru_cache(maxsize=1)
 def get_search_gateway() -> SearchGateway:
     quotas = {
@@ -81,7 +101,7 @@ def get_search_gateway() -> SearchGateway:
             ),
             SearxngProvider(os.getenv("SEARXNG_BASE_URL")),
             TavilyProvider(
-                os.getenv("TAVILY_API_KEY"),
+                os.getenv("TAVILY_TOKEN") or os.getenv("TAVILY_API_KEY"),
                 cost_amount=_decimal_env("TAVILY_SEARCH_COST_USD"),
             ),
         ],

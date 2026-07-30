@@ -100,10 +100,13 @@ Confidence ограничен `0.95`: bootstrap-сигналы не могут �
 - `accessed_at`;
 - normalized document digest.
 
-Поле `accepted_identifier_links` в этом срезе всегда пусто. Для accepted link
-потребуется фактически загруженный документ, Evidence Guard и схема
-`EntityIdentifier/Evidence`. Поэтому результат `provisional`, `conflicting`
-или `unresolved` физически не может быть выдан как разрешённая идентичность.
+Первоначальная bootstrap revision всегда имеет пустое
+`accepted_identifier_links`. Следующий candidate-срез
+`IDENTITY-EVIDENCE-GUARD-V0.1` может добавить link только после отдельного
+`query_provider → fetch_document`, загрузки документа, locator-bound evidence
+и fail-closed проверки источника и конкурирующих реквизитов. First-party link
+не переводит identity в `resolved`: официальный registry verification остаётся
+отдельным дефицитом.
 
 ## Следующий оборот
 
@@ -115,8 +118,10 @@ Confidence ограничен `0.95`: bootstrap-сигналы не могут �
 - same-domain `fetch_document` для найденных первичных документов;
 - `review_conflict`, когда автоматическое объединение запрещено.
 
-Эти записи являются кандидатами для Policy Guard. Endpoint не вызывает
-Yandex, Tavily или другой provider и не расходует бюджет.
+Эти записи являются кандидатами для Policy Guard. Сам
+`resolve-identity` endpoint не вызывает Yandex, Tavily или другой provider и
+не расходует бюджет; отдельный `identity-search` исполняет только выданный
+`query_provider` plan.
 
 ## История и граница v0.1
 
@@ -127,12 +132,15 @@ recovery относятся к `#88`.
 
 Срез не закрывает всю `#84`. Остаются:
 
-- повышение identity link только после Evidence Guard;
 - официальный registry/source verification;
 - distinguishing brand, branch, owner и affiliated entity;
 - human-review decision;
 - Benchmark identity fixtures для «Дедала» и контрольного набора;
 - интеграция с targeted crawler `#85` и УДП Evaluator `#86`.
+
+Candidate-реализация повышения identity link после Evidence Guard описана в
+`IDENTITY-EVIDENCE-GUARD-V0.1.md`; до merge/deployment она не считается
+фактом stage.
 
 ## Проверка
 

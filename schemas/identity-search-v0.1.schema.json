@@ -1,0 +1,688 @@
+{
+  "$defs": {
+    "ActionCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "action_type": {
+          "$ref": "#/$defs/ActionType"
+        },
+        "ai_priority": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Ai Priority",
+          "type": "number"
+        },
+        "deficit_code": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Deficit Code",
+          "type": "string"
+        },
+        "error_risk": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Error Risk",
+          "type": "number"
+        },
+        "estimated_cost_by_currency": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Estimated Cost By Currency",
+          "type": "object"
+        },
+        "estimated_latency_ms": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Estimated Latency Ms",
+          "type": "integer"
+        },
+        "expected_sufficiency_gain": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Expected Sufficiency Gain",
+          "type": "number"
+        },
+        "rate_limit_allowed": {
+          "default": true,
+          "title": "Rate Limit Allowed",
+          "type": "boolean"
+        },
+        "rights_allowed": {
+          "default": true,
+          "title": "Rights Allowed",
+          "type": "boolean"
+        },
+        "robots_allowed": {
+          "default": true,
+          "title": "Robots Allowed",
+          "type": "boolean"
+        },
+        "ssrf_validated": {
+          "default": true,
+          "title": "Ssrf Validated",
+          "type": "boolean"
+        },
+        "target": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action_type"
+      ],
+      "title": "ActionCandidate",
+      "type": "object"
+    },
+    "ActionDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "admissible": {
+          "title": "Admissible",
+          "type": "boolean"
+        },
+        "candidate": {
+          "$ref": "#/$defs/ActionCandidate"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "candidate",
+        "admissible"
+      ],
+      "title": "ActionDecision",
+      "type": "object"
+    },
+    "ActionOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_cost_by_currency": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Actual Cost By Currency",
+          "type": "object"
+        },
+        "artifact_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifact Refs",
+          "type": "array"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/$defs/ActionOutcomeState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "ActionOutcome",
+      "type": "object"
+    },
+    "ActionOutcomeState": {
+      "enum": [
+        "succeeded",
+        "partial",
+        "failed",
+        "blocked"
+      ],
+      "title": "ActionOutcomeState",
+      "type": "string"
+    },
+    "ActionType": {
+      "enum": [
+        "crawl_url",
+        "fetch_document",
+        "query_provider",
+        "resolve_identity",
+        "review_conflict",
+        "stop"
+      ],
+      "title": "ActionType",
+      "type": "string"
+    },
+    "AttemptState": {
+      "enum": [
+        "succeeded",
+        "empty",
+        "failed",
+        "skipped",
+        "cache_hit"
+      ],
+      "title": "AttemptState",
+      "type": "string"
+    },
+    "DiscoveryHint": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "discovered_at": {
+          "format": "date-time",
+          "title": "Discovered At",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "provider_call_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Provider Call Id",
+          "type": "string"
+        },
+        "snippet": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Snippet",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "provider_call_id",
+        "correlation_id",
+        "url",
+        "title",
+        "snippet",
+        "discovered_at"
+      ],
+      "title": "DiscoveryHint",
+      "type": "object"
+    },
+    "FallbackReason": {
+      "enum": [
+        "not_configured",
+        "policy_blocked",
+        "pricing_unknown",
+        "budget_blocked",
+        "quota_blocked",
+        "budget_exceeded",
+        "quota_exceeded",
+        "circuit_open",
+        "timeout",
+        "provider_error",
+        "empty_results"
+      ],
+      "title": "FallbackReason",
+      "type": "string"
+    },
+    "GatewayState": {
+      "enum": [
+        "success",
+        "degraded",
+        "unavailable"
+      ],
+      "title": "GatewayState",
+      "type": "string"
+    },
+    "NextActionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/ActionDecision"
+          },
+          "title": "Decisions",
+          "type": "array"
+        },
+        "input_deficits": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Deficits",
+          "type": "array"
+        },
+        "mission_id": {
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "selected_action": {
+          "$ref": "#/$defs/ActionCandidate"
+        },
+        "selection_reason": {
+          "title": "Selection Reason",
+          "type": "string"
+        },
+        "turn_number": {
+          "minimum": 1,
+          "title": "Turn Number",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mission_id",
+        "turn_number",
+        "input_deficits",
+        "decisions",
+        "selected_action",
+        "selection_reason"
+      ],
+      "title": "NextActionPlan",
+      "type": "object"
+    },
+    "ProviderAttempt": {
+      "additionalProperties": false,
+      "properties": {
+        "cost_amount": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ],
+          "default": "0",
+          "title": "Cost Amount"
+        },
+        "cost_currency": {
+          "default": "USD",
+          "pattern": "^[A-Z]{3}$",
+          "title": "Cost Currency",
+          "type": "string"
+        },
+        "latency_ms": {
+          "minimum": 0,
+          "title": "Latency Ms",
+          "type": "integer"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FallbackReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "request_fingerprint": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Request Fingerprint",
+          "type": "string"
+        },
+        "result_count": {
+          "minimum": 0,
+          "title": "Result Count",
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/AttemptState"
+        }
+      },
+      "required": [
+        "provider",
+        "state",
+        "request_fingerprint",
+        "latency_ms",
+        "result_count"
+      ],
+      "title": "ProviderAttempt",
+      "type": "object"
+    },
+    "ProviderCall": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "finished_at": {
+          "format": "date-time",
+          "title": "Finished At",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "mission_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Mission Id",
+          "type": "string"
+        },
+        "operation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "provider_ref": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Provider Ref",
+          "type": "string"
+        },
+        "request_fingerprint": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Request Fingerprint",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ProviderCallState"
+        }
+      },
+      "required": [
+        "id",
+        "mission_id",
+        "correlation_id",
+        "provider_ref",
+        "operation",
+        "request_fingerprint",
+        "state",
+        "started_at",
+        "finished_at"
+      ],
+      "title": "ProviderCall",
+      "type": "object"
+    },
+    "ProviderCallState": {
+      "enum": [
+        "succeeded",
+        "partial",
+        "failed",
+        "skipped"
+      ],
+      "title": "ProviderCallState",
+      "type": "string"
+    },
+    "QuestionState": {
+      "enum": [
+        "verified",
+        "partially_verified",
+        "conflicting",
+        "not_found_after_sufficient_search",
+        "not_searched",
+        "blocked",
+        "degraded"
+      ],
+      "title": "QuestionState",
+      "type": "string"
+    },
+    "SearchDiagnostics": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/ProviderAttempt"
+          },
+          "title": "Attempts",
+          "type": "array"
+        },
+        "cache_hit": {
+          "default": false,
+          "title": "Cache Hit",
+          "type": "boolean"
+        },
+        "fallback_used": {
+          "default": false,
+          "title": "Fallback Used",
+          "type": "boolean"
+        },
+        "selected_provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selected Provider"
+        },
+        "state": {
+          "$ref": "#/$defs/GatewayState"
+        },
+        "total_cost_by_currency": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Total Cost By Currency",
+          "type": "object"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "SearchDiagnostics",
+      "type": "object"
+    },
+    "StopReason": {
+      "enum": [
+        "sufficiency_reached",
+        "source_space_exhausted",
+        "budget_exhausted",
+        "critical_source_blocked",
+        "identity_unresolved",
+        "unresolved_conflict",
+        "technical_failure",
+        "policy_no_admissible_action",
+        "invalid_completion"
+      ],
+      "title": "StopReason",
+      "type": "string"
+    },
+    "SufficiencyFeedback": {
+      "additionalProperties": false,
+      "properties": {
+        "achieved": {
+          "$ref": "#/$defs/SufficiencyLevel",
+          "default": "L0"
+        },
+        "critical_gaps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Critical Gaps",
+          "type": "array"
+        },
+        "question_states": {
+          "additionalProperties": {
+            "$ref": "#/$defs/QuestionState"
+          },
+          "title": "Question States",
+          "type": "object"
+        },
+        "stop_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "question_states"
+      ],
+      "title": "SufficiencyFeedback",
+      "type": "object"
+    },
+    "SufficiencyLevel": {
+      "enum": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5"
+      ],
+      "title": "SufficiencyLevel",
+      "type": "string"
+    }
+  },
+  "$id": "https://aimeton.ru/schemas/identity-search-v0.1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "analysis_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Analysis Id",
+      "type": "string"
+    },
+    "correlation_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "diagnostics": {
+      "$ref": "#/$defs/SearchDiagnostics"
+    },
+    "discovery_hints": {
+      "items": {
+        "$ref": "#/$defs/DiscoveryHint"
+      },
+      "title": "Discovery Hints",
+      "type": "array"
+    },
+    "id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "identity_result_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Identity Result Id",
+      "type": "string"
+    },
+    "mission_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Mission Id",
+      "type": "string"
+    },
+    "next_action_candidates": {
+      "items": {
+        "$ref": "#/$defs/ActionCandidate"
+      },
+      "title": "Next Action Candidates",
+      "type": "array"
+    },
+    "outcome": {
+      "$ref": "#/$defs/ActionOutcome"
+    },
+    "plan": {
+      "$ref": "#/$defs/NextActionPlan"
+    },
+    "provider_call": {
+      "$ref": "#/$defs/ProviderCall"
+    },
+    "recommended_feedback": {
+      "$ref": "#/$defs/SufficiencyFeedback"
+    },
+    "schema_version": {
+      "default": "0.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "mission_id",
+    "analysis_id",
+    "correlation_id",
+    "identity_result_id",
+    "plan",
+    "provider_call",
+    "diagnostics",
+    "outcome",
+    "recommended_feedback"
+  ],
+  "title": "IdentitySearchResult",
+  "type": "object"
+}

@@ -85,6 +85,11 @@ jobs:
       OPENSTACK_SERVER_NAME: ${{ vars.OPENSTACK_SERVER_NAME }}
       BACKUP_KEEP: ${{ vars.STAGE_BACKUP_KEEP || '5' }}
       FAILED_KEEP: ${{ vars.STAGE_FAILED_KEEP || '2' }}
+      TAVILY_SEARCH_COST_USD: ${{ vars.TAVILY_SEARCH_COST_USD || '0.008' }}
+      SEARCH_MISSION_BUDGET_USD: ${{ vars.SEARCH_MISSION_BUDGET_USD || '0.008' }}
+      SEARCH_QUOTA_TAVILY: ${{ vars.SEARCH_QUOTA_TAVILY || '10' }}
+      IDENTITY_SEARCH_PROVIDER_ORDER: ${{ vars.IDENTITY_SEARCH_PROVIDER_ORDER || 'tavily,searxng' }}
+      IDENTITY_AUTHORITY_HOSTS: ${{ vars.IDENTITY_AUTHORITY_HOSTS || 'egrul.nalog.ru,service.nalog.ru,bo.nalog.ru' }}
 
     steps:
       - name: Resolve exact deployment SHA
@@ -135,6 +140,17 @@ jobs:
           . .venv-openstack-deploy/bin/activate
           python -m pip install --disable-pip-version-check -q -r requirements-openstack.txt
 
+      - name: Validate Tavily secret contract
+        shell: bash
+        env:
+          TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$TAVILY_TOKEN" || {
+            echo "Missing required stage secret: TAVILY_TOKEN" >&2
+            exit 1
+          }
+
       - name: OpenStack preflight
         shell: bash
         run: |
@@ -160,6 +176,7 @@ jobs:
         env:
           DEPLOY_SHA: ${{ steps.target.outputs.sha }}
           SOURCE_DIR: ${{ github.workspace }}
+          TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
         run: |
           set -Eeuo pipefail
           mkdir -p deployment-evidence
