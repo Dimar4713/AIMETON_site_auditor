@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.entity_resolution.dadata_api import router as dadata_router
 from app.entity_resolution.factory import get_entity_resolver
 from app.entity_resolution.models import (
     IdentityResolutionHistory,
@@ -16,6 +17,7 @@ from app.mission_orchestrator import (
 
 router = APIRouter(prefix="/api/missions", tags=["entity-resolution"])
 router.include_router(registry_router)
+router.include_router(dadata_router)
 
 
 class ApiModel(BaseModel):
