@@ -57,6 +57,13 @@ _Last updated: 2026-07-30_
   но не вернул usable result; SearXNG fallback дал пять discovery hints.
   Продолжение на cache завершило Evidence Guard с дополнительной стоимостью
   `$0`. Official registry verification остаётся открытым дефицитом.
+- Подготовлен локальный candidate `0.16.2 / Identity Benchmark-5 v0.1`: пять
+  замороженных Golden-5 случаев проходят воспроизводимый путь
+  `sanitized HTML → signals → provisional identity` без сети, provider и LLM;
+  добавлено извлечение definition-list `dt/dd`, необходимое для реальных
+  страниц реквизитов.
+  До merge и зелёного CI это не является фактом `main`; `#84` остаётся
+  открытой для official registry verification и human review.
 
 ## Текущее положение
 

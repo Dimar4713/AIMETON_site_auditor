@@ -61,7 +61,7 @@ def extract_html(html: str, *, base_url: str) -> Extraction:
 
     counters: dict[tuple[ContentRegion, str], int] = {}
     root = soup.body or soup
-    for element in root.select("h1, h2, h3, h4, p, li"):
+    for element in root.select("h1, h2, h3, h4, p, li, dt, dd"):
         text = normalize_text(element.get_text(" ", strip=True))
         if not text:
             continue

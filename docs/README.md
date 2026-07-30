@@ -10,6 +10,7 @@
 - [Полный план развития системы поиска, анализа и действий](roadmap/AIMETON_Site_Auditor_full_system_development_plan.md) — целевая архитектура Site Auditor как прикладного Runtime AIMETON: 12 РПТК, федеративный поиск, многоплоскостность, фрактальные ветви, усушение поиска, свойства мишеней, сценарии, Evidence/Entity Graph, Hunter, отчётность, Capability Management и очередность реализации.
 - [SEF T0 baseline](baseline/SEF-T0-BASELINE-2026-07-28.md) — точные SHA сервиса, stage, Sentinel и инфраструктуры, evidence ATS-09A, teardown/no-orphan и честная фиксация красного внешнего валидатора.
 - [SEF Benchmark-20 v0.1](benchmarks/SEF-BENCHMARK-20-V0.1.md) — замороженная выборка из 20 компаний и ручной identity-эталон для первых пяти.
+- [Identity Benchmark-5 v0.1](benchmarks/IDENTITY-BENCHMARK-5-V0.1.md) — воспроизводимый HTML → signals → Entity Resolution regression по Golden-5.
 - [SEF Mission и Evidence Contract v0.1](architecture/SEF-CONTRACT-V0.1.md) — provider-neutral модель данных, SQL-миграция и fail-closed инварианты доказательности.
 - [SEF Provider Gateway v0.1 → SR-G1](architecture/SEF-PROVIDER-GATEWAY-V0.1.md) — единый контракт Yandex/SearXNG/Tavily, operational readiness, fail-closed pricing/budget/quota, fallback и безопасная телеметрия.
 - [SEF Document Fetch/Extract v0.1 → SR-G1](architecture/SEF-DOCUMENT-FETCH-EXTRACT-V0.1.md) — HTTP-first загрузка, каскад кодировок, multi-area/header/footer extraction, redirect/canonical identity, digest, locators и строгий переход `hint → document → evidence`.
