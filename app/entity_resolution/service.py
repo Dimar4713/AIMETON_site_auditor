@@ -98,6 +98,39 @@ def _normalized_text(value: str) -> str:
     )
 
 
+def _normalized_legal_name(value: str) -> str:
+    normalized = _normalized_text(value)
+    match = re.match(
+        r"^(ооо|пао|ао|зао|ип)\s+(.+?)"
+        r"(?:\s+(?:реквизиты|контакты|официальный\s+сайт|"
+        r"информация\s+о\s+компании|карточка\s+предприятия))?$",
+        normalized,
+    )
+    if match is None:
+        return normalized
+    return f"{match.group(1)} {match.group(2)}".strip()
+
+
+def _display_legal_name(value: str) -> str:
+    compact = " ".join(value.split()).strip(" ,.;")
+    quoted = re.match(
+        r"^((?:ООО|ПАО|АО|ЗАО|ИП)\s+"
+        r"(?:[«„“\"]\s*[^»”“\"]{2,120}\s*[»”“\"]"
+        r"|'\s*[^']{2,120}\s*'))",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if quoted is not None:
+        return quoted.group(1)
+    return re.sub(
+        r"\s+(?:реквизиты|контакты|официальный\s+сайт|"
+        r"информация\s+о\s+компании|карточка\s+предприятия)$",
+        "",
+        compact,
+        flags=re.IGNORECASE,
+    )
+
+
 def _normalize_signal(signal: IdentitySignal) -> str:
     value = " ".join(signal.value.split()).strip(" ,.;")
     if signal.kind in {IdentitySignalKind.INN, IdentitySignalKind.OGRN}:
@@ -109,6 +142,8 @@ def _normalize_signal(signal: IdentitySignal) -> str:
         return f"+{digits}"
     if signal.kind == IdentitySignalKind.EMAIL:
         return value.casefold()
+    if signal.kind == IdentitySignalKind.LEGAL_NAME:
+        return _normalized_legal_name(value)
     return _normalized_text(value)
 
 
@@ -296,15 +331,7 @@ class ProvisionalEntityResolver:
                         ),
                     )
                 )
-        return sorted(
-            result,
-            key=lambda item: (
-                item[1].document_id,
-                item[1].kind,
-                item[1].normalized_value,
-                item[1].locator,
-            ),
-        )
+        return result
 
     @staticmethod
     def _build_candidates(
@@ -336,27 +363,64 @@ class ProvisionalEntityResolver:
 
         raw_conflicts: list[tuple[str, list[str], str]] = []
         for document_id, items in by_document.items():
-            names = {
-                _anchor_key(signal, ref)
-                for signal, ref in items
+            names = [
+                (index, _anchor_key(signal, ref))
+                for index, (signal, ref) in enumerate(items)
                 if signal.kind == IdentitySignalKind.LEGAL_NAME
-            }
-            strong = {
-                _anchor_key(signal, ref)
-                for signal, ref in items
+            ]
+            strong = [
+                (index, _anchor_key(signal, ref))
+                for index, (signal, ref) in enumerate(items)
                 if signal.kind in {IdentitySignalKind.INN, IdentitySignalKind.OGRN}
-            }
-            if len(names) == 1:
-                name = next(iter(names))
-                for identifier in strong:
+            ]
+            ambiguous = False
+            strong_groups: list[list[tuple[int, tuple[str, str]]]] = []
+            for item in strong:
+                if not strong_groups:
+                    strong_groups.append([item])
+                    continue
+                previous_index = strong_groups[-1][-1][0]
+                has_name_between = any(
+                    previous_index < name_index < item[0]
+                    for name_index, _name in names
+                )
+                repeated_kind = any(
+                    previous[1][0] == item[1][0]
+                    for previous in strong_groups[-1]
+                )
+                if has_name_between or repeated_kind:
+                    strong_groups.append([item])
+                else:
+                    strong_groups[-1].append(item)
+            for group in strong_groups:
+                if not names:
+                    continue
+                distances = [
+                    (
+                        sum(
+                            abs(strong_index - name_index)
+                            for strong_index, _identifier in group
+                        ),
+                        name_index,
+                        name,
+                    )
+                    for name_index, name in names
+                ]
+                best_distance = min(item[0] for item in distances)
+                nearest = [item for item in distances if item[0] == best_distance]
+                if len(nearest) != 1:
+                    ambiguous = True
+                    continue
+                name = nearest[0][2]
+                for _strong_index, identifier in group:
                     sets.union(name, identifier)
-            elif len(names) > 1 and strong:
+            if ambiguous:
                 raw_conflicts.append(
                     (
                         "ambiguous_document_attribution",
                         [document_id],
-                        "Несколько юридических наименований и реквизиты найдены "
-                        "в одном документе; автоматическое объединение запрещено.",
+                        "Реквизит равноудалён от нескольких юридических "
+                        "наименований; автоматическое объединение запрещено.",
                     )
                 )
 
@@ -405,17 +469,25 @@ class ProvisionalEntityResolver:
                 if _anchor_key(signal, ref) in group
             ]
             document_ids = {ref.document_id for _signal, ref in relevant}
-            weak = [
-                (signal, ref)
-                for signal, ref in valid
-                if ref.document_id in document_ids
-                and signal.kind
-                in {
-                    IdentitySignalKind.PHONE,
-                    IdentitySignalKind.EMAIL,
-                    IdentitySignalKind.ADDRESS,
-                }
-            ]
+            has_strong_identifier = any(
+                signal.kind in {IdentitySignalKind.INN, IdentitySignalKind.OGRN}
+                for signal, _ref in relevant
+            )
+            weak = (
+                [
+                    (signal, ref)
+                    for signal, ref in valid
+                    if ref.document_id in document_ids
+                    and signal.kind
+                    in {
+                        IdentitySignalKind.PHONE,
+                        IdentitySignalKind.EMAIL,
+                        IdentitySignalKind.ADDRESS,
+                    }
+                ]
+                if has_strong_identifier
+                else []
+            )
             relevant.extend(weak)
             names = [
                 ref.value
@@ -424,7 +496,7 @@ class ProvisionalEntityResolver:
             ]
             canonical_name = (
                 sorted(
-                    set(names),
+                    {_display_legal_name(value) for value in names},
                     key=lambda value: (-len(value), value.casefold()),
                 )[0]
                 if names

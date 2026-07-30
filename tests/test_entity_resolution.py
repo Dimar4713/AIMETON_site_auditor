@@ -289,6 +289,108 @@ def test_same_name_with_different_identifiers_stays_competing():
     assert result.next_action_candidates[0].action_type == ActionType.REVIEW_CONFLICT
 
 
+@pytest.mark.parametrize(
+    ("target_name", "bank_name"),
+    [
+        ('АО «Селектел»', None),
+        ('ООО "СЭНДИ"', 'ПАО "БАНК УРАЛСИБ"'),
+        ('ООО „Анатомика“', 'ПАО "СБЕРБАНК"'),
+    ],
+)
+def test_real_world_requisites_select_target_by_nearest_strong_identifiers(
+    target_name,
+    bank_name,
+):
+    orchestrator = MissionOrchestrator()
+    resolver = ProvisionalEntityResolver()
+    mission, crawl_plan = _crawl_plan(orchestrator)
+    batch = _batch(
+        mission,
+        crawl_plan,
+        name=f"{target_name} Реквизиты",
+    )
+    if bank_name:
+        batch.identity_signals.append(
+            _signal(
+                IdentitySignalKind.LEGAL_NAME,
+                bank_name,
+                "document_requisites",
+                "requisites",
+            )
+        )
+    resolution_plan = _record_crawl_and_plan_resolution(
+        orchestrator,
+        mission,
+        crawl_plan,
+    )
+
+    result = resolver.resolve(
+        orchestrator,
+        mission.contract.mission_id,
+        plan=resolution_plan,
+        bootstrap_results=[batch],
+    )
+
+    assert result.state == IdentityResolutionState.PROVISIONAL
+    selected = next(
+        item for item in result.candidates if item.id == result.selected_candidate_id
+    )
+    assert selected.canonical_name == target_name
+    assert {
+        item.scheme for item in selected.identifiers
+    } >= {"legal_name", "inn", "ogrn"}
+    if bank_name:
+        bank_candidates = [
+            item for item in result.candidates if item.canonical_name == bank_name
+        ]
+        assert len(bank_candidates) == 1
+        assert bank_candidates[0].confidence == 0.17
+
+
+def test_two_nearest_strong_legal_entities_remain_competing():
+    orchestrator = MissionOrchestrator()
+    resolver = ProvisionalEntityResolver()
+    mission, crawl_plan = _crawl_plan(orchestrator)
+    batch = _batch(mission, crawl_plan, name='ООО "Альфа"')
+    batch.identity_signals.extend(
+        [
+            _signal(
+                IdentitySignalKind.LEGAL_NAME,
+                'ООО "Бета"',
+                "document_requisites",
+                "requisites",
+            ),
+            _signal(
+                IdentitySignalKind.INN,
+                "2465000007",
+                "document_requisites",
+                "requisites",
+            ),
+            _signal(
+                IdentitySignalKind.OGRN,
+                "1232400000007",
+                "document_requisites",
+                "requisites",
+            ),
+        ]
+    )
+    resolution_plan = _record_crawl_and_plan_resolution(
+        orchestrator,
+        mission,
+        crawl_plan,
+    )
+
+    result = resolver.resolve(
+        orchestrator,
+        mission.contract.mission_id,
+        plan=resolution_plan,
+        bootstrap_results=[batch],
+    )
+
+    assert result.state == IdentityResolutionState.CONFLICTING
+    assert result.selected_candidate_id is None
+
+
 def test_invalid_identifier_is_not_promoted_and_requires_more_search():
     orchestrator = MissionOrchestrator()
     resolver = ProvisionalEntityResolver()

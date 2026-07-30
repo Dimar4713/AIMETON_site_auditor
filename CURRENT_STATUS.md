@@ -39,12 +39,16 @@ _Last updated: 2026-07-30_
   ревизия, `accepted_identifier_links=[]`, следующий `query_provider` остался
   только candidate и не выполнялся. Registry verification, accepted identity
   links, human review и Benchmark identity остаются следующими срезами `#84`.
-- После добавления repository secret `TAVILY_TOKEN` подготовлен локальный
-  candidate следующего среза `#84`: `query_provider → DiscoveryHint →
-  fetch_document → Evidence Guard → accepted_identifier_links → targeted
-  crawl candidate`. Версия candidate `0.16.0`. До merge, зелёного CI, Deploy
-  Stage и live read-back фактическим состоянием остаётся `0.15.0`; сам secret
-  и его значение в документации, диагностике и логах не фиксируются.
+- Evidence Guard слит PR `#101` и развёрнут на stage: версия `0.16.0`, exact
+  SHA `1ed2376ab589b1174da29998cfbda7fdb4ede127`, Deploy Stage
+  `#30516485317` — success. Tavily operationally ready; secret не
+  экспонируется.
+- Live-проверка трёх first-party страниц выявила P0 real-world attribution
+  defect до provider call; Tavily credit не расходовался. Подготовлен
+  candidate `0.16.1`: точные границы legal name/address, привязка групп
+  ИНН/ОГРН к ближайшему юридическому имени и отделение банковского субъекта.
+  До merge, CI, deployment и повторного live-smoke фактом stage остаётся
+  `0.16.0`; `#84` и `#85` остаются открытыми.
 
 ## Текущее положение
 

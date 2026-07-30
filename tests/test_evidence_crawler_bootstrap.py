@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -9,6 +10,12 @@ from app.document_pipeline import (
     DocumentPipeline,
     StaticHttpFetcher,
 )
+from app.document_pipeline.extractor import extract_html
+from app.document_pipeline.models import (
+    DocumentDiagnostics,
+    FetchPath,
+    FetchedDocument,
+)
 from app.evidence_crawler import (
     BootstrapCrawlPolicy,
     BootstrapEvidenceCrawler,
@@ -17,6 +24,7 @@ from app.evidence_crawler import (
     MetadataResponse,
     RobotsState,
 )
+from app.evidence_crawler.models import IdentitySignalKind
 from app.mission_orchestrator import (
     ActionCandidate,
     ActionOutcomeState,
@@ -30,10 +38,12 @@ from app.mission_orchestrator import (
     default_site_mission_request,
 )
 from app.scraper import FetchError
+from app.sef.models import Document, DocumentFetchState
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "bootstrap"
+IDENTITY_FIXTURES = ROOT / "tests" / "fixtures" / "entity_resolution"
 
 
 class FakeMetadataFetcher(MetadataFetcher):
@@ -69,6 +79,73 @@ class FakeMetadataFetcher(MetadataFetcher):
                 media_type="",
             ),
         )
+
+
+def _fixture_document(filename: str) -> FetchedDocument:
+    html = (IDENTITY_FIXTURES / filename).read_text(encoding="utf-8")
+    url = f"https://example.test/{filename}"
+    extraction = extract_html(html, base_url=url)
+    digest = f"sha256:{'a' * 64}"
+    return FetchedDocument(
+        document=Document(
+            id=f"document_{filename}",
+            mission_id="mission_fixture",
+            source_id="source_fixture",
+            correlation_id="correlation_fixture",
+            url=url,
+            title=filename,
+            accessed_at=datetime(2026, 7, 30, tzinfo=UTC),
+            fetch_status=DocumentFetchState.FETCHED,
+            content_digest=digest,
+            media_type="text/html",
+        ),
+        raw_content_digest=f"sha256:{'b' * 64}",
+        normalized_content_digest=digest,
+        normalized_text=extraction.text,
+        blocks=extraction.blocks,
+        links=extraction.links,
+        tables=extraction.tables,
+        diagnostics=DocumentDiagnostics(
+            request_fingerprint=f"sha256:{'c' * 64}",
+            path=FetchPath.STATIC,
+            raw_bytes=len(html.encode("utf-8")),
+            latency_ms=1,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_target", "expected_bank"),
+    [
+        ("selectel_requisites.html", "АО «Селектел»", None),
+        ("sendy_requisites.html", 'ООО "СЭНДИ"', "ПАО «БАНК УРАЛСИБ»"),
+        ("bsk_requisites.html", "ООО „Анатомика“", 'ПАО "СБЕРБАНК"'),
+    ],
+)
+def test_real_world_identity_extraction_has_exact_boundaries(
+    filename,
+    expected_target,
+    expected_bank,
+):
+    signals = BootstrapEvidenceCrawler._extract_identity_signals(
+        _fixture_document(filename)
+    )
+    legal_names = [
+        item.value
+        for item in signals
+        if item.kind == IdentitySignalKind.LEGAL_NAME
+    ]
+    addresses = [
+        item.value
+        for item in signals
+        if item.kind == IdentitySignalKind.ADDRESS
+    ]
+
+    assert expected_target in legal_names
+    if expected_bank is not None:
+        assert expected_bank in legal_names
+    assert all("официальный сайт" not in item.casefold() for item in legal_names)
+    assert all("адреса и контакты" not in item.casefold() for item in addresses)
 
 
 def _mission_and_plan(orchestrator: MissionOrchestrator):
