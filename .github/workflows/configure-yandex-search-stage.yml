@@ -2,6 +2,10 @@ name: Configure Yandex Search Stage
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/deploy-triggers/yandex-search-stage
 
 permissions:
   contents: read
