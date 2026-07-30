@@ -58,6 +58,32 @@ jobs:
           done
           echo "DaData environment credential contract present"
 
+      - name: Align stage smoke with runtime health contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/configure_dadata_stage.sh")
+          text = path.read_text(encoding="utf-8")
+          old = '''assert payload.get("configured") is True, payload
+          assert "api_token_present" in payload, payload
+          assert "secret_present" in payload, payload
+          assert payload["api_token_present"] is True, payload
+          assert payload["secret_present"] is True, payload
+          print(json.dumps({"provider": "dadata", "configured": True}, ensure_ascii=False))'''
+          new = '''assert payload.get("state") == "active", payload
+          assert payload.get("api_token_configured") is True, payload
+          assert payload.get("secret_configured") is True, payload
+          assert payload.get("secrets_exposed") is False, payload
+          print(json.dumps({"provider": "dadata", "state": "active", "secrets_exposed": False}, ensure_ascii=False, sort_keys=True))'''
+          if old not in text:
+              raise SystemExit("Expected legacy DaData health assertions not found")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+          bash -n scripts/configure_dadata_stage.sh
+
       - name: Configure runtime and run live smoke
         shell: bash
         run: |
