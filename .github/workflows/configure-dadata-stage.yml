@@ -58,7 +58,7 @@ jobs:
           done
           echo "DaData environment credential contract present"
 
-      - name: Align stage smoke with runtime health contract
+      - name: Align stage smoke with runtime contracts
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -67,20 +67,32 @@ jobs:
 
           path = Path("scripts/configure_dadata_stage.sh")
           text = path.read_text(encoding="utf-8")
-          old = '''assert payload.get("configured") is True, payload
+
+          old_health = '''assert payload.get("configured") is True, payload
           assert "api_token_present" in payload, payload
           assert "secret_present" in payload, payload
           assert payload["api_token_present"] is True, payload
           assert payload["secret_present"] is True, payload
           print(json.dumps({"provider": "dadata", "configured": True}, ensure_ascii=False))'''
-          new = '''assert payload.get("state") == "active", payload
+          new_health = '''assert payload.get("state") == "active", payload
           assert payload.get("api_token_configured") is True, payload
           assert payload.get("secret_configured") is True, payload
           assert payload.get("secrets_exposed") is False, payload
           print(json.dumps({"provider": "dadata", "state": "active", "secrets_exposed": False}, ensure_ascii=False, sort_keys=True))'''
-          if old not in text:
+
+          old_lookup = '''assert "document_digest" in payload or payload.get("state") == "unresolved", payload'''
+          new_lookup = '''records = payload.get("records") or []
+          if payload.get("state") != "unresolved":
+              assert records, payload
+              assert all(record.get("response_digest") for record in records), payload'''
+
+          if old_health not in text:
               raise SystemExit("Expected legacy DaData health assertions not found")
-          path.write_text(text.replace(old, new), encoding="utf-8")
+          if old_lookup not in text:
+              raise SystemExit("Expected legacy DaData lookup digest assertion not found")
+
+          text = text.replace(old_health, new_health).replace(old_lookup, new_lookup)
+          path.write_text(text, encoding="utf-8")
           PY
           bash -n scripts/configure_dadata_stage.sh
 
