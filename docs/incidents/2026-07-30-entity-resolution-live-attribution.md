@@ -1,7 +1,7 @@
 # Incident: ложный identity conflict на реальных страницах реквизитов
 
 Дата обнаружения: 2026-07-30  
-Статус: исправление подготовлено локально; stage ещё не подтверждён  
+Статус: исправлено и подтверждено на stage
 Связанная задача: `#84`
 
 ## Фактическое состояние
@@ -27,7 +27,7 @@ Sendy и БСК.
 Дополнительно label и value в соседних HTML-блоках/табличных ячейках не всегда
 извлекались как единый provenance-bearing signal.
 
-## Решение candidate `0.16.1`
+## Решение `0.16.1`
 
 - legal name ограничивается закрывающей кавычкой или границей bare-name;
 - полные формы `ООО/АО/ПАО/ЗАО` канонизируются с сокращёнными;
@@ -52,6 +52,34 @@ Sendy и БСК.
 
 Интеграционный тест проходит путь `HTML extraction → bootstrap signals →
 provisional resolution` и проверяет target name, ИНН, ОГРН и отсутствие
-ложного address fragment. Публикация, CI, deployment и повторный
-one-credit live smoke должны быть зафиксированы отдельным evidence после
-фактического выполнения.
+ложного address fragment. Фактические CI, deployment и live evidence
+зафиксированы ниже.
+
+## Deployment и live evidence
+
+- implementation PR: `#102`;
+- merge/deployment SHA:
+  `5d7cb748f95868b92871aaa6fbce842c29f93ea9`;
+- PR Baseline CI: `#30521337143` — success;
+- main Baseline CI: `#30521415347` — success;
+- Deploy Stage: `#30521495457` — success;
+- stage read-back: `version=0.16.1`, exact deployment SHA;
+- Tavily и SearXNG: active; secrets не экспонируются.
+
+Повторный live-цикл использовал first-party страницу БСК:
+
+1. bootstrap завершён;
+2. resolver выбрал provisional ООО «Анатомика» с ИНН `2308284006` и ОГРН
+   `1222300007225`;
+3. Tavily Basic вызван ровно один раз (`quota 10 → 9`), но usable results не
+   вернул;
+4. бесплатный SearXNG fallback сформировал пять discovery hints;
+5. продолжение той же поисковой сигнатуры из cache стоило `$0`;
+6. `bsckrd.ru/requisites` загружен как first-party document;
+7. Evidence Guard принял ИНН и ОГРН с locator `footer/li[5]` и `footer/li[6]`;
+8. identity history содержит две ревизии, targeted crawl candidate создан;
+9. `official_registry_verification` остаётся открытым дефицитом.
+
+Таким образом, P0-дефект attribution устранён. Tavily delivery и budget
+подтверждены, но его search quality на данном сложном identity query не
+подтверждена: полезный документ в этом smoke найден через SearXNG fallback.
