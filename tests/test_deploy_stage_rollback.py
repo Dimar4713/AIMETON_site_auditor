@@ -90,6 +90,7 @@ exit 22
             "STAGE_URL": "https://stage.invalid",
             "HEALTH_TIMEOUT": "5",
             "LOCK_FILE": str(tmp_path / "deploy.lock"),
+            "TAVILY_TOKEN": "deployment-test-value",
         }
     )
 
@@ -105,6 +106,15 @@ exit 22
     assert result.returncode != 0
     assert "ROLLBACK:" in result.stdout
     assert "Rollback restored SHA" in result.stdout
+    assert "deployment-test-value" not in result.stdout
+    runtime_secret = stack_dir / ".runtime-secrets.env"
+    assert runtime_secret.stat().st_mode & 0o777 == 0o600
+    assert runtime_secret.read_text(encoding="utf-8").strip().startswith(
+        "TAVILY_TOKEN="
+    )
+    assert "deployment-test-value" not in (
+        stack_dir / "docker-compose.runtime-secrets.yml"
+    ).read_text(encoding="utf-8")
     assert (stack_dir / "app-source-sha.txt").read_text(encoding="utf-8").strip() == previous_sha
     assert (stack_dir / "app-source" / "marker.txt").read_text(encoding="utf-8").strip() == "previous-bundle"
 

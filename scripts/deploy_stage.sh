@@ -11,6 +11,12 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 BACKUP_KEEP="${BACKUP_KEEP:-5}"
 FAILED_KEEP="${FAILED_KEEP:-2}"
 LOCK_FILE="${LOCK_FILE:-/tmp/aimeton-auditor-stage-deploy.lock}"
+TAVILY_TOKEN="${TAVILY_TOKEN:-}"
+TAVILY_SEARCH_COST_USD="${TAVILY_SEARCH_COST_USD:-0.008}"
+SEARCH_MISSION_BUDGET_USD="${SEARCH_MISSION_BUDGET_USD:-0.008}"
+SEARCH_QUOTA_TAVILY="${SEARCH_QUOTA_TAVILY:-10}"
+IDENTITY_SEARCH_PROVIDER_ORDER="${IDENTITY_SEARCH_PROVIDER_ORDER:-tavily,searxng}"
+IDENTITY_AUTHORITY_HOSTS="${IDENTITY_AUTHORITY_HOSTS:-egrul.nalog.ru,service.nalog.ru,bo.nalog.ru}"
 
 log() {
   printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
@@ -31,6 +37,11 @@ fail() {
 [[ -f "$SOURCE_DIR/app/main.py" ]] || fail "app/main.py missing from source"
 [[ -f "$SOURCE_DIR/app/mcp_server.py" ]] || fail "app/mcp_server.py missing from source"
 [[ -f "$SOURCE_DIR/requirements.txt" ]] || fail "requirements.txt missing from source"
+[[ -n "$TAVILY_TOKEN" ]] || fail "TAVILY_TOKEN is required for stage"
+[[ "$TAVILY_TOKEN" != *$'\n'* ]] || fail "TAVILY_TOKEN contains a newline"
+[[ "$TAVILY_SEARCH_COST_USD" =~ ^0\.[0-9]+$ ]] || fail "TAVILY_SEARCH_COST_USD must be a positive decimal below 1"
+[[ "$SEARCH_MISSION_BUDGET_USD" =~ ^0\.[0-9]+$ ]] || fail "SEARCH_MISSION_BUDGET_USD must be a positive decimal below 1"
+[[ "$SEARCH_QUOTA_TAVILY" =~ ^[1-9][0-9]*$ ]] || fail "SEARCH_QUOTA_TAVILY must be a positive integer"
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || fail "Another stage deployment is already running"
@@ -41,10 +52,46 @@ BACKUP_DIR="$DEPLOY_ROOT/app-source.backup.$(date -u +'%Y%m%dT%H%M%SZ').${DEPLOY
 FAILED_DIR="$DEPLOY_ROOT/app-source.failed.$(date -u +'%Y%m%dT%H%M%SZ').${DEPLOY_SHA:0:12}"
 CURRENT_DIR="$STACK_DIR/app-source"
 SHA_FILE="$STACK_DIR/app-source-sha.txt"
+RUNTIME_SECRETS_FILE="$STACK_DIR/.runtime-secrets.env"
+COMPOSE_OVERRIDE_FILE="$STACK_DIR/docker-compose.runtime-secrets.yml"
 PREVIOUS_SHA="unknown"
 SWITCHED=0
 
 mkdir -p "$DEPLOY_ROOT"
+
+configure_runtime_secrets() {
+  local secret_tmp override_tmp
+  secret_tmp="$(mktemp "$DEPLOY_ROOT/runtime-secrets.XXXXXX")"
+  override_tmp="$(mktemp "$DEPLOY_ROOT/runtime-compose.XXXXXX")"
+  chmod 600 "$secret_tmp"
+  printf 'TAVILY_TOKEN=%s\n' "$TAVILY_TOKEN" > "$secret_tmp"
+  cat > "$override_tmp" <<EOF
+services:
+  $SERVICE:
+    env_file:
+      - $RUNTIME_SECRETS_FILE
+    environment:
+      TAVILY_SEARCH_COST_USD: "$TAVILY_SEARCH_COST_USD"
+      SEARCH_MISSION_BUDGET_USD: "$SEARCH_MISSION_BUDGET_USD"
+      SEARCH_QUOTA_TAVILY: "$SEARCH_QUOTA_TAVILY"
+      IDENTITY_SEARCH_PROVIDER_ORDER: "$IDENTITY_SEARCH_PROVIDER_ORDER"
+      IDENTITY_AUTHORITY_HOSTS: "$IDENTITY_AUTHORITY_HOSTS"
+EOF
+  chmod 600 "$override_tmp"
+  mv "$secret_tmp" "$RUNTIME_SECRETS_FILE"
+  mv "$override_tmp" "$COMPOSE_OVERRIDE_FILE"
+  log "Runtime provider configuration installed without exposing credentials"
+}
+
+compose_stack() {
+  (
+    cd "$STACK_DIR"
+    docker compose \
+      -f docker-compose.yml \
+      -f "$COMPOSE_OVERRIDE_FILE" \
+      "$@"
+  )
+}
 
 if [[ -f "$SHA_FILE" ]]; then
   PREVIOUS_SHA="$(tr -d '[:space:]' < "$SHA_FILE")"
@@ -123,11 +170,8 @@ rollback() {
     mv "$BACKUP_DIR" "$CURRENT_DIR"
     printf '%s\n' "$PREVIOUS_SHA" > "$SHA_FILE"
 
-    (
-      cd "$STACK_DIR"
-      docker compose build "$SERVICE"
-      docker compose up -d --force-recreate "$SERVICE"
-    )
+    compose_stack build "$SERVICE"
+    compose_stack up -d --force-recreate "$SERVICE"
 
     if wait_healthy; then
       log "Rollback restored SHA: $PREVIOUS_SHA"
@@ -191,6 +235,8 @@ printf '%s\n' "$DEPLOY_SHA" > "$STAGING_DIR/.aimeton-deploy-sha"
 grep -q 'stage-auditor.aimeton.ru' "$STAGING_DIR/app/mcp_server.py" || fail "Stage MCP host allowlist missing"
 grep -q 'Location.*\/mcp\/' "$STAGING_DIR/app/main.py" || fail "Relative MCP redirect implementation missing"
 
+configure_runtime_secrets
+
 log "Switching bundle atomically; previous SHA: $PREVIOUS_SHA"
 if [[ -d "$CURRENT_DIR" ]]; then
   mv "$CURRENT_DIR" "$BACKUP_DIR"
@@ -200,11 +246,8 @@ printf '%s\n' "$DEPLOY_SHA" > "$SHA_FILE"
 SWITCHED=1
 
 log "Building and recreating Docker service: $SERVICE"
-(
-  cd "$STACK_DIR"
-  docker compose build "$SERVICE"
-  docker compose up -d --force-recreate "$SERVICE"
-)
+compose_stack build "$SERVICE"
+compose_stack up -d --force-recreate "$SERVICE"
 
 wait_healthy || rollback "container failed health check"
 smoke_test || rollback "stage smoke test failed"

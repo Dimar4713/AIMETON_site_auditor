@@ -100,19 +100,28 @@ YANDEX_SEARCH_COST_RUB=...
 SEARCH_MISSION_BUDGET_RUB=...
 SEARCH_QUOTA_YANDEX=...
 
-TAVILY_API_KEY=...
+TAVILY_TOKEN=...
 TAVILY_SEARCH_COST_USD=...
 SEARCH_MISSION_BUDGET_USD=...
 SEARCH_QUOTA_TAVILY=...
+IDENTITY_SEARCH_PROVIDER_ORDER=tavily,searxng
 ```
 
 Ненастроенные адаптеры пропускаются. `cost_amount=0` для платного provider
 означает `pricing_unknown`, а не бесплатный или разрешённый вызов.
+`TAVILY_API_KEY` поддерживается только как legacy alias; каноническое имя
+repository/stage secret — `TAVILY_TOKEN`.
+
+Для identity-среза `#84` используется Tavily Basic: 1 credit на запрос,
+`retries=0`, консервативная оценка `$0.008` и отдельный mission-budget. Это не
+разрешает платный fallback для остальных маршрутов.
 
 Фактическое наблюдение stage 29.07.2026 после развёртывания `#82`: SearXNG —
 `active`, `ready=true`; Yandex и Tavily — `not_configured`, `ready=false`;
 `secrets_exposed=false`. Секреты при проверке не извлекались и не
-публиковались.
+публиковались. Добавление `TAVILY_TOKEN` 30.07.2026 само по себе не меняет
+этот зафиксированный stage-факт: operational readiness будет обновлена только
+после нового Deploy Stage и live read-back.
 
 ## 7. Наблюдаемость
 
