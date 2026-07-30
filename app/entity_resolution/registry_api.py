@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.entity_resolution.factory import get_entity_resolver
 from app.entity_resolution.models import IdentityResolutionResult
-from app.entity_resolution.registry import RegistryEvidence, RegistryVerificationResult
+from app.entity_resolution.registry import RegistryEvidence
 from app.entity_resolution.registry_runtime import (
     HumanReviewDecision,
     HumanReviewDecisionRecord,
@@ -14,7 +14,7 @@ from app.entity_resolution.registry_runtime import (
 from app.mission_orchestrator import NextActionPlan, get_mission_orchestrator
 
 
-router = APIRouter(prefix="/api/missions", tags=["registry-verification"])
+router = APIRouter(tags=["registry-verification"])
 
 
 class ApiModel(BaseModel):
