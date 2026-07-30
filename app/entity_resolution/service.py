@@ -98,6 +98,40 @@ def _normalized_text(value: str) -> str:
     )
 
 
+_LEGAL_FORM_ALIASES = (
+    (
+        re.compile(r"^общество\s+с\s+ограниченной\s+ответственностью\b"),
+        "ооо",
+    ),
+    (
+        re.compile(r"^публичное\s+акционерное\s+общество\b"),
+        "пао",
+    ),
+    (
+        re.compile(r"^закрытое\s+акционерное\s+общество\b"),
+        "зао",
+    ),
+    (
+        re.compile(r"^акционерное\s+общество\b"),
+        "ао",
+    ),
+)
+
+
+def _normalized_legal_name(value: str) -> str:
+    normalized = _normalized_text(value)
+    for expression, replacement in _LEGAL_FORM_ALIASES:
+        normalized = expression.sub(replacement, normalized, count=1)
+    return normalized
+
+
+def _bank_like_legal_name(value: str) -> bool:
+    tokens = set(_normalized_legal_name(value).split())
+    return bool(tokens & {"банк", "банка", "bank"}) or any(
+        token.endswith("банк") for token in tokens
+    )
+
+
 def _normalize_signal(signal: IdentitySignal) -> str:
     value = " ".join(signal.value.split()).strip(" ,.;")
     if signal.kind in {IdentitySignalKind.INN, IdentitySignalKind.OGRN}:
@@ -109,6 +143,8 @@ def _normalize_signal(signal: IdentitySignal) -> str:
         return f"+{digits}"
     if signal.kind == IdentitySignalKind.EMAIL:
         return value.casefold()
+    if signal.kind == IdentitySignalKind.LEGAL_NAME:
+        return _normalized_legal_name(value)
     return _normalized_text(value)
 
 
@@ -341,16 +377,22 @@ class ProvisionalEntityResolver:
                 for signal, ref in items
                 if signal.kind == IdentitySignalKind.LEGAL_NAME
             }
+            non_bank_names = {
+                anchor
+                for anchor in names
+                if not _bank_like_legal_name(anchor[1])
+            }
+            attributable_names = non_bank_names or names
             strong = {
                 _anchor_key(signal, ref)
                 for signal, ref in items
                 if signal.kind in {IdentitySignalKind.INN, IdentitySignalKind.OGRN}
             }
-            if len(names) == 1:
-                name = next(iter(names))
+            if len(attributable_names) == 1:
+                name = next(iter(attributable_names))
                 for identifier in strong:
                     sets.union(name, identifier)
-            elif len(names) > 1 and strong:
+            elif len(attributable_names) > 1 and strong:
                 raw_conflicts.append(
                     (
                         "ambiguous_document_attribution",
@@ -398,13 +440,21 @@ class ProvisionalEntityResolver:
 
         candidates: list[IdentityCandidate] = []
         anchor_to_candidate: dict[tuple[str, str], str] = {}
-        for group in sorted(grouped_anchors.values(), key=lambda value: sorted(value)):
+        ordered_groups = sorted(
+            grouped_anchors.values(),
+            key=lambda value: sorted(value),
+        )
+        for group in ordered_groups:
             relevant = [
                 (signal, ref)
                 for signal, ref in valid
                 if _anchor_key(signal, ref) in group
             ]
             document_ids = {ref.document_id for _signal, ref in relevant}
+            group_has_strong = any(
+                signal.kind in {IdentitySignalKind.INN, IdentitySignalKind.OGRN}
+                for signal, _ref in relevant
+            )
             weak = [
                 (signal, ref)
                 for signal, ref in valid
@@ -415,6 +465,7 @@ class ProvisionalEntityResolver:
                     IdentitySignalKind.EMAIL,
                     IdentitySignalKind.ADDRESS,
                 }
+                and (group_has_strong or len(ordered_groups) == 1)
             ]
             relevant.extend(weak)
             names = [

@@ -84,7 +84,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.16.0",
+    version="0.16.1",
     lifespan=lifespan,
 )
 app.include_router(runtime_router)

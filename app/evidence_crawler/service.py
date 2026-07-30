@@ -79,11 +79,37 @@ PHONE_RE = re.compile(
     r"(?<!\d)(?:\+7|8)[\s(.-]*\d{3}[\s).-]*\d{3}[\s.-]*\d{2}[\s.-]*\d{2}(?!\d)"
 )
 ADDRESS_RE = re.compile(
-    r"(?i)\b(?:юридический\s+)?адрес\s*[:№-]?\s*(.{8,220})"
+    r"(?i)\b(?:юридический\s+|почтовый\s+|фактический\s+)?"
+    r"адрес\b\s*(?:[:№-]\s*|\|\s*)(.{8,220})"
+)
+LEGAL_FORM_PATTERN = (
+    r"(?:ООО|ПАО|АО|ЗАО|ИП|"
+    r"общество\s+с\s+ограниченной\s+ответственностью|"
+    r"публичное\s+акционерное\s+общество|"
+    r"закрытое\s+акционерное\s+общество|"
+    r"акционерное\s+общество)"
 )
 LEGAL_NAME_RE = re.compile(
-    r"(?i)\b(?:ООО|ПАО|АО|ЗАО|ИП)\s+[«\"']?[^,\n.;]{2,120}[»\"']?"
+    rf"(?i:\b{LEGAL_FORM_PATTERN})\s+"
+    r"(?:"
+    r"«[^»\n]{2,160}»|"
+    r"“[^”\n]{2,160}”|"
+    r"\"[^\"\n]{2,160}\"|"
+    r"'[^'\n]{2,160}'|"
+    r"[A-ZА-ЯЁ][\w&.-]*(?:\s+[A-ZА-ЯЁ][\w&.-]*){0,5}"
+    r")"
 )
+IDENTITY_LABELS = {
+    "инн": IdentitySignalKind.INN,
+    "огрн": IdentitySignalKind.OGRN,
+    "огрнип": IdentitySignalKind.OGRN,
+    "юридический адрес": IdentitySignalKind.ADDRESS,
+    "почтовый адрес": IdentitySignalKind.ADDRESS,
+    "фактический адрес": IdentitySignalKind.ADDRESS,
+    "полное наименование": IdentitySignalKind.LEGAL_NAME,
+    "сокращенное наименование": IdentitySignalKind.LEGAL_NAME,
+    "сокращённое наименование": IdentitySignalKind.LEGAL_NAME,
+}
 
 
 def _stable_id(prefix: str, value: str) -> str:
@@ -389,6 +415,29 @@ class BootstrapEvidenceCrawler:
                 add(IdentitySignalKind.ADDRESS, match.group(1), block.locator)
             for match in LEGAL_NAME_RE.finditer(text):
                 add(IdentitySignalKind.LEGAL_NAME, match.group(0), block.locator)
+
+        for index, block in enumerate(fetched.blocks[:-1]):
+            label = " ".join(block.text.casefold().split()).strip(" :№-|")
+            kind = IDENTITY_LABELS.get(label)
+            if kind is None:
+                continue
+            following = fetched.blocks[index + 1]
+            value = following.text.strip()
+            locator = f"{block.locator}->{following.locator}"
+            if kind == IdentitySignalKind.INN:
+                match = re.fullmatch(r"\D*(\d{10}|\d{12})\D*", value)
+                if match:
+                    add(kind, match.group(1), locator)
+            elif kind == IdentitySignalKind.OGRN:
+                match = re.fullmatch(r"\D*(\d{13}|\d{15})\D*", value)
+                if match:
+                    add(kind, match.group(1), locator)
+            elif kind == IdentitySignalKind.ADDRESS:
+                if len(value) >= 8:
+                    add(kind, value[:220], locator)
+            else:
+                for match in LEGAL_NAME_RE.finditer(value):
+                    add(kind, match.group(0), locator)
         return signals
 
     async def run_mission(
