@@ -44,8 +44,8 @@ class RegistryEvidence(RegistryModel):
     accessed_at: datetime
     document_digest: Digest
     legal_name: str = Field(min_length=1, max_length=500)
-    inn: str | None = Field(default=None, pattern=r"^\d{10}|\d{12}$")
-    ogrn: str | None = Field(default=None, pattern=r"^\d{13}|\d{15}$")
+    inn: str | None = Field(default=None, pattern=r"^(?:\d{10}|\d{12})$")
+    ogrn: str | None = Field(default=None, pattern=r"^(?:\d{13}|\d{15})$")
     relationship_role: EntityRelationshipRole = EntityRelationshipRole.SUBJECT
     lifecycle_state: str = "evidence"
 
@@ -244,8 +244,7 @@ class OfficialRegistryVerifier:
             if len(subject_keys) > 1:
                 reason_codes.append("multiple_subject_records")
 
-        needs_review = bool(reason_codes)
-        if needs_review:
+        if reason_codes:
             review = HumanReviewRequest(
                 id=_stable_id(
                     "identity_review",
