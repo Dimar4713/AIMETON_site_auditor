@@ -54,7 +54,37 @@ assert p["folder_id_configured"] is True, p
 assert p["secrets_exposed"] is False, p
 PY
 
-lookup="$(curl --fail --silent --show-error -H 'Content-Type: application/json' --data "{\"query\":\"$YANDEX_SEARCH_SMOKE_QUERY\"}" "$STAGE_URL/api/missions/search/yandex/web")"
+request_file="$(mktemp)"
+response_file="$(mktemp)"
+python3 - "$request_file" "$YANDEX_SEARCH_SMOKE_QUERY" <<'PY'
+import json, sys
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps({"query": sys.argv[2]}, ensure_ascii=False))
+PY
+http_code="$(curl --silent --show-error -H 'Content-Type: application/json' --data-binary "@$request_file" -o "$response_file" -w '%{http_code}' "$STAGE_URL/api/missions/search/yandex/web")"
+lookup="$(cat "$response_file")"
+rm -f "$request_file" "$response_file"
+if [[ "$http_code" != 2* ]]; then
+  echo "Yandex Search smoke failed: stage_http_status=$http_code"
+  python3 - "$lookup" <<'PY'
+import json, sys
+raw = sys.argv[1]
+try:
+    payload = json.loads(raw)
+except Exception:
+    print("stage_response=non_json")
+else:
+    detail = payload.get("detail")
+    if isinstance(detail, str):
+        print("stage_detail=" + detail[:1000])
+    else:
+        print("stage_response_keys=" + ",".join(sorted(payload.keys())))
+PY
+  echo "container_log_tail_begin"
+  docker logs --tail 120 "$CONTAINER" 2>&1 | sed -E 's/(Api-Key|Bearer|Token) [A-Za-z0-9._~+\/-]+/\1 [REDACTED]/g'
+  echo "container_log_tail_end"
+  exit 1
+fi
 python3 - "$lookup" <<'PY'
 import json, sys
 p = json.loads(sys.argv[1])
