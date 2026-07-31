@@ -9,6 +9,7 @@ from dataclasses import dataclass
 HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE)
 CHECKBOX_RE = re.compile(r"^\s*[-*]\s+\[( |x|X)\]\s+(.+?)\s*$", re.MULTILINE)
 ISSUE_REF_RE = re.compile(r"(?i)\b(?:part\s+of|closes?|fixes?|resolves?)\s+#(\d+)\b")
+DIRECT_ISSUE_REF_RE = re.compile(r"(?<!\w)#(\d+)\b")
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ def validate_issue_closure(body: str) -> Validation:
     if not pending:
         return Validation(True, ())
     transfer = section(body, "Debt transfer")
-    if transfer and ISSUE_REF_RE.search(transfer):
+    if transfer and DIRECT_ISSUE_REF_RE.search(transfer):
         return Validation(True, ())
     return Validation(False, (
         f"Issue has {len(pending)} open checkbox(es) and no Debt transfer section with an explicit Issue reference",
