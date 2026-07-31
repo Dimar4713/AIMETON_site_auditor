@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,7 +15,13 @@ from app.entity_resolution.registry_runtime import (
     RegistryVerificationHistory,
     get_registry_verification_coordinator,
 )
-from app.mission_orchestrator import NextActionPlan, get_mission_orchestrator
+from app.mission_orchestrator import (
+    ActionCandidate,
+    ActionType,
+    NextActionPlan,
+    PolicySnapshot,
+    get_mission_orchestrator,
+)
 
 
 router = APIRouter(tags=["registry-verification"])
@@ -45,6 +55,40 @@ def _base_identity(mission_id: str, result_id: str) -> IdentityResolutionResult:
     return result
 
 
+def _auto_promotion_plan(
+    mission_id: str,
+    evidence: list[RegistryEvidence],
+) -> NextActionPlan:
+    orchestrator = get_mission_orchestrator()
+    snapshot = orchestrator.get(mission_id)
+    source_urls = [str(item.source_url) for item in evidence]
+    allowed_hosts = {
+        host
+        for value in [str(snapshot.contract.target_url), *source_urls]
+        if (host := (urlsplit(value).hostname or "").casefold())
+    }
+    return orchestrator.plan(
+        mission_id,
+        deficits=["official_registry_verification"],
+        candidates=[
+            ActionCandidate(
+                action_type=ActionType.FETCH_DOCUMENT,
+                target=source_urls[0],
+                deficit_code="official_registry_verification",
+                expected_sufficiency_gain=0.8,
+                ai_priority=0.95,
+            )
+        ],
+        policy=PolicySnapshot(
+            allowed_hosts=frozenset(allowed_hosts),
+            remaining_actions=max(
+                0,
+                snapshot.contract.budget.max_actions - len(snapshot.turns),
+            ),
+        ),
+    )
+
+
 @router.post(
     "/{mission_id}/verify-registry",
     response_model=RegistryVerificationEnvelope,
@@ -59,17 +103,27 @@ def verify_registry(mission_id: str, request: RegistryVerificationRequest):
         verification = coordinator.verify(mission_id, candidate, request.evidence)
         promoted = None
         if coordinator.can_promote(verification):
-            if request.promotion_plan is None:
-                raise ValueError("verified registry evidence requires a promotion plan")
-            promoted = get_entity_resolver().promote_identifier_links(
-                get_mission_orchestrator(),
+            plan = request.promotion_plan or _auto_promotion_plan(
                 mission_id,
-                plan=request.promotion_plan,
+                request.evidence,
+            )
+            orchestrator = get_mission_orchestrator()
+            promoted = get_entity_resolver().promote_identifier_links(
+                orchestrator,
+                mission_id,
+                plan=plan,
                 base_result_id=base.id,
                 accepted_identifier_ids=verification.accepted_identifier_ids,
                 artifact_ids=verification.evidence_ids,
                 authority_verified=True,
             )
+            if request.promotion_plan is None:
+                orchestrator.record_turn(
+                    mission_id,
+                    plan=plan,
+                    outcome=promoted.outcome,
+                    feedback=promoted.recommended_feedback,
+                )
         elif request.promotion_plan is not None:
             raise ValueError("registry result is not eligible for automatic promotion")
         return RegistryVerificationEnvelope(
