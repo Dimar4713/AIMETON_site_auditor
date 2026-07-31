@@ -126,7 +126,7 @@ class YandexWebSearchProvider:
             "query": {
                 "searchType": _wire_enum(self._search_type, "SEARCH_TYPE_"),
                 "queryText": query_text,
-                "familyMode": _wire_enum(self._family_mode, "FAMILY_MODE_"),
+                "familyMode": self._family_mode,
                 "page": str(page),
                 "fixTypoMode": "FIX_TYPO_MODE_ON",
             },
