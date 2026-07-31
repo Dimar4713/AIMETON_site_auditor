@@ -9,7 +9,7 @@ from app.sufficiency_evaluator.models import SufficiencyEvaluation
 from app.sufficiency_evaluator.service import evaluate_targeted_crawl
 
 
-router = APIRouter(prefix="/api/missions", tags=["sufficiency-evaluator"])
+router = APIRouter(tags=["sufficiency-evaluator"])
 
 
 class SufficiencyApiModel(BaseModel):
@@ -25,10 +25,7 @@ class SufficiencyEvaluationRequest(SufficiencyApiModel):
     "/{mission_id}/evaluate-sufficiency",
     response_model=SufficiencyEvaluation,
 )
-def evaluate_sufficiency(
-    mission_id: str,
-    request: SufficiencyEvaluationRequest,
-):
+def evaluate_sufficiency(mission_id: str, request: SufficiencyEvaluationRequest):
     try:
         return evaluate_targeted_crawl(
             get_mission_orchestrator(),
