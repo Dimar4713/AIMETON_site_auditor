@@ -117,16 +117,29 @@ def request_graphql(token: str, query: str, variables: dict[str, Any]) -> dict[s
 
 
 def project_id(token: str, owner: str, number: int) -> str:
-    query = """
+    user_query = """
     query($login:String!, $number:Int!) {
       user(login:$login) { projectV2(number:$number) { id } }
+    }
+    """
+    data = request_graphql(token, user_query, {"login": owner, "number": number})
+    project = (data.get("user") or {}).get("projectV2")
+    if project:
+        return project["id"]
+
+    organization_query = """
+    query($login:String!, $number:Int!) {
       organization(login:$login) { projectV2(number:$number) { id } }
     }
     """
-    data = request_graphql(token, query, {"login": owner, "number": number})
-    project = (data.get("user") or {}).get("projectV2") or (data.get("organization") or {}).get("projectV2")
+    data = request_graphql(
+        token,
+        organization_query,
+        {"login": owner, "number": number},
+    )
+    project = (data.get("organization") or {}).get("projectV2")
     if not project:
-        raise RuntimeError("Project not found")
+        raise RuntimeError(f"Project V2 #{number} not found for {owner}")
     return project["id"]
 
 
