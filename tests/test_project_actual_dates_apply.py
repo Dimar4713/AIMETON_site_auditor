@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from scripts.project_actual_dates_apply import (
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+from scripts.project_actual_dates_apply import (  # noqa: E402
     APPROVED_CUTOFF,
     EXPECTED_UNRESOLVED,
     approved_items,
