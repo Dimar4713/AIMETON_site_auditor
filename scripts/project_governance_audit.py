@@ -12,6 +12,11 @@ GRAPHQL = "https://api.github.com/graphql"
 EXECUTION_STATUSES = {"In Progress", "In Review", "Validation"}
 TERMINAL_STATUSES = {"Done"}
 DATE_FIELDS = {"Actual start", "Actual finish"}
+DEBT_TRANSFER_RE = re.compile(
+    r"(?mis)^#{1,6}\s+Debt transfer\s*$"
+    r"(?P<body>.*?)(?=^#{1,6}\s+|\Z)"
+)
+ISSUE_REFERENCE_RE = re.compile(r"(?<!\w)#(?P<number>\d+)\b")
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,14 @@ def checkbox_counts(body: str) -> tuple[int, int]:
     open_count = len(re.findall(r"(?mi)^\s*- \[ \] ", body or ""))
     checked_count = len(re.findall(r"(?mi)^\s*- \[[xX]\] ", body or ""))
     return open_count, checked_count
+
+
+def debt_transfer_target(body: str) -> int | None:
+    match = DEBT_TRANSFER_RE.search(body or "")
+    if not match:
+        return None
+    reference = ISSUE_REFERENCE_RE.search(match.group("body"))
+    return int(reference.group("number")) if reference else None
 
 
 def audit_item(item: dict[str, Any]) -> list[AuditFinding]:
@@ -84,12 +97,13 @@ def audit_item(item: dict[str, Any]) -> list[AuditFinding]:
         ))
 
     open_checks, checked_checks = checkbox_counts(body)
-    if completed and open_checks:
+    transferred_to = debt_transfer_target(body)
+    if completed and open_checks and transferred_to is None:
         findings.append(AuditFinding(
             "completed_with_open_checkboxes", repository, number, kind, title,
             f"open={open_checks}; checked={checked_checks}",
         ))
-    if checked_checks and "Evidence of Done" not in body:
+    if checked_checks and "Evidence of Done" not in body and transferred_to is None:
         findings.append(AuditFinding(
             "checked_without_evidence_section", repository, number, kind, title,
             f"checked={checked_checks}",
