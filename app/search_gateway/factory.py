@@ -4,6 +4,7 @@ import os
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 
+from app.search_gateway.factory_helpers import first_nonempty_env
 from app.search_gateway.gateway import SearchGateway
 from app.search_gateway.models import SearchPolicy
 from app.search_gateway.providers import SearxngProvider, TavilyProvider, YandexProvider
@@ -96,7 +97,10 @@ def get_search_gateway() -> SearchGateway:
         [
             YandexProvider(
                 os.getenv("YANDEX_SEARCH_API_KEY"),
-                os.getenv("YANDEX_SEARCH_FOLDER_ID"),
+                first_nonempty_env(
+                    "YANDEX_CLOUD_FOLDER_ID",
+                    "YANDEX_SEARCH_FOLDER_ID",
+                ),
                 cost_amount=_decimal_env("YANDEX_SEARCH_COST_RUB"),
             ),
             SearxngProvider(os.getenv("SEARXNG_BASE_URL")),
