@@ -192,6 +192,7 @@ class YandexProvider(HttpSearchProvider):
                     "queryText": request.query,
                     "familyMode": "FAMILY_MODE_MODERATE",
                     "page": "0",
+                    "fixTypoMode": "FIX_TYPO_MODE_ON",
                 },
                 "groupSpec": {
                     "groupMode": "GROUP_MODE_FLAT",
@@ -199,7 +200,7 @@ class YandexProvider(HttpSearchProvider):
                     "docsInGroup": "1",
                 },
                 "maxPassages": "3",
-                "l10n": "LOCALIZATION_RU",
+                "l10N": "LOCALIZATION_RU",
                 "folderId": self._folder_id,
                 "responseFormat": "FORMAT_XML",
             },
@@ -232,4 +233,3 @@ class YandexProvider(HttpSearchProvider):
                 )
             )
         return results[: request.limit]
-
