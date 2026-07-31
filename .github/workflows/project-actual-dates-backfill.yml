@@ -1,0 +1,60 @@
+name: Project Actual Dates Backfill
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  dry-run:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'project:plan-actual-dates'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${GH_TOKEN:-}" || { echo "Missing secret PROJECTS_TOKEN"; exit 1; }
+          test -n "${PROJECT_OWNER:-}" || { echo "Missing variable PROJECT_OWNER"; exit 1; }
+          test -n "${PROJECT_NUMBER:-}" || { echo "Missing variable PROJECT_NUMBER"; exit 1; }
+
+      - name: Build immutable dry-run plan
+        id: plan
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/project_actual_dates_backfill.py 2>&1 | tee actual-dates-backfill-plan.json
+
+      - name: Upload dry-run evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actual-dates-backfill-plan
+          path: actual-dates-backfill-plan.json
+
+      - name: Publish dry-run plan
+        if: always() && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECTS_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = 'actual-dates-backfill-plan.json';
+            const raw = fs.existsSync(path) ? fs.readFileSync(path, 'utf8').trim() : 'No plan file was produced.';
+            const report = raw.length > 55000 ? `${raw.slice(0, 55000)}\n…truncated` : raw;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: `## Actual dates historical backfill — dry-run\n\n- mode: \`dry_run\`\n- Project mutations: \`0\`\n- workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n\`\`\`json\n${report}\n\`\`\``
+            });
