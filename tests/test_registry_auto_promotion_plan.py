@@ -125,6 +125,10 @@ def test_auto_registry_promotion_plan_is_third_mission_turn():
     assert plan.selected_action.action_type == ActionType.FETCH_DOCUMENT
     assert plan.selected_action.target == "https://egrul.nalog.ru/document/1"
     assert plan.selected_action.deficit_code == "official_registry_verification"
-    assert plan.policy_snapshot.allowed_hosts == frozenset(
-        {"example.test", "egrul.nalog.ru"}
+    selected_decision = next(
+        decision
+        for decision in plan.decisions
+        if decision.candidate == plan.selected_action
     )
+    assert selected_decision.admissible is True
+    assert selected_decision.reason_codes == []
