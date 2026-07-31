@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "repository": "Dimar4713/AIMETON_site_auditor",
+  "date_overrides": {
+    "7": {
+      "actual_start": "2026-07-21",
+      "actual_finish": "2026-07-22",
+      "evidence": "Epic aggregate over completed child Issues #9-#16"
+    },
+    "31": {
+      "actual_start": "2026-07-22",
+      "actual_finish": "2026-07-22",
+      "evidence": "commit 31367ed883947cfb093243d8dbe0551ca2264695; issue.closed_at"
+    },
+    "34": {
+      "actual_start": "2026-07-22",
+      "actual_finish": "2026-07-22",
+      "evidence": "commit 272550e8fcee685b7513cd5cd5d9e9d3a4f30d26; issue.closed_at"
+    }
+  },
+  "lifecycle_exclusions": {
+    "19": {
+      "state_reason": "not_planned",
+      "reason": "Technical record created by mistake; no execution occurred"
+    },
+    "32": {
+      "state_reason": "duplicate",
+      "reason": "Duplicate of the accepted snapshot work item #31"
+    }
+  }
+}
