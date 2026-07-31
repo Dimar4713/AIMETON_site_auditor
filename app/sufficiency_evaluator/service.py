@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 from app.evidence_crawler.models import CrawlStatus, IdentitySignalKind, PageType
@@ -18,7 +19,9 @@ from app.sufficiency_evaluator.models import (
     SufficiencyDelta,
     SufficiencyDimension,
     SufficiencyEvaluation,
+    SufficiencyTurnRecord,
 )
+from app.sufficiency_evaluator.trace_store import get_sufficiency_trace_store
 
 
 _LEVEL_VALUE = {level: index for index, level in enumerate(SufficiencyLevel)}
@@ -208,7 +211,40 @@ def evaluate_targeted_crawl(
             remaining_actions=max(0, snapshot.contract.budget.max_actions - len(snapshot.turns)),
         ),
     )
-    improved = [item.dimension for item in dimensions if _LEVEL_VALUE[item.level] > _LEVEL_VALUE[snapshot.achieved_sufficiency]]
+    improved = [
+        item.dimension
+        for item in dimensions
+        if _LEVEL_VALUE[item.level] > _LEVEL_VALUE[snapshot.achieved_sufficiency]
+    ]
+    evidence_refs = list(
+        dict.fromkeys(
+            [
+                *envelope.crawl.outcome.artifact_refs,
+                *(page.document_id for page in envelope.crawl.pages),
+                *(
+                    str(candidate.url)
+                    for candidate in envelope.crawl.primary_document_candidates
+                ),
+            ]
+        )
+    )
+    turn_record = get_sufficiency_trace_store().append(
+        SufficiencyTurnRecord(
+            mission_id=mission_id,
+            analysis_id=snapshot.contract.analysis_id,
+            correlation_id=snapshot.contract.correlation_id,
+            turn_number=len(get_sufficiency_trace_store().list_for_mission(mission_id)) + 1,
+            before_level=snapshot.achieved_sufficiency,
+            after_level=achieved,
+            evidence_refs=evidence_refs,
+            critical_gaps=gaps,
+            next_action_type=next_plan.selected_action.action_type.value,
+            next_action_target=next_plan.selected_action.target,
+            next_action_deficit=next_plan.selected_action.deficit_code,
+            next_action_reason=next_plan.selection_reason,
+            recorded_at=datetime.now(UTC),
+        )
+    )
     return SufficiencyEvaluation(
         mission_id=mission_id,
         target_level=target,
@@ -225,4 +261,5 @@ def evaluate_targeted_crawl(
         report_release_allowed=release_allowed,
         stop_reason=stop_reason,
         next_plan=next_plan,
+        turn_record=turn_record,
     )
