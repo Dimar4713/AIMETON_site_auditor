@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -34,8 +35,25 @@ class SufficiencyDelta(SufficiencyModel):
     critical_gaps: list[str] = Field(default_factory=list)
 
 
-class SufficiencyEvaluation(SufficiencyModel):
+class SufficiencyTurnRecord(SufficiencyModel):
     schema_version: str = "0.1.0"
+    mission_id: str
+    analysis_id: str
+    correlation_id: str
+    turn_number: int = Field(ge=1)
+    before_level: SufficiencyLevel
+    after_level: SufficiencyLevel
+    evidence_refs: list[str] = Field(default_factory=list)
+    critical_gaps: list[str] = Field(default_factory=list)
+    next_action_type: str
+    next_action_target: str = ""
+    next_action_deficit: str = ""
+    next_action_reason: str
+    recorded_at: datetime
+
+
+class SufficiencyEvaluation(SufficiencyModel):
+    schema_version: str = "0.2.0"
     mission_id: str
     target_level: SufficiencyLevel
     achieved_level: SufficiencyLevel
@@ -46,3 +64,4 @@ class SufficiencyEvaluation(SufficiencyModel):
     report_release_allowed: bool = False
     stop_reason: StopReason | None = None
     next_plan: NextActionPlan | None = None
+    turn_record: SufficiencyTurnRecord | None = None
