@@ -4,8 +4,8 @@
   "date_overrides": {
     "7": {
       "actual_start": "2026-07-21",
-      "actual_finish": "2026-07-22",
-      "evidence": "Epic aggregate over completed child Issues #9-#16"
+      "actual_finish": "2026-07-21",
+      "evidence": "Actual finish already immutably recorded in Project as 2026-07-21; Actual start aggregated from child Issues #9-#16. Child completion continued through 2026-07-22 and is retained as historical evidence, not used to overwrite the existing Project date."
     },
     "31": {
       "actual_start": "2026-07-22",
