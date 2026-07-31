@@ -37,7 +37,10 @@ def load_project(token: str, project: str) -> tuple[dict[str, str], dict[int, di
         items(first:100, after:$cursor) {
           nodes {
             id
-            content { ... on Issue { number repository { nameWithOwner } } }
+            content {
+              ... on Issue { number repository { nameWithOwner } }
+              ... on PullRequest { number repository { nameWithOwner } }
+            }
             fieldValues(first:100) { nodes {
               ... on ProjectV2ItemFieldDateValue {
                 date field { ... on ProjectV2Field { name } }
