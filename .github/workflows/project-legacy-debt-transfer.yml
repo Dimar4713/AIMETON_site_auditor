@@ -1,0 +1,33 @@
+name: Project Legacy Debt Transfer
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply changes
+        required: true
+        type: boolean
+        default: false
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  transfer:
+    if: github.event_name == 'workflow_dispatch' || (github.event.issue.number == 139 && github.event.label.name == 'project:apply-legacy-debt-transfer')
+    runs-on: ubuntu-latest
+    environment: project-governance
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run exact legacy debt transfer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: ${{ github.event_name == 'issues' || inputs.apply }}
+        run: python -m scripts.project_legacy_debt_transfer | tee legacy-debt-transfer.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: legacy-debt-transfer-${{ github.run_id }}
+          path: legacy-debt-transfer.json
