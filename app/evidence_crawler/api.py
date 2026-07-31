@@ -18,10 +18,12 @@ from app.mission_orchestrator import (
     get_mission_orchestrator,
 )
 from app.scraper import FetchError
+from app.sufficiency_evaluator.api import router as sufficiency_router
 
 
 router = APIRouter(prefix="/api/missions", tags=["evidence-crawler"])
 router.include_router(targeted_router)
+router.include_router(sufficiency_router)
 
 
 class ApiModel(BaseModel):
