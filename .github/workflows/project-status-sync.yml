@@ -100,6 +100,7 @@ jobs:
             core.setOutput('number', String(number));
             core.setOutput('node_id', item.node_id);
             core.setOutput('state', item.state);
+            core.setOutput('state_reason', item.state_reason || '');
             core.setOutput('title', item.title || '');
             core.setOutput(
               'labels',
@@ -108,6 +109,7 @@ jobs:
                 .filter(Boolean)
                 .join(',')
             );
+            core.setOutput('created_at', item.created_at || '');
             core.setOutput(
               'event_at',
               context.eventName === 'workflow_dispatch'
@@ -126,8 +128,10 @@ jobs:
           ITEM_NUMBER: ${{ steps.item.outputs.number }}
           ITEM_KIND: ${{ steps.item.outputs.kind }}
           ITEM_STATE: ${{ steps.item.outputs.state }}
+          ITEM_STATE_REASON: ${{ steps.item.outputs.state_reason }}
           ITEM_TITLE: ${{ steps.item.outputs.title }}
           ITEM_LABELS: ${{ steps.item.outputs.labels }}
+          ITEM_CREATED_AT: ${{ steps.item.outputs.created_at }}
           EVENT_AT: ${{ steps.item.outputs.event_at }}
           ITEM_CLOSED_AT: ${{ steps.item.outputs.closed_at }}
           PR_MERGED: ${{ steps.item.outputs.merged }}
