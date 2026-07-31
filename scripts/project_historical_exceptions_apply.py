@@ -10,14 +10,22 @@ from scripts.project_actual_dates_backfill import project_id, request_graphql
 
 MANIFEST = Path("config/project_historical_exceptions.json")
 DATE_FIELDS = {"Actual start", "Actual finish"}
+APPROVED_DATE_OVERRIDES = {"7", "31", "34", "126", "130", "131", "132"}
+APPROVED_LIFECYCLE_EXCLUSIONS = {"19", "32", "128"}
 
 
 def load_manifest() -> dict[str, Any]:
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    if set(data["date_overrides"]) != {"7", "31", "34"}:
-        raise RuntimeError("Unexpected date override set")
-    if set(data["lifecycle_exclusions"]) != {"19", "32"}:
-        raise RuntimeError("Unexpected lifecycle exclusion set")
+    if set(data["date_overrides"]) != APPROVED_DATE_OVERRIDES:
+        raise RuntimeError(
+            "Unexpected date override set: "
+            f"{sorted(data['date_overrides'])}"
+        )
+    if set(data["lifecycle_exclusions"]) != APPROVED_LIFECYCLE_EXCLUSIONS:
+        raise RuntimeError(
+            "Unexpected lifecycle exclusion set: "
+            f"{sorted(data['lifecycle_exclusions'])}"
+        )
     return data
 
 
