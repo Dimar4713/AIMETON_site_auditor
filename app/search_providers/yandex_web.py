@@ -69,13 +69,6 @@ def _text(node: ET.Element | None, path: str) -> str:
     return "" if found is None else "".join(found.itertext()).strip()
 
 
-def _wire_enum(value: str, prefix: str) -> str:
-    value = value.strip()
-    if value.startswith(prefix):
-        value = value.removeprefix(prefix)
-    return value.lower()
-
-
 def _short_upstream_error(response: httpx.Response) -> str:
     try:
         payload = response.json()
@@ -124,7 +117,7 @@ class YandexWebSearchProvider:
             raise ValueError("Yandex search query with site filter exceeds 400 characters")
         payload = {
             "query": {
-                "searchType": _wire_enum(self._search_type, "SEARCH_TYPE_"),
+                "searchType": self._search_type,
                 "queryText": query_text,
                 "familyMode": self._family_mode,
                 "page": str(page),
@@ -134,7 +127,7 @@ class YandexWebSearchProvider:
                 "groupsOnPage": str(self._results_per_page),
             },
             "region": "225",
-            "l10N": "ru",
+            "l10N": "LOCALIZATION_RU",
             "folderId": self._folder_id,
             "responseFormat": "FORMAT_XML",
         }
