@@ -1,11 +1,11 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "repository": "Dimar4713/AIMETON_site_auditor",
   "date_overrides": {
     "7": {
       "actual_start": "2026-07-21",
       "actual_finish": "2026-07-21",
-      "evidence": "Actual finish already immutably recorded in Project as 2026-07-21; Actual start aggregated from child Issues #9-#16. Child completion continued through 2026-07-22 and is retained as historical evidence, not used to overwrite the existing Project date."
+      "evidence": "Actual finish already immutably recorded in Project as 2026-07-21; Actual start aggregated from child Issues #9-#16."
     },
     "31": {
       "actual_start": "2026-07-22",
@@ -16,6 +16,26 @@
       "actual_start": "2026-07-22",
       "actual_finish": "2026-07-22",
       "evidence": "commit 272550e8fcee685b7513cd5cd5d9e9d3a4f30d26; issue.closed_at"
+    },
+    "126": {
+      "actual_start": "2026-07-31",
+      "actual_finish": "2026-07-31",
+      "evidence": "PR #131 created_at and issue.closed_at; governance repair work was executed and accepted on 2026-07-31"
+    },
+    "130": {
+      "actual_start": "2026-07-31",
+      "actual_finish": "2026-07-31",
+      "evidence": "pull_request.created_at and pull_request.merged_at"
+    },
+    "131": {
+      "actual_start": "2026-07-31",
+      "actual_finish": "2026-07-31",
+      "evidence": "pull_request.created_at and pull_request.merged_at"
+    },
+    "132": {
+      "actual_start": "2026-07-31",
+      "actual_finish": "2026-07-31",
+      "evidence": "pull_request.created_at and pull_request.merged_at"
     }
   },
   "lifecycle_exclusions": {
@@ -26,6 +46,10 @@
     "32": {
       "state_reason": "duplicate",
       "reason": "Duplicate of the accepted snapshot work item #31"
+    },
+    "128": {
+      "state_reason": "not_planned",
+      "reason": "Accidentally created service Issue; no execution occurred"
     }
   }
 }
