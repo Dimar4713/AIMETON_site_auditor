@@ -8,6 +8,7 @@ from app.evidence_crawler.models import (
     BootstrapCrawlPolicy,
     BootstrapCrawlResult,
 )
+from app.evidence_crawler.targeted_api import router as targeted_router
 from app.mission_orchestrator import (
     ActionCandidate,
     ActionType,
@@ -20,6 +21,7 @@ from app.scraper import FetchError
 
 
 router = APIRouter(prefix="/api/missions", tags=["evidence-crawler"])
+router.include_router(targeted_router)
 
 
 class ApiModel(BaseModel):
