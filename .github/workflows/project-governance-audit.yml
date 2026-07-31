@@ -32,7 +32,7 @@ jobs:
         id: audit
         run: |
           set -o pipefail
-          python scripts/project_governance_audit.py 2>&1 | tee governance-audit.json
+          python -m scripts.project_governance_audit_v2 2>&1 | tee governance-audit.json
 
       - name: Publish audit evidence
         if: always() && github.event_name == 'issues'
