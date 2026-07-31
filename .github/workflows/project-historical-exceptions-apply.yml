@@ -1,0 +1,60 @@
+name: Project Historical Exceptions Apply
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  apply:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'project:apply-historical-exceptions'
+    runs-on: ubuntu-latest
+    environment: project-governance
+    env:
+      GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+      APPLY: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate configuration
+        run: |
+          set -Eeuo pipefail
+          test -n "${GH_TOKEN:-}"
+          test -n "${PROJECT_OWNER:-}"
+          test -n "${PROJECT_NUMBER:-}"
+
+      - name: Apply approved historical exceptions
+        run: |
+          set -o pipefail
+          python -m scripts.project_historical_exceptions_apply 2>&1 | tee historical-exceptions-evidence.json
+
+      - name: Publish evidence
+        if: always() && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECTS_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const raw = fs.existsSync('historical-exceptions-evidence.json')
+              ? fs.readFileSync('historical-exceptions-evidence.json', 'utf8').trim()
+              : 'No evidence file was produced.';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: `## Historical exceptions apply evidence\n\n- workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n\`\`\`json\n${raw}\n\`\`\``
+            });
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-historical-exceptions-${{ github.run_id }}
+          path: historical-exceptions-evidence.json
+          if-no-files-found: error
