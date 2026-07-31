@@ -1,4 +1,8 @@
-from scripts.project_governance_audit import audit_item, checkbox_counts
+from scripts.project_governance_audit import (
+    audit_item,
+    checkbox_counts,
+    debt_transfer_target,
+)
 
 
 def _item(*, status, state="OPEN", merged=False, body="", dates=None, kind="Issue"):
@@ -87,3 +91,43 @@ def test_finish_before_start_is_reported():
         )
     )
     assert "actual_finish_before_start" in {item.code for item in findings}
+
+
+def test_valid_debt_transfer_suppresses_only_checklist_evidence_findings():
+    body = (
+        "## Критерии приёмки\n- [ ] unfinished\n- [x] historical\n\n"
+        "## Debt transfer\nHistorical debt is tracked in #138.\n"
+    )
+    assert debt_transfer_target(body) == 138
+    findings = audit_item(
+        _item(
+            status="Done",
+            state="CLOSED",
+            body=body,
+            dates={
+                "Actual start": "2026-07-29",
+                "Actual finish": "2026-07-30",
+            },
+        )
+    )
+    assert findings == []
+
+
+def test_debt_transfer_without_issue_reference_does_not_suppress_findings():
+    body = (
+        "## Критерии приёмки\n- [ ] unfinished\n\n"
+        "## Debt transfer\nWill be handled later.\n"
+    )
+    assert debt_transfer_target(body) is None
+    findings = audit_item(
+        _item(
+            status="Done",
+            state="CLOSED",
+            body=body,
+            dates={
+                "Actual start": "2026-07-29",
+                "Actual finish": "2026-07-30",
+            },
+        )
+    )
+    assert [item.code for item in findings] == ["completed_with_open_checkboxes"]
