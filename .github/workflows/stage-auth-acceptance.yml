@@ -23,7 +23,7 @@ jobs:
        github.event.comment.user.login == 'Dimar4713')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       CONTAINER: aimeton-auditor
@@ -38,18 +38,25 @@ jobs:
           cd "$STACK_DIR"
 
           report="$RUNNER_TEMP/stage-auth-acceptance.md"
-          : > "$report"
           username="acceptance-$(date -u +%Y%m%d%H%M%S)-$RANDOM"
-          token="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-          token_hash="$(printf %s "$token" | sha256sum | awk '{print $1}')"
-          echo "::add-mask::$token"
+          token=""
+          token_hash=""
+          {
+            echo "## Independent stage auth acceptance"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- status: started"
+          } > "$report"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
 
           cleanup() {
             set +e
-            docker exec \
-              -e TEST_USERNAME="$username" \
-              -e TEST_TOKEN_HASH="$token_hash" \
-              "$CONTAINER" python - <<'PY'
+            if [[ -n "$token_hash" ]]; then
+              docker exec \
+                -e TEST_USERNAME="$username" \
+                -e TEST_TOKEN_HASH="$token_hash" \
+                "$CONTAINER" python - <<'PY'
           import os
           import sqlite3
           from pathlib import Path
@@ -70,63 +77,66 @@ jobs:
                   (os.environ["TEST_TOKEN_HASH"],),
               )
           PY
+            fi
           }
           trap cleanup EXIT
 
           docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+
+          # A command comment can arrive before the runtime deploy completes.
+          # Wait for the deployed container to expose the exact auth adapter contract.
+          deadline=$((SECONDS + 300))
+          runtime_ready=no
+          while (( SECONDS < deadline )); do
+            if docker exec "$CONTAINER" python - <<'PY' >/dev/null 2>&1
+          from app.admin_users import AdminSQLiteUserRepository
+          from app.session_resolution import TypedLocalAuthProvider
+          from app.auth import PasswordHasher, UserRole
+          assert AdminSQLiteUserRepository and TypedLocalAuthProvider and PasswordHasher and UserRole
+          PY
+            then
+              runtime_ready=yes
+              break
+            fi
+            sleep 10
+          done
+          [[ "$runtime_ready" == yes ]]
+
           auth_db="$(docker exec "$CONTAINER" sh -lc 'printf %s "${AIMETON_AUTH_DB:-/app/data/auth.sqlite3}"')"
           [[ "$auth_db" == /app/data/* ]]
           data_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
           [[ -n "$data_mount" ]]
+          deployed_sha="$(cat "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
 
-          docker exec \
-            -e TEST_USERNAME="$username" \
-            -e TEST_TOKEN_HASH="$token_hash" \
-            "$CONTAINER" python - <<'PY'
+          # Create the user and session through the same repository/provider code
+          # used by the HTTP application. This prevents schema or hashing drift.
+          token="$(docker exec -e TEST_USERNAME="$username" "$CONTAINER" python - <<'PY'
           import os
-          import sqlite3
-          from datetime import UTC, datetime, timedelta
+          from datetime import timedelta
           from pathlib import Path
 
+          from app.admin_users import AdminSQLiteUserRepository
+          from app.auth import PasswordHasher, UserRole
+          from app.session_resolution import TypedLocalAuthProvider
+
           path = Path(os.environ.get("AIMETON_AUTH_DB", "/app/data/auth.sqlite3"))
-          path.parent.mkdir(parents=True, exist_ok=True)
-          with sqlite3.connect(path) as connection:
-              connection.execute(
-                  """
-                  CREATE TABLE IF NOT EXISTS users (
-                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      username TEXT NOT NULL UNIQUE,
-                      password_hash TEXT NOT NULL,
-                      role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
-                      is_active INTEGER NOT NULL DEFAULT 1,
-                      created_at TEXT NOT NULL
-                  )
-                  """
-              )
-              connection.execute(
-                  """
-                  CREATE TABLE IF NOT EXISTS sessions (
-                      token_hash TEXT PRIMARY KEY,
-                      user_id INTEGER NOT NULL REFERENCES users(id),
-                      expires_at TEXT NOT NULL,
-                      revoked_at TEXT
-                  )
-                  """
-              )
-              cursor = connection.execute(
-                  "INSERT INTO users(username, password_hash, role, created_at) VALUES (?, ?, 'user', ?)",
-                  (os.environ["TEST_USERNAME"], "acceptance-placeholder-not-login-capable", datetime.now(UTC).isoformat()),
-              )
-              user_id = int(cursor.lastrowid)
-              connection.execute(
-                  "INSERT INTO sessions(token_hash, user_id, expires_at) VALUES (?, ?, ?)",
-                  (
-                      os.environ["TEST_TOKEN_HASH"],
-                      user_id,
-                      (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
-                  ),
-              )
+          repository = AdminSQLiteUserRepository(path)
+          password = "acceptance-only-password-" + os.environ["TEST_USERNAME"]
+          user = repository.create_user(
+              os.environ["TEST_USERNAME"],
+              PasswordHasher().hash(password),
+              UserRole.USER,
+          )
+          session = TypedLocalAuthProvider(
+              repository,
+              session_ttl=timedelta(minutes=15),
+          ).create_session(user)
+          print(session.token)
           PY
+          )"
+          [[ -n "$token" ]]
+          echo "::add-mask::$token"
+          token_hash="$(printf %s "$token" | sha256sum | awk '{print $1}')"
 
           anonymous_code="$(curl -sS -o /dev/null -w '%{http_code}' "$STAGE_URL/api/auth/me")"
           [[ "$anonymous_code" == 401 ]]
@@ -142,16 +152,19 @@ jobs:
           [[ "$csrf_code" == 403 ]]
           python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert p["detail"]["reason"]=="csrf_failed"' "$RUNNER_TEMP/csrf-denied.json"
 
-          docker restart "$CONTAINER" >/dev/null
-          deadline=$((SECONDS + 180))
-          while (( SECONDS < deadline )); do
-            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
-            [[ "$status" == healthy ]] && break
-            [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]] && exit 1
-            sleep 5
-          done
-          [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == healthy ]]
+          wait_healthy() {
+            local deadline=$((SECONDS + 180)) status=""
+            while (( SECONDS < deadline )); do
+              status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+              [[ "$status" == healthy ]] && return 0
+              [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]] && return 1
+              sleep 5
+            done
+            return 1
+          }
 
+          docker restart "$CONTAINER" >/dev/null
+          wait_healthy
           me_after_restart="$(curl -fsS --cookie "aimeton_session=$token" "$STAGE_URL/api/auth/me")"
           python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["username"]==sys.argv[2]' "$me_after_restart" "$username"
 
@@ -160,16 +173,7 @@ jobs:
             -f docker-compose.override.yml \
             -f docker-compose.runtime-secrets.yml \
             up -d --force-recreate auditor
-
-          deadline=$((SECONDS + 180))
-          while (( SECONDS < deadline )); do
-            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
-            [[ "$status" == healthy ]] && break
-            [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]] && exit 1
-            sleep 5
-          done
-          [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == healthy ]]
-
+          wait_healthy
           me_after_recreate="$(curl -fsS --cookie "aimeton_session=$token" "$STAGE_URL/api/auth/me")"
           python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["username"]==sys.argv[2]' "$me_after_recreate" "$username"
 
@@ -189,8 +193,10 @@ jobs:
             echo
             echo "- workflow run: $GITHUB_RUN_ID"
             echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- deployed source SHA: \`$deployed_sha\`"
             echo "- auth DB path: \`$auth_db\`"
             echo "- /app/data mount: ✅ \`$data_mount\`"
+            echo "- runtime auth contract readiness: ✅"
             echo "- anonymous /me: ✅ 401"
             echo "- valid user session before restart: ✅"
             echo "- role denial: ✅ 403 role_forbidden"
@@ -205,9 +211,9 @@ jobs:
           } > "$report"
 
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
-          echo "report=$report" >> "$GITHUB_OUTPUT"
 
       - name: Upload sanitized evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: stage-auth-acceptance-${{ github.run_id }}
@@ -216,6 +222,7 @@ jobs:
           retention-days: 30
 
       - name: Publish evidence to SA-MVP-01B
+        if: ${{ success() }}
         continue-on-error: true
         uses: actions/github-script@v7
         env:
