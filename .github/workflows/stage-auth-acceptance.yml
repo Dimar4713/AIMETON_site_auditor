@@ -53,7 +53,7 @@ jobs:
           cleanup() {
             set +e
             if [[ -n "$token_hash" ]]; then
-              docker exec \
+              docker exec -i \
                 -e TEST_USERNAME="$username" \
                 -e TEST_TOKEN_HASH="$token_hash" \
                 "$CONTAINER" python - <<'PY'
@@ -83,12 +83,10 @@ jobs:
 
           docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
 
-          # A command comment can arrive before the runtime deploy completes.
-          # Wait for the deployed container to expose the exact auth adapter contract.
           deadline=$((SECONDS + 300))
           runtime_ready=no
           while (( SECONDS < deadline )); do
-            if docker exec "$CONTAINER" python - <<'PY' >/dev/null 2>&1
+            if docker exec -i "$CONTAINER" python - <<'PY' >/dev/null 2>&1
           from app.admin_users import AdminSQLiteUserRepository
           from app.session_resolution import TypedLocalAuthProvider
           from app.auth import PasswordHasher, UserRole
@@ -108,9 +106,7 @@ jobs:
           [[ -n "$data_mount" ]]
           deployed_sha="$(cat "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
 
-          # Create the user and session through the same repository/provider code
-          # used by the HTTP application. This prevents schema or hashing drift.
-          token="$(docker exec -e TEST_USERNAME="$username" "$CONTAINER" python - <<'PY'
+          token="$(docker exec -i -e TEST_USERNAME="$username" "$CONTAINER" python - <<'PY'
           import os
           from datetime import timedelta
           from pathlib import Path
@@ -177,7 +173,7 @@ jobs:
           me_after_recreate="$(curl -fsS --cookie "aimeton_session=$token" "$STAGE_URL/api/auth/me")"
           python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["username"]==sys.argv[2]' "$me_after_recreate" "$username"
 
-          integrity="$(docker exec "$CONTAINER" python - <<'PY'
+          integrity="$(docker exec -i "$CONTAINER" python - <<'PY'
           import os
           import sqlite3
           from pathlib import Path
