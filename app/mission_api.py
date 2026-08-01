@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.auth import User
-from app.auth_api import current_user, require_admin
+from app.auth_api import CSRF_COOKIE, CSRF_HEADER, _require_csrf, current_user, require_admin
 from app.mission_contract import (
     Mission,
     MissionCreate,
@@ -61,8 +61,11 @@ def _not_found() -> HTTPException:
 def create_owned_mission(
     payload: MissionCreate,
     user: User = Depends(current_user),
+    csrf_cookie: str | None = Cookie(default=None, alias=CSRF_COOKIE),
+    csrf_header: str | None = Header(default=None, alias=CSRF_HEADER),
     repository: MissionRepository = Depends(get_mission_repository),
 ) -> MissionUserProjection:
+    _require_csrf(csrf_cookie, csrf_header)
     mission = repository.create(user.id, payload)
     return MissionUserProjection.from_mission(mission)
 
@@ -96,8 +99,11 @@ def update_owned_mission_state(
     mission_id: str,
     payload: MissionStateRequest,
     user: User = Depends(current_user),
+    csrf_cookie: str | None = Cookie(default=None, alias=CSRF_COOKIE),
+    csrf_header: str | None = Header(default=None, alias=CSRF_HEADER),
     repository: MissionRepository = Depends(get_mission_repository),
 ) -> MissionUserProjection:
+    _require_csrf(csrf_cookie, csrf_header)
     mission = repository.update_state_for_owner(user.id, mission_id, payload.state)
     if mission is None:
         raise _not_found()
