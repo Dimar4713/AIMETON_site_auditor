@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -16,10 +17,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  deployment-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      real_deploy: ${{ steps.gate.outputs.real_deploy }}
+    steps:
+      - name: Require a successful deploy job
+        id: gate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName === 'workflow_dispatch') {
+              core.setOutput('real_deploy', 'true');
+              return;
+            }
+            const runId = context.payload.workflow_run?.id;
+            if (!runId || context.payload.workflow_run?.conclusion !== 'success') {
+              core.setOutput('real_deploy', 'false');
+              return;
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+            const deploy = jobs.find(job => job.name === 'deploy');
+            const realDeploy = Boolean(deploy && deploy.status === 'completed' && deploy.conclusion === 'success');
+            core.info(`parent deploy job conclusion: ${deploy?.conclusion || 'missing'}`);
+            core.setOutput('real_deploy', realDeploy ? 'true' : 'false');
+
   configure:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    needs: deployment-gate
+    if: ${{ needs.deployment-gate.outputs.real_deploy == 'true' }}
     runs-on:
       - self-hosted
       - Linux
