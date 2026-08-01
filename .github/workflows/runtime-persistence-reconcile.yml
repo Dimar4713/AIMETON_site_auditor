@@ -1,0 +1,153 @@
+name: Runtime Persistence Reconcile
+
+on:
+  workflow_run:
+    workflows:
+      - Deploy Stage
+    types:
+      - completed
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-runtime-persistence-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'issue_comment' && github.event.issue.number == 159 && github.event.comment.body == '/apply-runtime-persistence' && github.event.comment.user.login == 'Dimar4713') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      STAGE_URL: https://stage-auditor.aimeton.ru
+      SERVICE: auditor
+      CONTAINER: aimeton-auditor
+      DATA_DIR: /opt/aimeton/auditor-stack/data/runtime-core
+      RUNTIME_COMPOSE: /opt/aimeton/auditor-stack/docker-compose.runtime-secrets.yml
+
+    steps:
+      - name: Reconcile persistent runtime storage
+        id: reconcile
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+
+          report="$RUNNER_TEMP/runtime-persistence-reconcile.md"
+          backup="$RUNTIME_COMPOSE.before-persistence.$(date -u +%Y%m%dT%H%M%SZ).bak"
+          : > "$report"
+
+          echo "## Runtime persistence reconcile evidence" >> "$report"
+          echo >> "$report"
+          echo "- workflow run: $GITHUB_RUN_ID" >> "$report"
+          echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$report"
+          echo "- mode: controlled apply" >> "$report"
+          echo >> "$report"
+
+          test -f docker-compose.yml
+          test -f docker-compose.override.yml
+          test -f "$RUNTIME_COMPOSE"
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+
+          mkdir -p "$DATA_DIR"
+          chmod 700 "$DATA_DIR"
+          cp -a "$RUNTIME_COMPOSE" "$backup"
+
+          if ! grep -Fq '/app/data' "$RUNTIME_COMPOSE"; then
+            cat >> "$RUNTIME_COMPOSE" <<'EOF'
+            volumes:
+              - ./data/runtime-core:/app/data
+          EOF
+          fi
+
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.override.yml \
+            -f docker-compose.runtime-secrets.yml \
+            config --quiet
+
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.override.yml \
+            -f docker-compose.runtime-secrets.yml \
+            up -d --force-recreate "$SERVICE"
+
+          deadline=$((SECONDS + 180))
+          while (( SECONDS < deadline )); do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+            if [[ "$status" == healthy ]]; then
+              break
+            fi
+            if [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]]; then
+              echo "Container entered terminal state: $status" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$status" == healthy ]]
+
+          mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
+          [[ -n "$mount" ]]
+          [[ "${mount##*|}" == '/app/data' ]]
+
+          health="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/health")"
+          python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p.get("status")=="ok", p' "$health"
+
+          db_exists=no
+          integrity=not-created
+          tables=not-created
+          if docker exec "$CONTAINER" sh -lc 'test -f /app/data/runtime-core.sqlite3'; then
+            db_exists=yes
+            integrity="$(docker exec "$CONTAINER" python -c 'import sqlite3; c=sqlite3.connect("file:/app/data/runtime-core.sqlite3?mode=ro", uri=True); print(c.execute("PRAGMA integrity_check").fetchone()[0]); c.close()')"
+            tables="$(docker exec "$CONTAINER" python -c 'import sqlite3; c=sqlite3.connect("file:/app/data/runtime-core.sqlite3?mode=ro", uri=True); print(",".join(r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type=\"table\" AND name NOT LIKE \"sqlite_%\" ORDER BY name"))); c.close()')"
+            [[ "$integrity" == ok ]]
+          fi
+
+          echo "- persistent directory: ✅ present" >> "$report"
+          echo "- compose validation: ✅" >> "$report"
+          echo "- container health: \`$status\`" >> "$report"
+          echo "- /app/data mount: ✅ \`$mount\`" >> "$report"
+          echo "- API health: ✅" >> "$report"
+          echo "- runtime DB exists: \`$db_exists\`" >> "$report"
+          echo "- SQLite integrity: \`$integrity\`" >> "$report"
+          echo "- tables: \`$tables\`" >> "$report"
+          echo "- rollback compose backup: ✅ created" >> "$report"
+          echo >> "$report"
+          echo "### Verdict" >> "$report"
+          echo "✅ Runtime persistence is reconciled and verified." >> "$report"
+
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+
+      - name: Upload reconcile evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-persistence-reconcile-${{ github.run_id }}
+          path: ${{ steps.reconcile.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-03.4
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.reconcile.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 159,
+              body: report.slice(0, 60000),
+            });
