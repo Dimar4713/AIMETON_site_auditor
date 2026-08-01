@@ -1,8 +1,7 @@
 name: Provision Stage MCP Admin Token
 
 on:
-  issues:
-    types: [labeled]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,25 +12,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  route:
-    runs-on: ubuntu-latest
-    outputs:
-      run_provision: ${{ steps.route.outputs.run_provision }}
-    steps:
-      - id: route
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          LABEL_NAME: ${{ github.event.label.name }}
-        run: |
-          run_provision=false
-          if [[ "$ISSUE_NUMBER" == "39" && "$LABEL_NAME" == "mcp-token-provision" ]]; then
-            run_provision=true
-          fi
-          echo "run_provision=$run_provision" >> "$GITHUB_OUTPUT"
-
   provision:
-    needs: route
-    if: needs.route.outputs.run_provision == 'true'
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
