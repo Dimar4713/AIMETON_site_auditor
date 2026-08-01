@@ -5,6 +5,8 @@ on:
     types: [opened, edited, reopened, closed, labeled, unlabeled, assigned]
   pull_request:
     types: [opened, reopened, closed, ready_for_review, converted_to_draft, labeled, unlabeled, review_requested]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       operation:
@@ -46,6 +48,11 @@ concurrency:
 
 jobs:
   sync:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (!github.event.issue.pull_request &&
+       github.event.comment.body == '/sync-project-item' &&
+       github.event.comment.user.login == 'Dimar4713')
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
