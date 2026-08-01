@@ -4,8 +4,12 @@ on:
   schedule:
     - cron: '17 */6 * * *'
   workflow_dispatch:
-  issues:
-    types: [labeled]
+    inputs:
+      controlled_failure:
+        description: Inject a synthetic critical signal for recovery validation
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,38 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  route:
-    runs-on: ubuntu-latest
-    outputs:
-      run_observe: ${{ steps.decision.outputs.run_observe }}
-      controlled_failure: ${{ steps.decision.outputs.controlled_failure }}
-    steps:
-      - name: Record route decision
-        id: decision
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          LABEL_NAME: ${{ github.event.label.name }}
-        run: |
-          run_observe=true
-          controlled_failure=false
-          if [[ "$EVENT_NAME" == "issues" ]]; then
-            if [[ "$ISSUE_NUMBER" != "38" ]]; then
-              run_observe=false
-            elif [[ "$LABEL_NAME" == "observability-controlled-failure" ]]; then
-              controlled_failure=true
-            elif [[ "$LABEL_NAME" != "observability-check" ]]; then
-              run_observe=false
-            fi
-          fi
-          echo "run_observe=$run_observe" >> "$GITHUB_OUTPUT"
-          echo "controlled_failure=$controlled_failure" >> "$GITHUB_OUTPUT"
-          printf 'event=%s ref=%s sha=%s decision=%s controlled_failure=%s\n' \
-            "$EVENT_NAME" "$GITHUB_REF" "$GITHUB_SHA" "$run_observe" "$controlled_failure"
-
   observe:
-    needs: route
-    if: needs.route.outputs.run_observe == 'true'
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
@@ -63,7 +36,7 @@ jobs:
       OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
       OS_AUTH_TYPE: v3applicationcredential
       OPENSTACK_SERVER_ID: ${{ vars.OPENSTACK_SERVER_ID }}
-      OBS_CONTROLLED_FAILURE: ${{ needs.route.outputs.controlled_failure }}
+      OBS_CONTROLLED_FAILURE: ${{ inputs.controlled_failure || false }}
     steps:
       - uses: actions/checkout@v4
 
@@ -115,7 +88,7 @@ jobs:
           os_data = json.loads(Path('observability-evidence/openstack-summary.json').read_text(encoding='utf-8'))
           alerts = list(data.get('alerts', []))
           if os.environ.get('OBS_CONTROLLED_FAILURE', '').lower() == 'true':
-              alerts.append({'severity': 'critical', 'signal': 'controlled_failure', 'value': 'issue-38-label'})
+              alerts.append({'severity': 'critical', 'signal': 'controlled_failure', 'value': 'workflow-dispatch'})
               data['controlled_failure'] = True
           if os_data.get('configured') and (not os_data.get('found') or os_data.get('status') != 'ACTIVE'):
               alerts.append({'severity': 'critical', 'signal': 'openstack_vm', 'value': os_data.get('status') or 'not-found'})
@@ -142,7 +115,7 @@ jobs:
       - name: Publish manual check or alert to Issue 38
         if: >-
           always() &&
-          (github.event_name == 'workflow_dispatch' || github.event_name == 'issues' || steps.summary.outputs.severity != 'ok')
+          (github.event_name == 'workflow_dispatch' || steps.summary.outputs.severity != 'ok')
         uses: actions/github-script@v7
         env:
           SEVERITY: ${{ steps.summary.outputs.severity }}
