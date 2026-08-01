@@ -70,14 +70,7 @@ jobs:
             backup="$(ls -1t backups/auth/runtime-core.sqlite3.*.bak 2>/dev/null | head -n1 || true)"
             integrity=missing
             if [[ -n "$backup" ]]; then
-              integrity="$(python3 - "$backup" <<'PY'
-import sqlite3, sys
-p = sys.argv[1]
-con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
-print(con.execute("PRAGMA integrity_check").fetchone()[0])
-con.close()
-PY
-)"
+              integrity="$(python3 -c 'import sqlite3,sys; con=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True); print(con.execute("PRAGMA integrity_check").fetchone()[0]); con.close()' "$backup")"
               echo "- latest backup: ✅ present" >> "$report"
               echo "- backup integrity: \`$integrity\`" >> "$report"
             else
