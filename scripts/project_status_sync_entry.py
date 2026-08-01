@@ -16,7 +16,7 @@ def guarded_actual_date_updates(
     target_status: str,
     current_dates: dict[str, str],
 ) -> dict[str, str]:
-    """Set start for every execution state and never create finish without start."""
+    """Set start for every execution state and repair finish from terminal state."""
     updates: dict[str, str] = {}
     created_at = os.getenv("ITEM_CREATED_AT", "").strip()
     state_reason = os.getenv("ITEM_STATE_REASON", "").strip().casefold()
@@ -33,19 +33,11 @@ def guarded_actual_date_updates(
         )
 
     finish_timestamp = ""
-    if (
-        ctx.item_kind == "issue"
-        and ctx.event_action == "closed"
-        and ctx.item_state == "closed"
-    ):
+    if ctx.item_kind == "issue" and ctx.item_state == "closed":
         if state_reason in NON_EXECUTION_REASONS:
             return updates
         finish_timestamp = ctx.item_closed_at
-    elif (
-        ctx.item_kind == "pull_request"
-        and ctx.event_action == "closed"
-        and ctx.pr_merged
-    ):
+    elif ctx.item_kind == "pull_request" and ctx.pr_merged:
         finish_timestamp = ctx.pr_merged_at
 
     if finish_timestamp and "Actual finish" not in current_dates:

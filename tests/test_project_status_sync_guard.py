@@ -57,6 +57,23 @@ def test_merged_pr_gets_start_before_finish(monkeypatch: pytest.MonkeyPatch) -> 
     }
 
 
+def test_manual_repair_restores_merged_pr_finish(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ITEM_CREATED_AT", "2026-07-30T09:00:00Z")
+    updates = entry.guarded_actual_date_updates(
+        context(
+            event_name="workflow_dispatch",
+            event_action="workflow_dispatch",
+            item_state="closed",
+            pr_merged=True,
+            pr_merged_at="2026-08-01T18:05:00Z",
+        ),
+        "Done",
+        "Done",
+        {"Actual start": "2026-07-30"},
+    )
+    assert updates == {"Actual finish": "2026-08-01"}
+
+
 def test_issue_finish_without_start_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ITEM_STATE_REASON", raising=False)
     with pytest.raises(RuntimeError, match="without a provable Actual start"):
@@ -72,6 +89,23 @@ def test_issue_finish_without_start_is_rejected(monkeypatch: pytest.MonkeyPatch)
             "Done",
             {},
         )
+
+
+def test_manual_repair_restores_closed_issue_finish(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ITEM_STATE_REASON", raising=False)
+    updates = entry.guarded_actual_date_updates(
+        context(
+            event_name="workflow_dispatch",
+            event_action="workflow_dispatch",
+            item_kind="issue",
+            item_state="closed",
+            item_closed_at="2026-08-01T18:05:00Z",
+        ),
+        "Done",
+        "Done",
+        {"Actual start": "2026-07-30"},
+    )
+    assert updates == {"Actual finish": "2026-08-01"}
 
 
 def test_not_planned_issue_does_not_get_execution_dates(
