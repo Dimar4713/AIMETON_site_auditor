@@ -1,9 +1,6 @@
 name: Stage Retention
 
 on:
-  issues:
-    types:
-      - labeled
   workflow_dispatch:
     inputs:
       mode:
@@ -38,29 +35,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  route:
-    runs-on: ubuntu-latest
-    outputs:
-      run_retention: ${{ steps.decision.outputs.run_retention }}
-    steps:
-      - name: Record route decision
-        id: decision
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_ACTION: ${{ github.event.action }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          LABEL_NAME: ${{ github.event.label.name }}
-        run: |
-          run_retention=false
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] ||              [[ "$EVENT_NAME" == "issues" && "$EVENT_ACTION" == "labeled" && "$ISSUE_NUMBER" == "37" && "$LABEL_NAME" == "retention-plan" ]]; then
-            run_retention=true
-          fi
-          echo "run_retention=$run_retention" >> "$GITHUB_OUTPUT"
-          printf 'event=%s action=%s ref=%s sha=%s decision=%s\n'             "$EVENT_NAME" "${EVENT_ACTION:-none}" "$GITHUB_REF" "$GITHUB_SHA" "$run_retention"
-
   retention:
-    needs: route
-    if: needs.route.outputs.run_retention == 'true'
     runs-on:
       - self-hosted
       - Linux
@@ -81,29 +56,17 @@ jobs:
       - name: Resolve retention parameters
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_MODE: ${{ github.event.inputs.mode }}
-          INPUT_KEEP_BACKUPS: ${{ github.event.inputs.keep_backups }}
-          INPUT_KEEP_FAILED: ${{ github.event.inputs.keep_failed }}
-          INPUT_CONFIRM: ${{ github.event.inputs.confirm }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_KEEP_BACKUPS: ${{ inputs.keep_backups }}
+          INPUT_KEEP_FAILED: ${{ inputs.keep_failed }}
+          INPUT_CONFIRM: ${{ inputs.confirm }}
         run: |
           set -Eeuo pipefail
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            mode="${INPUT_MODE:-plan}"
-            keep_backups="${INPUT_KEEP_BACKUPS:-3}"
-            keep_failed="${INPUT_KEEP_FAILED:-2}"
-            confirm="${INPUT_CONFIRM:-}"
-          else
-            mode="plan"
-            keep_backups="3"
-            keep_failed="2"
-            confirm=""
-          fi
           {
-            echo "MODE=$mode"
-            echo "KEEP_BACKUPS=$keep_backups"
-            echo "KEEP_FAILED=$keep_failed"
-            echo "CONFIRM=$confirm"
+            echo "MODE=${INPUT_MODE:-plan}"
+            echo "KEEP_BACKUPS=${INPUT_KEEP_BACKUPS:-3}"
+            echo "KEEP_FAILED=${INPUT_KEEP_FAILED:-2}"
+            echo "CONFIRM=${INPUT_CONFIRM:-}"
           } >> "$GITHUB_ENV"
 
       - name: Verify stage health before retention
