@@ -38,11 +38,11 @@ def test_require_admin_uses_policy_boundary() -> None:
     assert require_admin(admin, RoleAdminPolicy()) is admin
 
 
-def test_require_admin_returns_403_for_regular_user() -> None:
+def test_require_admin_returns_typed_403_for_regular_user() -> None:
     with pytest.raises(HTTPException) as error:
         require_admin(user(UserRole.USER), RoleAdminPolicy())
     assert error.value.status_code == 403
-    assert error.value.detail == "admin role required"
+    assert error.value.detail == {"reason": "role_forbidden"}
 
 
 def test_sqlite_adapter_satisfies_session_repository_shape(tmp_path) -> None:
