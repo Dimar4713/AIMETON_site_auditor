@@ -2,13 +2,8 @@ name: Server Auth Persistence Audit
 
 on:
   workflow_dispatch:
-  issues:
-    types: [labeled]
-  push:
-    branches: [main]
-    paths:
-      - ".github/agent-triggers/server-auth-persistence-audit"
-      - ".github/workflows/server-auth-persistence-audit.yml"
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -20,7 +15,12 @@ concurrency:
 
 jobs:
   audit:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || (github.event.issue.number == 159 && github.event.label.name == 'server-audit')
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 159 &&
+       github.event.comment.body == '/audit-auth-persistence' &&
+       github.event.comment.user.login == 'Dimar4713')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
