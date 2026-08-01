@@ -15,12 +15,7 @@ concurrency:
 
 jobs:
   audit:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.number == 159 &&
-       github.event.comment.body == '/audit-auth-persistence' &&
-       github.event.comment.user.login == 'Dimar4713')
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'issue_comment' && github.event.issue.number == 159 && github.event.comment.body == '/audit-auth-persistence' && github.event.comment.user.login == 'Dimar4713') }}
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
