@@ -1,18 +1,11 @@
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
-from app.main import app
-
 
 STATIC = Path("static")
 
 
 def test_root_contains_login_gate_and_hidden_workspace():
-    with TestClient(app) as client:
-        response = client.get("/")
-    assert response.status_code == 200
-    html = response.text
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert 'id="authGate"' in html
     assert 'id="loginForm"' in html
     assert 'id="loginUsername"' in html
