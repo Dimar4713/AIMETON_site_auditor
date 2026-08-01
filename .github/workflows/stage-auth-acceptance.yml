@@ -1,0 +1,234 @@
+name: Stage Auth Acceptance
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-auth-acceptance
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 164 &&
+       github.event.comment.body == '/accept-auth-stage' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+
+    steps:
+      - name: Verify auth persistence and negative authorization
+        id: acceptance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+
+          report="$RUNNER_TEMP/stage-auth-acceptance.md"
+          : > "$report"
+          username="acceptance-$(date -u +%Y%m%d%H%M%S)-$RANDOM"
+          token="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          token_hash="$(printf %s "$token" | sha256sum | awk '{print $1}')"
+          echo "::add-mask::$token"
+
+          cleanup() {
+            set +e
+            docker exec \
+              -e TEST_USERNAME="$username" \
+              -e TEST_TOKEN_HASH="$token_hash" \
+              "$CONTAINER" python - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          path = Path(os.environ.get("AIMETON_AUTH_DB", "/app/data/auth.sqlite3"))
+          if not path.exists():
+              raise SystemExit(0)
+          with sqlite3.connect(path) as connection:
+              row = connection.execute(
+                  "SELECT id FROM users WHERE username = ?",
+                  (os.environ["TEST_USERNAME"],),
+              ).fetchone()
+              if row:
+                  connection.execute("DELETE FROM sessions WHERE user_id = ?", (row[0],))
+                  connection.execute("DELETE FROM users WHERE id = ?", (row[0],))
+              connection.execute(
+                  "DELETE FROM sessions WHERE token_hash = ?",
+                  (os.environ["TEST_TOKEN_HASH"],),
+              )
+          PY
+          }
+          trap cleanup EXIT
+
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          auth_db="$(docker exec "$CONTAINER" sh -lc 'printf %s "${AIMETON_AUTH_DB:-/app/data/auth.sqlite3}"')"
+          [[ "$auth_db" == /app/data/* ]]
+          data_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
+          [[ -n "$data_mount" ]]
+
+          docker exec \
+            -e TEST_USERNAME="$username" \
+            -e TEST_TOKEN_HASH="$token_hash" \
+            "$CONTAINER" python - <<'PY'
+          import os
+          import sqlite3
+          from datetime import UTC, datetime, timedelta
+          from pathlib import Path
+
+          path = Path(os.environ.get("AIMETON_AUTH_DB", "/app/data/auth.sqlite3"))
+          path.parent.mkdir(parents=True, exist_ok=True)
+          with sqlite3.connect(path) as connection:
+              connection.execute(
+                  """
+                  CREATE TABLE IF NOT EXISTS users (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      username TEXT NOT NULL UNIQUE,
+                      password_hash TEXT NOT NULL,
+                      role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+                      is_active INTEGER NOT NULL DEFAULT 1,
+                      created_at TEXT NOT NULL
+                  )
+                  """
+              )
+              connection.execute(
+                  """
+                  CREATE TABLE IF NOT EXISTS sessions (
+                      token_hash TEXT PRIMARY KEY,
+                      user_id INTEGER NOT NULL REFERENCES users(id),
+                      expires_at TEXT NOT NULL,
+                      revoked_at TEXT
+                  )
+                  """
+              )
+              cursor = connection.execute(
+                  "INSERT INTO users(username, password_hash, role, created_at) VALUES (?, ?, 'user', ?)",
+                  (os.environ["TEST_USERNAME"], "acceptance-placeholder-not-login-capable", datetime.now(UTC).isoformat()),
+              )
+              user_id = int(cursor.lastrowid)
+              connection.execute(
+                  "INSERT INTO sessions(token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+                  (
+                      os.environ["TEST_TOKEN_HASH"],
+                      user_id,
+                      (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
+                  ),
+              )
+          PY
+
+          anonymous_code="$(curl -sS -o /dev/null -w '%{http_code}' "$STAGE_URL/api/auth/me")"
+          [[ "$anonymous_code" == 401 ]]
+
+          me_before="$(curl -fsS --cookie "aimeton_session=$token" "$STAGE_URL/api/auth/me")"
+          python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["username"]==sys.argv[2] and p["role"]=="user" and p["is_active"] is True' "$me_before" "$username"
+
+          role_code="$(curl -sS -o "$RUNNER_TEMP/role-denied.json" -w '%{http_code}' --cookie "aimeton_session=$token" "$STAGE_URL/api/auth/admin/ping")"
+          [[ "$role_code" == 403 ]]
+          python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert p["detail"]["reason"]=="role_forbidden"' "$RUNNER_TEMP/role-denied.json"
+
+          csrf_code="$(curl -sS -o "$RUNNER_TEMP/csrf-denied.json" -w '%{http_code}' -X POST --cookie "aimeton_session=$token" "$STAGE_URL/api/auth/logout")"
+          [[ "$csrf_code" == 403 ]]
+          python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert p["detail"]["reason"]=="csrf_failed"' "$RUNNER_TEMP/csrf-denied.json"
+
+          docker restart "$CONTAINER" >/dev/null
+          deadline=$((SECONDS + 180))
+          while (( SECONDS < deadline )); do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+            [[ "$status" == healthy ]] && break
+            [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]] && exit 1
+            sleep 5
+          done
+          [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == healthy ]]
+
+          me_after_restart="$(curl -fsS --cookie "aimeton_session=$token" "$STAGE_URL/api/auth/me")"
+          python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["username"]==sys.argv[2]' "$me_after_restart" "$username"
+
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.override.yml \
+            -f docker-compose.runtime-secrets.yml \
+            up -d --force-recreate auditor
+
+          deadline=$((SECONDS + 180))
+          while (( SECONDS < deadline )); do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+            [[ "$status" == healthy ]] && break
+            [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]] && exit 1
+            sleep 5
+          done
+          [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == healthy ]]
+
+          me_after_recreate="$(curl -fsS --cookie "aimeton_session=$token" "$STAGE_URL/api/auth/me")"
+          python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["username"]==sys.argv[2]' "$me_after_recreate" "$username"
+
+          integrity="$(docker exec "$CONTAINER" python - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+          path = Path(os.environ.get("AIMETON_AUTH_DB", "/app/data/auth.sqlite3"))
+          with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+              print(connection.execute("PRAGMA integrity_check").fetchone()[0])
+          PY
+          )"
+          [[ "$integrity" == ok ]]
+
+          {
+            echo "## Independent stage auth acceptance"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- auth DB path: \`$auth_db\`"
+            echo "- /app/data mount: ✅ \`$data_mount\`"
+            echo "- anonymous /me: ✅ 401"
+            echo "- valid user session before restart: ✅"
+            echo "- role denial: ✅ 403 role_forbidden"
+            echo "- CSRF denial: ✅ 403 csrf_failed"
+            echo "- same user and session after container restart: ✅"
+            echo "- same user and session after compose force-recreate: ✅"
+            echo "- SQLite integrity: \`$integrity\`"
+            echo "- credentials/session token in evidence: not recorded"
+            echo
+            echo "### Verdict"
+            echo "✅ Stage auth persistence and negative authorization acceptance passed."
+          } > "$report"
+
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+
+      - name: Upload sanitized evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-auth-acceptance-${{ github.run_id }}
+          path: ${{ steps.acceptance.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-MVP-01B
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.acceptance.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 164,
+              body: report.slice(0, 60000),
+            });
