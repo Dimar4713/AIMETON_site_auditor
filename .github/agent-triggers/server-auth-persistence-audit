@@ -1,2 +1,3 @@
-run=2026-08-01T16:05:00+02:00
-purpose=restore-self-hosted-server-audit
+run=2026-08-01T16:37:00+02:00
+purpose=publish-auth-persistence-evidence-to-SA-03.4
+issue=159
