@@ -1,0 +1,264 @@
+name: Stage Mission Ownership Acceptance
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-mission-ownership-acceptance
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 177 &&
+       github.event.comment.body == '/accept-mission-stage' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 25
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+
+    steps:
+      - name: Verify mission ownership and persistence
+        id: acceptance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+
+          report="$RUNNER_TEMP/stage-mission-ownership-acceptance.md"
+          suffix="$(date -u +%Y%m%d%H%M%S)-$RANDOM"
+          alice="accept-alice-$suffix"
+          bob="accept-bob-$suffix"
+          admin="accept-admin-$suffix"
+          alice_token=""; bob_token=""; admin_token=""; mission_id=""
+          csrf="mission-acceptance-$suffix"
+          {
+            echo "## Independent stage mission ownership acceptance"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- status: started"
+          } > "$report"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+
+          cleanup() {
+            set +e
+            docker exec -i \
+              -e TEST_ALICE="$alice" -e TEST_BOB="$bob" -e TEST_ADMIN="$admin" \
+              -e TEST_MISSION_ID="$mission_id" \
+              "$CONTAINER" python - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+          auth = Path(os.environ.get("AIMETON_AUTH_DB", "/app/data/auth.sqlite3"))
+          missions = Path(os.environ.get("AIMETON_MISSION_DB", "/app/data/missions.sqlite3"))
+          if auth.exists():
+              with sqlite3.connect(auth) as db:
+                  for username in (os.environ["TEST_ALICE"], os.environ["TEST_BOB"], os.environ["TEST_ADMIN"]):
+                      row = db.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+                      if row:
+                          db.execute("DELETE FROM sessions WHERE user_id = ?", (row[0],))
+                          db.execute("DELETE FROM users WHERE id = ?", (row[0],))
+          mission_id = os.environ.get("TEST_MISSION_ID", "")
+          if mission_id and missions.exists():
+              with sqlite3.connect(missions) as db:
+                  db.execute("DELETE FROM mission_records WHERE mission_id = ?", (mission_id,))
+                  db.execute("DELETE FROM missions WHERE id = ?", (mission_id,))
+          PY
+          }
+          trap cleanup EXIT
+
+          wait_healthy() {
+            local deadline=$((SECONDS + 240)) status=""
+            while (( SECONDS < deadline )); do
+              status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+              [[ "$status" == healthy ]] && return 0
+              [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]] && return 1
+              sleep 5
+            done
+            return 1
+          }
+
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          wait_healthy
+
+          deadline=$((SECONDS + 300)); runtime_ready=no
+          while (( SECONDS < deadline )); do
+            if docker exec -i "$CONTAINER" python - <<'PY' >/dev/null 2>&1
+          from app.admin_users import AdminSQLiteUserRepository
+          from app.auth import PasswordHasher, UserRole
+          from app.session_resolution import TypedLocalAuthProvider
+          from app.mission_sqlite import SQLiteMissionRepository
+          from app.mission_recovery import recovery_decision
+          assert all((AdminSQLiteUserRepository, PasswordHasher, UserRole, TypedLocalAuthProvider, SQLiteMissionRepository, recovery_decision))
+          PY
+            then runtime_ready=yes; break; fi
+            sleep 10
+          done
+          [[ "$runtime_ready" == yes ]]
+
+          mapfile -t credentials < <(docker exec -i \
+            -e TEST_ALICE="$alice" -e TEST_BOB="$bob" -e TEST_ADMIN="$admin" \
+            "$CONTAINER" python - <<'PY'
+          import os, secrets
+          from datetime import timedelta
+          from pathlib import Path
+          from app.admin_users import AdminSQLiteUserRepository
+          from app.auth import PasswordHasher, UserRole
+          from app.session_resolution import TypedLocalAuthProvider
+          path = Path(os.environ.get("AIMETON_AUTH_DB", "/app/data/auth.sqlite3"))
+          repo = AdminSQLiteUserRepository(path)
+          provider = TypedLocalAuthProvider(repo, session_ttl=timedelta(minutes=30))
+          for env_name, role in (("TEST_ALICE", UserRole.USER), ("TEST_BOB", UserRole.USER), ("TEST_ADMIN", UserRole.ADMIN)):
+              username = os.environ[env_name]
+              user = repo.create_user(username, PasswordHasher().hash(secrets.token_urlsafe(48)), role)
+              print(f"{user.id}|{provider.create_session(user).token}")
+          PY
+          )
+          [[ ${#credentials[@]} -eq 3 ]]
+          alice_id="${credentials[0]%%|*}"; alice_token="${credentials[0]#*|}"
+          bob_id="${credentials[1]%%|*}"; bob_token="${credentials[1]#*|}"
+          admin_id="${credentials[2]%%|*}"; admin_token="${credentials[2]#*|}"
+          echo "::add-mask::$alice_token"; echo "::add-mask::$bob_token"; echo "::add-mask::$admin_token"
+
+          cookie_alice="aimeton_session=$alice_token; aimeton_csrf=$csrf"
+          cookie_bob="aimeton_session=$bob_token; aimeton_csrf=$csrf"
+          cookie_admin="aimeton_session=$admin_token; aimeton_csrf=$csrf"
+
+          created="$(curl -fsS -X POST "$STAGE_URL/api/user/missions" \
+            --cookie "$cookie_alice" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
+            --data '{"title":"Stage ownership acceptance","target_ref":"https://example.org","input_snapshot":{"secret_seed":"must-not-leak"},"correlation_id":"stage-ownership-acceptance","owner_id":999999}')"
+          mission_id="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert "owner_id" not in p and "input_snapshot" not in p and "technical_snapshot" not in p; print(p["id"])' "$created")"
+
+          docker exec -i -e TEST_MISSION_ID="$mission_id" "$CONTAINER" python - <<'PY'
+          import os
+          from app.mission_sqlite import SQLiteMissionRepository
+          repo = SQLiteMissionRepository()
+          mid = os.environ["TEST_MISSION_ID"]
+          repo.append_record(mid, "turn", {"turn": 1, "result": "observed"}, record_id="turn-stage-1")
+          repo.append_record(mid, "sufficiency", {"decision": "continue", "deficits": ["ownership-proof"]}, record_id="udp-stage-1")
+          PY
+
+          owner_view="$(curl -fsS --cookie "$cookie_alice" "$STAGE_URL/api/user/missions/$mission_id")"
+          python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["id"]==sys.argv[2] and p["state"]=="running" and "owner_id" not in p' "$owner_view" "$mission_id"
+
+          bob_read="$(curl -sS -o "$RUNNER_TEMP/bob-read.json" -w '%{http_code}' --cookie "$cookie_bob" "$STAGE_URL/api/user/missions/$mission_id")"
+          [[ "$bob_read" == 404 ]]
+          bob_write="$(curl -sS -o "$RUNNER_TEMP/bob-write.json" -w '%{http_code}' -X PATCH \
+            --cookie "$cookie_bob" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
+            --data '{"state":"completed"}' "$STAGE_URL/api/user/missions/$mission_id/state")"
+          [[ "$bob_write" == 404 ]]
+
+          admin_view="$(curl -fsS --cookie "$cookie_admin" "$STAGE_URL/api/admin/missions/$mission_id")"
+          python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["id"]==sys.argv[2] and p["owner_id"]==int(sys.argv[3])' "$admin_view" "$mission_id" "$alice_id"
+
+          degraded="$(curl -fsS -X PATCH "$STAGE_URL/api/user/missions/$mission_id/state" \
+            --cookie "$cookie_alice" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
+            --data '{"state":"degraded"}')"
+          python3 -c 'import json,sys; assert json.loads(sys.argv[1])["state"]=="degraded"' "$degraded"
+
+          verify_persisted() {
+            docker exec -i -e TEST_MISSION_ID="$mission_id" -e TEST_OWNER_ID="$alice_id" "$CONTAINER" python - <<'PY'
+          import os
+          from app.mission_sqlite import SQLiteMissionRepository
+          from app.mission_recovery import RecoveryDisposition, recovery_decision
+          repo = SQLiteMissionRepository()
+          mission = repo.get_for_admin(os.environ["TEST_MISSION_ID"])
+          assert mission is not None
+          assert mission.owner_id == int(os.environ["TEST_OWNER_ID"])
+          assert mission.state.value == "degraded"
+          records = repo.records_for_owner(mission.owner_id, mission.id)
+          assert records is not None
+          assert [(r["id"], r["kind"]) for r in records] == [("turn-stage-1", "turn"), ("udp-stage-1", "sufficiency")]
+          decision = recovery_decision(mission)
+          assert decision.disposition is RecoveryDisposition.REVIEW_DEGRADED
+          assert decision.state.value == "degraded"
+          PY
+          }
+
+          verify_persisted
+          docker restart "$CONTAINER" >/dev/null
+          wait_healthy
+          verify_persisted
+          curl -fsS --cookie "$cookie_alice" "$STAGE_URL/api/user/missions/$mission_id" | python3 -c 'import json,sys; assert json.load(sys.stdin)["state"]=="degraded"'
+
+          docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.runtime-secrets.yml up -d --force-recreate auditor
+          wait_healthy
+          verify_persisted
+          curl -fsS --cookie "$cookie_alice" "$STAGE_URL/api/user/missions/$mission_id" | python3 -c 'import json,sys; assert json.load(sys.stdin)["state"]=="degraded"'
+
+          integrity="$(docker exec -i "$CONTAINER" python - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+          path = Path(os.environ.get("AIMETON_MISSION_DB", "/app/data/missions.sqlite3"))
+          with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+              print(db.execute("PRAGMA integrity_check").fetchone()[0])
+          PY
+          )"
+          [[ "$integrity" == ok ]]
+          deployed_sha="$(cat "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
+          data_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
+          [[ -n "$data_mount" ]]
+
+          {
+            echo "## Independent stage mission ownership acceptance"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- deployed source SHA: \`$deployed_sha\`"
+            echo "- /app/data mount: ✅ \`$data_mount\`"
+            echo "- server-derived owner: ✅"
+            echo "- user A own mission read/update: ✅"
+            echo "- user B cross-user read/write: ✅ 404/404"
+            echo "- admin policy-scoped read and owner visibility: ✅"
+            echo "- stable turn and УДП records: ✅"
+            echo "- degraded recovery disposition remains review_degraded: ✅"
+            echo "- owner/state/records after container restart: ✅"
+            echo "- owner/state/records after compose force-recreate: ✅"
+            echo "- user projection excludes ownership/internal snapshots/secrets: ✅"
+            echo "- SQLite integrity: \`$integrity\`"
+            echo "- credentials/session tokens/internal payloads in evidence: not recorded"
+            echo
+            echo "### Verdict"
+            echo "✅ Stage mission ownership, isolation, recovery and persistence acceptance passed."
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-mission-ownership-acceptance-${{ github.run_id }}
+          path: ${{ steps.acceptance.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-MVP-01C
+        if: ${{ success() }}
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.acceptance.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 177,
+              body: report.slice(0, 60000),
+            });
