@@ -7,14 +7,14 @@ from pathlib import Path
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
-from app.auth import (
-    LocalAuthProvider,
-    SQLiteUserRepository,
-    User,
-    UserRole,
-    bootstrap_admin_from_env,
-)
+from app.auth import AuthProvider, User, UserRole, bootstrap_admin_from_env
 from app.auth_boundary import AdminPolicy, RoleAdminPolicy
+from app.session_resolution import (
+    SessionFailure,
+    SessionResolution,
+    TypedLocalAuthProvider,
+    TypedSQLiteUserRepository,
+)
 
 
 SESSION_COOKIE = "aimeton_session"
@@ -25,12 +25,12 @@ def _database_path() -> Path:
     return Path(os.getenv("AIMETON_AUTH_DB", "data/auth.sqlite3"))
 
 
-def get_auth_provider() -> LocalAuthProvider:
+def get_auth_provider() -> TypedLocalAuthProvider:
     path = _database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    repository = SQLiteUserRepository(path)
+    repository = TypedSQLiteUserRepository(path)
     bootstrap_admin_from_env(repository)
-    return LocalAuthProvider(repository)
+    return TypedLocalAuthProvider(repository)
 
 
 def get_admin_policy() -> AdminPolicy:
@@ -52,17 +52,38 @@ class UserResponse(BaseModel):
         return cls(id=user.id, username=user.username, role=user.role)
 
 
+def _auth_error(reason: SessionFailure) -> HTTPException:
+    if reason is SessionFailure.USER_BLOCKED:
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"reason": reason.value},
+        )
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={"reason": reason.value},
+    )
+
+
+def _resolve_session(auth: AuthProvider, token: str) -> SessionResolution:
+    """Prefer typed providers while preserving compatibility with injected legacy fakes."""
+    typed_resolver = getattr(auth, "resolve_session_typed", None)
+    if callable(typed_resolver):
+        return typed_resolver(token)
+    user = auth.resolve_session(token)
+    if user is None:
+        return SessionResolution(failure=SessionFailure.UNAUTHENTICATED)
+    return SessionResolution(user=user)
+
+
 def current_user(
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    auth: LocalAuthProvider = Depends(get_auth_provider),
+    auth: AuthProvider = Depends(get_auth_provider),
 ) -> User:
-    user = auth.resolve_session(session_token or "")
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="authentication required",
-        )
-    return user
+    resolution = _resolve_session(auth, session_token or "")
+    if resolution.failure is not None:
+        raise _auth_error(resolution.failure)
+    assert resolution.user is not None
+    return resolution.user
 
 
 def require_admin(
@@ -72,7 +93,7 @@ def require_admin(
     if not policy.allows_admin_operation(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="admin role required",
+            detail={"reason": "role_forbidden"},
         )
     return user
 
@@ -81,13 +102,13 @@ def require_admin(
 def login(
     payload: LoginRequest,
     response: Response,
-    auth: LocalAuthProvider = Depends(get_auth_provider),
+    auth: AuthProvider = Depends(get_auth_provider),
 ):
     user = auth.authenticate(payload.username, payload.password)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid credentials",
+            detail={"reason": "unauthenticated"},
         )
     session = auth.create_session(user)
     max_age = max(1, int((session.expires_at - datetime.now(UTC)).total_seconds()))
@@ -108,7 +129,7 @@ def login(
 def logout(
     response: Response,
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    auth: LocalAuthProvider = Depends(get_auth_provider),
+    auth: AuthProvider = Depends(get_auth_provider),
 ):
     auth.revoke_session(session_token or "")
     response.delete_cookie(
