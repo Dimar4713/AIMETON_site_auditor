@@ -21,6 +21,7 @@ class NoCacheStaticFiles(StaticFiles):
         return resp
 
 
+from app.auth_api import router as auth_router
 from app.company_intelligence_runtime import run_company_intelligence
 from app.discovery import run_hunt
 from app.entity_resolution.api import router as entity_resolution_router
@@ -84,9 +85,10 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AIMETON Site Auditor",
-    version="0.16.2",
+    version="0.16.3",
     lifespan=lifespan,
 )
+app.include_router(auth_router)
 app.include_router(runtime_router)
 app.include_router(mission_router)
 app.include_router(evidence_crawler_router)
@@ -139,6 +141,7 @@ def health():
         "analysis_mode": "ai-sales-with-canonical-km-company-profile",
         "osint": "contacts-finance-workforce-legal-ownership",
         "api": "/docs",
+        "auth": "/api/auth",
         "mcp": "/mcp",
         "mcp_admin": "/mcp-admin",
         "mcp_security": "public-rate-limited-admin-authenticated",
