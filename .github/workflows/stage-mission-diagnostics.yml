@@ -1,0 +1,131 @@
+name: Stage Mission Diagnostics
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-mission-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 177 &&
+       github.event.comment.body == '/diagnose-mission-stage' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+
+    steps:
+      - name: Collect sanitized diagnostics
+        id: diagnostics
+        shell: bash
+        run: |
+          set +e
+          report="$RUNNER_TEMP/stage-mission-diagnostics.md"
+          cd "$STACK_DIR" || true
+
+          deployed_sha="$(cat app-source-sha.txt 2>/dev/null || echo unavailable)"
+          container_state="$(docker inspect --format '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo unavailable)"
+          health_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}not-configured{{end}}' "$CONTAINER" 2>/dev/null || echo unavailable)"
+          data_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}' 2>/dev/null || true)"
+          auth_db="$(docker exec "$CONTAINER" sh -lc 'printf %s "${AIMETON_AUTH_DB:-/app/data/auth.sqlite3}"' 2>/dev/null || echo unavailable)"
+          mission_db="$(docker exec "$CONTAINER" sh -lc 'printf %s "${AIMETON_MISSION_DB:-/app/data/missions.sqlite3}"' 2>/dev/null || echo unavailable)"
+
+          import_result="$(docker exec -i "$CONTAINER" python - <<'PY' 2>&1
+          checks = {}
+          for name, statement in {
+              "mission_sqlite": "from app.mission_sqlite import SQLiteMissionRepository",
+              "mission_recovery": "from app.mission_recovery import recovery_decision",
+              "mission_api": "from app.mission_api import get_mission_repository",
+              "auth_runtime": "from app.session_resolution import TypedLocalAuthProvider",
+          }.items():
+              try:
+                  exec(statement, {})
+                  checks[name] = "ok"
+              except Exception as exc:
+                  checks[name] = f"failed:{type(exc).__name__}"
+          print(";".join(f"{key}={value}" for key, value in checks.items()))
+          PY
+          )"
+
+          health_code="$(curl -sS -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$STAGE_URL/api/health" 2>/dev/null || echo curl_failed)"
+          anonymous_user_missions="$(curl -sS -o "$RUNNER_TEMP/user-missions.json" -w '%{http_code}' "$STAGE_URL/api/user/missions" 2>/dev/null || echo curl_failed)"
+          anonymous_admin_missions="$(curl -sS -o "$RUNNER_TEMP/admin-missions.json" -w '%{http_code}' "$STAGE_URL/api/admin/missions" 2>/dev/null || echo curl_failed)"
+
+          mission_db_exists="$(docker exec "$CONTAINER" sh -lc 'test -f "${AIMETON_MISSION_DB:-/app/data/missions.sqlite3}" && echo yes || echo no' 2>/dev/null || echo unavailable)"
+          integrity="$(docker exec -i "$CONTAINER" python - <<'PY' 2>/dev/null
+          import os, sqlite3
+          from pathlib import Path
+          path = Path(os.environ.get("AIMETON_MISSION_DB", "/app/data/missions.sqlite3"))
+          if not path.exists():
+              print("not-created")
+          else:
+              with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+                  print(db.execute("PRAGMA integrity_check").fetchone()[0])
+          PY
+          )"
+
+          {
+            echo "## Stage mission diagnostics"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- deployed source SHA: \`$deployed_sha\`"
+            echo "- container state: \`$container_state\`"
+            echo "- health state: \`$health_state\`"
+            echo "- /app/data mount present: $([[ -n "$data_mount" ]] && echo yes || echo no)"
+            echo "- auth DB path: \`$auth_db\`"
+            echo "- mission DB path: \`$mission_db\`"
+            echo "- mission DB exists: \`$mission_db_exists\`"
+            echo "- mission DB integrity: \`${integrity:-unavailable}\`"
+            echo "- runtime imports: \`${import_result:-unavailable}\`"
+            echo "- /api/health HTTP: \`$health_code\`"
+            echo "- anonymous /api/user/missions HTTP: \`$anonymous_user_missions\`"
+            echo "- anonymous /api/admin/missions HTTP: \`$anonymous_admin_missions\`"
+            echo "- credentials/tokens/internal payloads: not collected"
+          } > "$report"
+
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-mission-diagnostics-${{ github.run_id }}
+          path: ${{ steps.diagnostics.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish diagnostics to SA-MVP-01C
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.diagnostics.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 177,
+              body: report.slice(0, 60000),
+            });
