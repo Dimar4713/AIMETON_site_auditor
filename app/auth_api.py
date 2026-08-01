@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hmac
 import os
 from pathlib import Path
+import secrets
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
 from app.auth import AuthProvider, User, UserRole, bootstrap_admin_from_env
@@ -18,11 +20,21 @@ from app.session_resolution import (
 
 
 SESSION_COOKIE = "aimeton_session"
+CSRF_COOKIE = "aimeton_csrf"
+CSRF_HEADER = "X-CSRF-Token"
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 def _database_path() -> Path:
     return Path(os.getenv("AIMETON_AUTH_DB", "data/auth.sqlite3"))
+
+
+def _cookie_secure() -> bool:
+    return os.getenv("AIMETON_COOKIE_SECURE", "true").lower() not in {
+        "0",
+        "false",
+        "no",
+    }
 
 
 def get_auth_provider() -> TypedLocalAuthProvider:
@@ -75,6 +87,18 @@ def _resolve_session(auth: AuthProvider, token: str) -> SessionResolution:
     return SessionResolution(user=user)
 
 
+def _require_csrf(cookie_token: str | None, header_token: str | None) -> None:
+    if (
+        not cookie_token
+        or not header_token
+        or not hmac.compare_digest(cookie_token, header_token)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"reason": "csrf_failed"},
+        )
+
+
 def current_user(
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
     auth: AuthProvider = Depends(get_auth_provider),
@@ -102,6 +126,7 @@ def require_admin(
 def login(
     payload: LoginRequest,
     response: Response,
+    existing_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
     auth: AuthProvider = Depends(get_auth_provider),
 ):
     user = auth.authenticate(payload.username, payload.password)
@@ -110,14 +135,28 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"reason": "unauthenticated"},
         )
+
+    # Prevent session fixation: any session presented before login is revoked,
+    # then a fresh server-side session and CSRF token are issued.
+    auth.revoke_session(existing_session or "")
     session = auth.create_session(user)
+    csrf_token = secrets.token_urlsafe(32)
     max_age = max(1, int((session.expires_at - datetime.now(UTC)).total_seconds()))
+    secure = _cookie_secure()
     response.set_cookie(
         SESSION_COOKIE,
         session.token,
         httponly=True,
-        secure=os.getenv("AIMETON_COOKIE_SECURE", "true").lower()
-        not in {"0", "false", "no"},
+        secure=secure,
+        samesite="strict",
+        max_age=max_age,
+        path="/",
+    )
+    response.set_cookie(
+        CSRF_COOKIE,
+        csrf_token,
+        httponly=False,
+        secure=secure,
         samesite="strict",
         max_age=max_age,
         path="/",
@@ -129,15 +168,25 @@ def login(
 def logout(
     response: Response,
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    csrf_cookie: str | None = Cookie(default=None, alias=CSRF_COOKIE),
+    csrf_header: str | None = Header(default=None, alias=CSRF_HEADER),
     auth: AuthProvider = Depends(get_auth_provider),
 ):
+    _require_csrf(csrf_cookie, csrf_header)
     auth.revoke_session(session_token or "")
+    secure = _cookie_secure()
     response.delete_cookie(
         SESSION_COOKIE,
         path="/",
-        secure=os.getenv("AIMETON_COOKIE_SECURE", "true").lower()
-        not in {"0", "false", "no"},
+        secure=secure,
         httponly=True,
+        samesite="strict",
+    )
+    response.delete_cookie(
+        CSRF_COOKIE,
+        path="/",
+        secure=secure,
+        httponly=False,
         samesite="strict",
     )
 
