@@ -1,0 +1,139 @@
+name: Archive inactive branches
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: dry-run or apply
+        required: true
+        type: choice
+        options: [dry-run, apply]
+        default: dry-run
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: archive-inactive-branches
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && github.event.issue.title == 'GOV-BRANCH-ARCHIVE: archive inactive branches')
+    runs-on: ubuntu-latest
+    env:
+      MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'apply' }}
+    steps:
+      - name: Rename inactive branches with archiv_ prefix
+        id: archive
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const defaultBranch = context.payload.repository.default_branch;
+            const mode = process.env.MODE;
+            if (!['dry-run', 'apply'].includes(mode)) {
+              core.setFailed(`Unsupported mode: ${mode}`);
+              return;
+            }
+
+            const branches = await github.paginate(github.rest.repos.listBranches, {
+              owner, repo, per_page: 100
+            });
+            const openPulls = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100
+            });
+            const protectedHeads = new Set(openPulls.map(pr => pr.head.ref));
+
+            const candidates = branches
+              .map(item => item.name)
+              .filter(name => name !== defaultBranch)
+              .filter(name => !name.startsWith('archiv_'))
+              .filter(name => !protectedHeads.has(name))
+              .sort();
+
+            const renamed = [];
+            const skipped = [];
+            const failed = [];
+
+            for (const oldName of candidates) {
+              const newName = `archiv_${oldName}`;
+              const collision = branches.some(item => item.name === newName);
+              if (collision) {
+                skipped.push({old_name: oldName, reason: 'archive_name_exists'});
+                continue;
+              }
+              if (mode === 'dry-run') {
+                renamed.push({old_name: oldName, new_name: newName, applied: false});
+                continue;
+              }
+              try {
+                const before = await github.rest.repos.getBranch({owner, repo, branch: oldName});
+                const beforeSha = before.data.commit.sha;
+                await github.request('POST /repos/{owner}/{repo}/branches/{branch}/rename', {
+                  owner,
+                  repo,
+                  branch: oldName,
+                  new_name: newName,
+                  headers: {'X-GitHub-Api-Version': '2022-11-28'}
+                });
+                const after = await github.rest.repos.getBranch({owner, repo, branch: newName});
+                const afterSha = after.data.commit.sha;
+                if (beforeSha !== afterSha) {
+                  throw new Error(`SHA mismatch ${beforeSha} != ${afterSha}`);
+                }
+                try {
+                  await github.rest.repos.getBranch({owner, repo, branch: oldName});
+                  throw new Error('old branch still resolves after rename');
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
+                renamed.push({old_name: oldName, new_name: newName, sha: afterSha, applied: true});
+              } catch (error) {
+                failed.push({old_name: oldName, new_name: newName, error: String(error.message || error)});
+              }
+            }
+
+            const report = {
+              mode,
+              default_branch: defaultBranch,
+              open_pr_heads: [...protectedHeads].sort(),
+              candidate_count: candidates.length,
+              renamed_count: renamed.length,
+              skipped_count: skipped.length,
+              failed_count: failed.length,
+              renamed,
+              skipped,
+              failed
+            };
+            core.summary
+              .addHeading('Branch archive result')
+              .addCodeBlock(JSON.stringify(report, null, 2), 'json')
+              .write();
+            core.setOutput('report', JSON.stringify(report));
+            if (failed.length) core.setFailed(`${failed.length} branch rename operations failed`);
+
+      - name: Publish evidence to trigger issue
+        if: always() && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        env:
+          REPORT: ${{ steps.archive.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const raw = process.env.REPORT || '{}';
+            const body = `## Branch archive evidence\n\n- workflow: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n- outcome: \`${{ steps.archive.outcome }}\`\n\n\`\`\`json\n${raw.slice(0, 60000)}\n\`\`\``;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body
+            });
