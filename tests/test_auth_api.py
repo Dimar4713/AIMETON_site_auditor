@@ -40,7 +40,7 @@ def test_login_me_and_logout(tmp_path, monkeypatch):
 
     login = login_as(client, "analyst", "analyst secure pass")
     assert login.status_code == 200
-    assert login.json() == {"id": 2, "username": "analyst", "role": "user"}
+    assert login.json() == {"id": 2, "username": "analyst", "role": "user", "is_active": True}
     set_cookie = login.headers.get_list("set-cookie")
     assert any(SESSION_COOKIE in value and "httponly" in value.lower() for value in set_cookie)
     assert any(CSRF_COOKIE in value and "httponly" not in value.lower() for value in set_cookie)
