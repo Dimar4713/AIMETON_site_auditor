@@ -1,0 +1,174 @@
+name: Server Auth Persistence Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: plan is read-only; apply performs the controlled stage migration
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply]
+      confirmation:
+        description: For apply enter APPLY-SA-03-4
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-server-auth-persistence-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    steps:
+      - name: Controlled plan or apply
+        id: migrate
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          STACK_DIR: /opt/aimeton/auditor-stack
+          CONTAINER: aimeton-auditor
+          TARGET_DIR: /opt/aimeton/auditor-stack/data/runtime-core
+          TARGET_DB: /opt/aimeton/auditor-stack/data/runtime-core/runtime-core.sqlite3
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/auth-persistence-migration.md"
+          : > "$report"
+          echo "## SA-03.4 controlled persistence migration" >> "$report"
+          echo >> "$report"
+          echo "- workflow run: $GITHUB_RUN_ID" >> "$report"
+          echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$report"
+          echo "- mode: $MODE" >> "$report"
+
+          cd "$STACK_DIR"
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          source_db="$(docker exec "$CONTAINER" sh -lc 'printf %s "${AIMETON_AUTH_DB:-/app/data/runtime-core.sqlite3}"')"
+          docker exec "$CONTAINER" sh -lc "test -f '$source_db'"
+          existing_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
+          backup="$(ls -1t backups/auth/runtime-core.sqlite3.*.bak 2>/dev/null | head -n1 || true)"
+          test -n "$backup"
+          backup_integrity="$(python3 -c 'import sqlite3,sys; c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); print(c.execute("PRAGMA integrity_check").fetchone()[0]); c.close()' "$backup")"
+          test "$backup_integrity" = ok
+
+          echo "- source DB exists: yes" >> "$report"
+          echo "- verified backup exists: yes" >> "$report"
+          echo "- backup integrity: ok" >> "$report"
+          echo "- current /app/data mount: ${existing_mount:-absent}" >> "$report"
+          echo "- target directory: $TARGET_DIR" >> "$report"
+
+          if [[ "$MODE" == plan ]]; then
+            echo "- verdict: ready-for-controlled-apply" >> "$report"
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            echo "report=$report" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          [[ "$MODE" == apply ]]
+          [[ "$CONFIRMATION" == APPLY-SA-03-4 ]]
+          [[ -z "$existing_mount" ]]
+          [[ ! -e "$TARGET_DB" ]]
+
+          ts="$(date -u +%Y%m%dT%H%M%SZ)"
+          compose_backup="docker-compose.yml.sa-03-4.$ts.bak"
+          staging="$TARGET_DIR/runtime-core.sqlite3.$ts.staging"
+          cp -a docker-compose.yml "$compose_backup"
+          install -d -m 0700 "$TARGET_DIR"
+
+          rollback() {
+            set +e
+            cp -a "$compose_backup" docker-compose.yml
+            docker compose up -d --force-recreate auditor
+          }
+          trap rollback ERR
+
+          docker stop "$CONTAINER" >/dev/null
+          docker cp "$CONTAINER:$source_db" "$staging"
+          chmod 0600 "$staging"
+          stage_integrity="$(python3 -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(c.execute("PRAGMA integrity_check").fetchone()[0]); c.close()' "$staging")"
+          test "$stage_integrity" = ok
+          source_digest="$(sha256sum "$staging" | awk '{print $1}')"
+          mv "$staging" "$TARGET_DB"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('docker-compose.yml')
+          text=p.read_text()
+          marker='      - /opt/aimeton/auditor-stack/data/runtime-core:/app/data\n'
+          if marker in text:
+              raise SystemExit('mount already present')
+          lines=text.splitlines(True)
+          out=[]
+          in_auditor=False
+          inserted=False
+          for line in lines:
+              if line.startswith('  auditor:'):
+                  in_auditor=True
+              elif in_auditor and line.startswith('  ') and not line.startswith('    ') and not line.startswith('  auditor:'):
+                  if not inserted:
+                      out.extend(['    volumes:\n', marker])
+                      inserted=True
+                  in_auditor=False
+              out.append(line)
+          if in_auditor and not inserted:
+              out.extend(['    volumes:\n', marker])
+              inserted=True
+          if not inserted:
+              raise SystemExit('auditor service not found')
+          p.write_text(''.join(out))
+          PY
+
+          docker compose up -d --force-recreate auditor
+          mount_after="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
+          test -n "$mount_after"
+          target_integrity="$(python3 -c 'import sqlite3,sys; c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); print(c.execute("PRAGMA integrity_check").fetchone()[0]); c.close()' "$TARGET_DB")"
+          test "$target_integrity" = ok
+          target_digest="$(sha256sum "$TARGET_DB" | awk '{print $1}')"
+          test "$source_digest" = "$target_digest"
+          curl -fsS https://stage-auditor.aimeton.ru/api/health >/dev/null
+          docker restart "$CONTAINER" >/dev/null
+          sleep 5
+          curl -fsS https://stage-auditor.aimeton.ru/api/health >/dev/null
+          mount_restart="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
+          test -n "$mount_restart"
+          trap - ERR
+
+          echo "- source/target digest match: yes" >> "$report"
+          echo "- target integrity: ok" >> "$report"
+          echo "- mount after recreate/restart: present" >> "$report"
+          echo "- health after recreate/restart: ok" >> "$report"
+          echo "- rollback compose retained: $compose_backup" >> "$report"
+          echo "- verdict: passed" >> "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+
+      - name: Upload sanitized evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-persistence-migration-${{ github.run_id }}
+          path: ${{ steps.migrate.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish sanitized evidence to SA-03.4
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.migrate.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 159,
+              body: report.slice(0, 60000),
+            });
