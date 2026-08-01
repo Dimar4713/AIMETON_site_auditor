@@ -14,6 +14,7 @@ from app.auth import (
     UserRole,
     bootstrap_admin_from_env,
 )
+from app.auth_boundary import AdminPolicy, RoleAdminPolicy
 
 
 SESSION_COOKIE = "aimeton_session"
@@ -30,6 +31,10 @@ def get_auth_provider() -> LocalAuthProvider:
     repository = SQLiteUserRepository(path)
     bootstrap_admin_from_env(repository)
     return LocalAuthProvider(repository)
+
+
+def get_admin_policy() -> AdminPolicy:
+    return RoleAdminPolicy()
 
 
 class LoginRequest(BaseModel):
@@ -60,8 +65,11 @@ def current_user(
     return user
 
 
-def require_admin(user: User = Depends(current_user)) -> User:
-    if user.role is not UserRole.ADMIN:
+def require_admin(
+    user: User = Depends(current_user),
+    policy: AdminPolicy = Depends(get_admin_policy),
+) -> User:
+    if not policy.allows_admin_operation(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="admin role required",
