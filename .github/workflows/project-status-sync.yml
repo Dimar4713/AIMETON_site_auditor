@@ -86,41 +86,22 @@ jobs:
               return;
             }
             const item = kind === 'pull_request'
-              ? (await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: number
-                })).data
-              : (await github.rest.issues.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: number
-                })).data;
+              ? (await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: number})).data
+              : (await github.rest.issues.get({owner: context.repo.owner, repo: context.repo.repo, issue_number: number})).data;
             core.setOutput('kind', kind);
             core.setOutput('number', String(number));
             core.setOutput('node_id', item.node_id);
             core.setOutput('state', item.state);
             core.setOutput('state_reason', item.state_reason || '');
             core.setOutput('title', item.title || '');
-            core.setOutput(
-              'labels',
-              (item.labels || [])
-                .map(x => typeof x === 'string' ? x : x.name)
-                .filter(Boolean)
-                .join(',')
-            );
+            core.setOutput('labels', (item.labels || []).map(x => typeof x === 'string' ? x : x.name).filter(Boolean).join(','));
             core.setOutput('created_at', item.created_at || '');
-            core.setOutput(
-              'event_at',
-              context.eventName === 'workflow_dispatch'
-                ? new Date().toISOString()
-                : (item.updated_at || new Date().toISOString())
-            );
+            core.setOutput('event_at', context.eventName === 'workflow_dispatch' ? new Date().toISOString() : (item.updated_at || new Date().toISOString()));
             core.setOutput('closed_at', item.closed_at || '');
             core.setOutput('merged', String(Boolean(item.merged)));
             core.setOutput('merged_at', item.merged_at || '');
 
-      - name: Synchronize Project V2 status, fields, views, and dates
+      - name: Synchronize Project V2 item, status, fields and actual dates
         id: project_sync
         shell: bash
         env:
@@ -138,8 +119,14 @@ jobs:
           PR_MERGED_AT: ${{ steps.item.outputs.merged_at }}
         run: |
           set -o pipefail
-          python scripts/project_status_sync_entry.py 2>&1 \
-            | tee project-sync-result.json
+          python scripts/project_status_sync_entry.py 2>&1 | tee project-sync-result.json
+
+      - name: Assign and verify planned dates after item synchronization
+        if: env.OPERATION == 'sync_item' && env.DRY_RUN != 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/project_plan_dates.py 2>&1 | tee project-plan-dates-result.json
 
       - name: Publish Roadmap repair evidence
         if: always() && env.OPERATION == 'repair_roadmap' && github.event_name == 'issues'
@@ -149,20 +136,9 @@ jobs:
           script: |
             const fs = require('fs');
             const path = 'project-sync-result.json';
-            const raw = fs.existsSync(path)
-              ? fs.readFileSync(path, 'utf8').trim()
-              : 'Project sync produced no report file.';
-            const report = raw.length > 55000
-              ? `${raw.slice(0, 55000)}\n…truncated`
-              : raw;
+            const raw = fs.existsSync(path) ? fs.readFileSync(path, 'utf8').trim() : 'Project sync produced no report file.';
+            const report = raw.length > 55000 ? `${raw.slice(0, 55000)}\n…truncated` : raw;
             const outcome = '${{ steps.project_sync.outcome }}';
             const dryRun = String(process.env.DRY_RUN).toLowerCase() === 'true';
-            const heading = dryRun
-              ? 'Roadmap repair dry-run evidence'
-              : 'Roadmap repair apply evidence';
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: `## ${heading}\n\n- outcome: \`${outcome}\`\n- workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n\`\`\`json\n${report}\n\`\`\``
-            });
+            const heading = dryRun ? 'Roadmap repair dry-run evidence' : 'Roadmap repair apply evidence';
+            await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: context.payload.issue.number, body: `## ${heading}\n\n- outcome: \`${outcome}\`\n- workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n\`\`\`json\n${report}\n\`\`\``});
