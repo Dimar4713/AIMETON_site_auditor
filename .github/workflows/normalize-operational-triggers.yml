@@ -2,8 +2,6 @@ name: Normalize Operational Workflow Triggers
 
 on:
   workflow_dispatch:
-  issue_comment:
-    types: [created]
 
 permissions:
   contents: write
@@ -15,7 +13,6 @@ concurrency:
 
 jobs:
   normalize:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'issue_comment' && github.event.issue.number == 164 && github.event.comment.body == '/normalize-operational-triggers' && github.event.comment.user.login == 'Dimar4713') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
