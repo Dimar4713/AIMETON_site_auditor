@@ -1,0 +1,73 @@
+name: Audit Stage Environment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/audit-stage-environment.yml
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    environment: stage
+    env:
+      GH_ADMIN_TOKEN: ${{ secrets.AIMETON_ENVIRONMENT_ADMIN_TOKEN }}
+      REPO: ${{ github.repository }}
+      ENVIRONMENT_NAME: stage
+      ISSUE_NUMBER: "158"
+    steps:
+      - name: Read environment metadata and publish sanitized inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${GH_ADMIN_TOKEN:-}"
+
+          api="https://api.github.com/repos/${REPO}/environments/${ENVIRONMENT_NAME}"
+          auth=(-H "Authorization: Bearer ${GH_ADMIN_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+
+          secrets_json="$(curl --fail --silent --show-error "${auth[@]}" "${api}/secrets?per_page=100")"
+          vars_json="$(curl --fail --silent --show-error "${auth[@]}" "${api}/variables?per_page=100")"
+
+          report="$(python3 - <<'PY' "$secrets_json" "$vars_json"
+import json, sys
+secrets_data=json.loads(sys.argv[1])
+vars_data=json.loads(sys.argv[2])
+secret_names=sorted(item['name'] for item in secrets_data.get('secrets', []))
+var_names=sorted(item['name'] for item in vars_data.get('variables', []))
+expected_secrets={'AIMETON_BOOTSTRAP_ADMIN_PASSWORD','ROUTERAI_API_KEY','OS_APPLICATION_CREDENTIAL_SECRET','TAVILY_TOKEN','AIMETON_ENVIRONMENT_ADMIN_TOKEN'}
+expected_vars={'AIMETON_BOOTSTRAP_ADMIN_USERNAME','AIMETON_COOKIE_SECURE'}
+legacy={'AUDITOR_BOOTSTRAP_ADMIN_PASSWORD','AUDITOR_ROUTERAI_API_KEY','AUDITOR_BOOTSTRAP_ADMIN_USERNAME','AUDITOR_COOKIE_SECURE'}
+all_names=set(secret_names)|set(var_names)
+lines=['## Stage environment sanitized inventory','', '### Secrets (names only)']
+lines += [f'- `{name}`' for name in secret_names] or ['- _none_']
+lines += ['', '### Variables (names only)']
+lines += [f'- `{name}`' for name in var_names] or ['- _none_']
+lines += ['', '### Contract check']
+for name in sorted(expected_secrets):
+    lines.append(f"- {'✅' if name in secret_names else '❌'} secret `{name}`")
+for name in sorted(expected_vars):
+    lines.append(f"- {'✅' if name in var_names else '❌'} variable `{name}`")
+for name in sorted(legacy):
+    lines.append(f"- {'❌ legacy still present' if name in all_names else '✅ legacy absent'} `{name}`")
+print('\n'.join(lines))
+PY
+)"
+
+          payload="$(python3 - <<'PY' "$report"
+import json, sys
+print(json.dumps({'body': sys.argv[1]}))
+PY
+)"
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -X POST \
+            "https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+            -d "$payload" >/dev/null
