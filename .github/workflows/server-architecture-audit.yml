@@ -1,9 +1,9 @@
 name: Server Architecture Audit
 
 on:
-  issues:
-    types: [labeled]
   workflow_dispatch:
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   audit:
-    if: github.event_name == 'workflow_dispatch' || (github.event.issue.number == 36 && github.event.label.name == 'server-audit')
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'issue_comment' && github.event.issue.number == 36 && github.event.comment.body == '/audit-server-architecture' && github.event.comment.user.login == 'Dimar4713') }}
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
