@@ -61,10 +61,7 @@ jobs:
           cp -a "$RUNTIME_COMPOSE" "$backup"
 
           if ! grep -Fq '/app/data' "$RUNTIME_COMPOSE"; then
-            cat >> "$RUNTIME_COMPOSE" <<'EOF'
-            volumes:
-              - ./data/runtime-core:/app/data
-          EOF
+            printf '%s\n' '    volumes:' '      - ./data/runtime-core:/app/data' >> "$RUNTIME_COMPOSE"
           fi
 
           docker compose \
