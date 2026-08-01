@@ -7,10 +7,11 @@ from pathlib import Path
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
-from app.auth import User, UserRole, bootstrap_admin_from_env
+from app.auth import AuthProvider, User, UserRole, bootstrap_admin_from_env
 from app.auth_boundary import AdminPolicy, RoleAdminPolicy
 from app.session_resolution import (
     SessionFailure,
+    SessionResolution,
     TypedLocalAuthProvider,
     TypedSQLiteUserRepository,
 )
@@ -63,11 +64,22 @@ def _auth_error(reason: SessionFailure) -> HTTPException:
     )
 
 
+def _resolve_session(auth: AuthProvider, token: str) -> SessionResolution:
+    """Prefer typed providers while preserving compatibility with injected legacy fakes."""
+    typed_resolver = getattr(auth, "resolve_session_typed", None)
+    if callable(typed_resolver):
+        return typed_resolver(token)
+    user = auth.resolve_session(token)
+    if user is None:
+        return SessionResolution(failure=SessionFailure.UNAUTHENTICATED)
+    return SessionResolution(user=user)
+
+
 def current_user(
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    auth: TypedLocalAuthProvider = Depends(get_auth_provider),
+    auth: AuthProvider = Depends(get_auth_provider),
 ) -> User:
-    resolution = auth.resolve_session_typed(session_token or "")
+    resolution = _resolve_session(auth, session_token or "")
     if resolution.failure is not None:
         raise _auth_error(resolution.failure)
     assert resolution.user is not None
@@ -90,7 +102,7 @@ def require_admin(
 def login(
     payload: LoginRequest,
     response: Response,
-    auth: TypedLocalAuthProvider = Depends(get_auth_provider),
+    auth: AuthProvider = Depends(get_auth_provider),
 ):
     user = auth.authenticate(payload.username, payload.password)
     if user is None:
@@ -117,7 +129,7 @@ def login(
 def logout(
     response: Response,
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    auth: TypedLocalAuthProvider = Depends(get_auth_provider),
+    auth: AuthProvider = Depends(get_auth_provider),
 ):
     auth.revoke_session(session_token or "")
     response.delete_cookie(
