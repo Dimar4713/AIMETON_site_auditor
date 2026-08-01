@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.auth import LocalAuthProvider, PasswordHasher, SQLiteUserRepository, UserRole
-from app.auth_api import get_auth_provider, router
+from app.auth_api import SESSION_COOKIE, get_auth_provider, router
 
 
 def build_client(tmp_path):
@@ -29,6 +29,7 @@ def test_login_me_and_logout(tmp_path, monkeypatch):
     assert login.json() == {"id": 2, "username": "analyst", "role": "user"}
     assert "httponly" in login.headers["set-cookie"].lower()
     assert "samesite=strict" in login.headers["set-cookie"].lower()
+    assert SESSION_COOKIE in client.cookies
 
     me = client.get("/api/auth/me")
     assert me.status_code == 200
@@ -36,6 +37,7 @@ def test_login_me_and_logout(tmp_path, monkeypatch):
 
     logout = client.post("/api/auth/logout")
     assert logout.status_code == 204
+    assert SESSION_COOKIE not in client.cookies
     assert client.get("/api/auth/me").status_code == 401
 
 
@@ -47,7 +49,8 @@ def test_invalid_credentials_are_rejected(tmp_path, monkeypatch):
         json={"username": "analyst", "password": "incorrect password"},
     )
     assert response.status_code == 401
-    assert "aimeton_session" not in response.headers.get("set-cookie", "")
+    assert SESSION_COOKIE not in response.headers.get("set-cookie", "")
+    assert "password_hash" not in response.text
 
 
 def test_user_cannot_access_admin_route(tmp_path, monkeypatch):
