@@ -2,10 +2,6 @@ name: Audit Stage Environment
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/audit-stage-environment.yml
 
 permissions:
   contents: read
@@ -24,7 +20,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           if [[ -z "${GH_ADMIN_TOKEN:-}" ]]; then
-            echo "AIMETON_ENVIRONMENT_ADMIN_TOKEN is not available in environment stage" >&2
+            echo "AIMETON_ENVIRONMENT_ADMIN_TOKEN is not available to this workflow" >&2
             exit 1
           fi
 
@@ -62,7 +58,6 @@ jobs:
 
           expected_secrets = {
               'AIMETON_BOOTSTRAP_ADMIN_PASSWORD',
-              'AIMETON_ENVIRONMENT_ADMIN_TOKEN',
               'OS_APPLICATION_CREDENTIAL_SECRET',
               'ROUTERAI_API_KEY',
               'TAVILY_TOKEN',
