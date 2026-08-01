@@ -10,7 +10,7 @@ from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response,
 from pydantic import BaseModel, Field
 
 from app.admin_users import AdminOperation, AdminSQLiteUserRepository, AdminUserService
-from app.auth import AuthProvider, User, UserRole, bootstrap_admin_from_env
+from app.auth import AuthProvider, User, UserRole
 from app.auth_boundary import AdminPolicy, RoleAdminPolicy
 from app.session_resolution import SessionFailure, SessionResolution, TypedLocalAuthProvider
 
@@ -33,7 +33,6 @@ def get_auth_provider() -> TypedLocalAuthProvider:
     path = _database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     repository = AdminSQLiteUserRepository(path)
-    bootstrap_admin_from_env(repository)
     return TypedLocalAuthProvider(repository)
 
 
