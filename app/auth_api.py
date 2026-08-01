@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import os
 from pathlib import Path
 
@@ -62,13 +63,14 @@ def login(payload: LoginRequest, response: Response, auth: LocalAuthProvider = D
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
     session = auth.create_session(user)
+    max_age = max(1, int((session.expires_at - datetime.now(UTC)).total_seconds()))
     response.set_cookie(
         SESSION_COOKIE,
         session.token,
         httponly=True,
         secure=os.getenv("AIMETON_COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
         samesite="strict",
-        max_age=max(1, int((session.expires_at.timestamp()))),
+        max_age=max_age,
         path="/",
     )
     return UserResponse.from_user(user)
