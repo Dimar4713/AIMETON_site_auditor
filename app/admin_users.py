@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Protocol
 
 from app.auth import PasswordHasher, User, UserRole
+from app.session_resolution import TypedSQLiteUserRepository
 
 
 class AdminUserRepository(Protocol):
@@ -15,10 +17,60 @@ class AdminUserRepository(Protocol):
     def add_audit_event(self, actor_id: int, action: str, target_user_id: int | None, reason: str, result: str) -> None: ...
 
 
+class AdminSQLiteUserRepository(TypedSQLiteUserRepository):
+    def _initialize(self) -> None:
+        super()._initialize()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_audit_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    actor_id INTEGER NOT NULL,
+                    action TEXT NOT NULL,
+                    target_user_id INTEGER,
+                    reason TEXT NOT NULL,
+                    result TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+
+    def list_users(self) -> list[User]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, username, role, is_active FROM users ORDER BY id"
+            ).fetchall()
+        return [User(row["id"], row["username"], UserRole(row["role"]), bool(row["is_active"])) for row in rows]
+
+    def update_password(self, user_id: int, password_hash: str) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (password_hash, user_id),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("user not found")
+            connection.execute(
+                "UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+                (datetime.now(UTC).isoformat(), user_id),
+            )
+
+    def add_audit_event(self, actor_id: int, action: str, target_user_id: int | None, reason: str, result: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO auth_audit_events(actor_id, action, target_user_id, reason, result, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (actor_id, action, target_user_id, reason.strip()[:500], result, datetime.now(UTC).isoformat()),
+            )
+
+
 @dataclass(frozen=True)
 class AdminOperation:
     actor: User
     reason: str
+
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise ValueError("reason is required")
 
 
 class AdminUserService:
