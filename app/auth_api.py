@@ -7,7 +7,13 @@ from pathlib import Path
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
-from app.auth import LocalAuthProvider, SQLiteUserRepository, User, UserRole, bootstrap_admin_from_env
+from app.auth import (
+    LocalAuthProvider,
+    SQLiteUserRepository,
+    User,
+    UserRole,
+    bootstrap_admin_from_env,
+)
 
 
 SESSION_COOKIE = "aimeton_session"
@@ -47,28 +53,42 @@ def current_user(
 ) -> User:
     user = auth.resolve_session(session_token or "")
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="authentication required",
+        )
     return user
 
 
 def require_admin(user: User = Depends(current_user)) -> User:
     if user.role is not UserRole.ADMIN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin role required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="admin role required",
+        )
     return user
 
 
 @router.post("/login", response_model=UserResponse)
-def login(payload: LoginRequest, response: Response, auth: LocalAuthProvider = Depends(get_auth_provider)):
+def login(
+    payload: LoginRequest,
+    response: Response,
+    auth: LocalAuthProvider = Depends(get_auth_provider),
+):
     user = auth.authenticate(payload.username, payload.password)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid credentials",
+        )
     session = auth.create_session(user)
     max_age = max(1, int((session.expires_at - datetime.now(UTC)).total_seconds()))
     response.set_cookie(
         SESSION_COOKIE,
         session.token,
         httponly=True,
-        secure=os.getenv("AIMETON_COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
+        secure=os.getenv("AIMETON_COOKIE_SECURE", "true").lower()
+        not in {"0", "false", "no"},
         samesite="strict",
         max_age=max_age,
         path="/",
@@ -83,8 +103,14 @@ def logout(
     auth: LocalAuthProvider = Depends(get_auth_provider),
 ):
     auth.revoke_session(session_token or "")
-    response.delete_cookie(SESSION_COOKIE, path="/")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(
+        SESSION_COOKIE,
+        path="/",
+        secure=os.getenv("AIMETON_COOKIE_SECURE", "true").lower()
+        not in {"0", "false", "no"},
+        httponly=True,
+        samesite="strict",
+    )
 
 
 @router.get("/me", response_model=UserResponse)
