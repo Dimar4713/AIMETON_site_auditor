@@ -2,10 +2,6 @@ name: Project Planned Dates
 
 on:
   workflow_dispatch:
-  issues:
-    types: [opened, reopened, closed, labeled, unlabeled]
-  pull_request:
-    types: [opened, synchronize, reopened, closed, ready_for_review, converted_to_draft]
 
 permissions:
   contents: read
