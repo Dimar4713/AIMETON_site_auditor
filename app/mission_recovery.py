@@ -14,6 +14,11 @@ class ResumeDisposition(StrEnum):
     TERMINAL = "terminal"
 
 
+# Backward-compatible alias for existing acceptance tooling. New code should use
+# ResumeDisposition as the canonical public name.
+RecoveryDisposition = ResumeDisposition
+
+
 class MissionRecoveryDecision(BaseModel):
     mission_id: str
     state: MissionState
