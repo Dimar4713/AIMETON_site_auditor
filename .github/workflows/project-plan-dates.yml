@@ -1,0 +1,52 @@
+name: Project Planned Dates
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened, reopened, closed, labeled, unlabeled]
+  pull_request:
+    types: [opened, reopened, closed, ready_for_review, converted_to_draft]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: project-plan-dates
+  cancel-in-progress: false
+
+jobs:
+  plan-dates:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate Project configuration
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN" || { echo 'Missing PROJECTS_TOKEN'; exit 1; }
+          test -n "$PROJECT_OWNER" || { echo 'Missing PROJECT_OWNER'; exit 1; }
+          test -n "$PROJECT_NUMBER" || { echo 'Missing PROJECT_NUMBER'; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Assign, repair and verify planned dates
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -o pipefail
+          python scripts/project_plan_dates.py 2>&1 | tee project-plan-dates-result.json
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-plan-dates-${{ github.run_id }}
+          path: project-plan-dates-result.json
+          if-no-files-found: error
