@@ -2,6 +2,8 @@ const userBox = document.querySelector('#session-user');
 const detailBox = document.querySelector('#mission-detail');
 const errorBox = document.querySelector('#mission-error');
 const guidanceBox = document.querySelector('#mission-guidance');
+const evidenceBox = document.querySelector('#mission-evidence');
+const reportBox = document.querySelector('#mission-report');
 
 function stateLabel(state) {
   return ({running: 'Выполняется', degraded: 'Ограниченный результат', blocked: 'Заблокировано', completed: 'Завершено'})[state] || state;
@@ -12,7 +14,7 @@ function guidance(state) {
     running: 'Анализ выполняется. Обновите страницу позже.',
     degraded: 'Получен ограниченный результат. Успешный отчёт не подтверждён.',
     blocked: 'Продолжение заблокировано. Требуется устранить указанную причину.',
-    completed: 'Миссия завершена. Допустимый отчёт появится отдельным безопасным действием.',
+    completed: 'Миссия завершена. Доступность отчёта определяется отдельным release-контрактом.',
   })[state] || 'Состояние миссии обновлено.';
 }
 
@@ -25,11 +27,42 @@ async function api(path) {
   return response;
 }
 
+function renderEvidence(records) {
+  evidenceBox.replaceChildren();
+  if (!records.length) {
+    evidenceBox.textContent = 'Допустимые evidence/УДП записи пока отсутствуют.';
+    return;
+  }
+  for (const record of records) {
+    const item = document.createElement('article');
+    item.className = 'mission-card';
+    const title = document.createElement('h3');
+    title.textContent = record.kind === 'sufficiency' ? 'УДП' : 'Шаг анализа';
+    const summary = document.createElement('p');
+    summary.textContent = record.data.summary || record.data.status || 'Запись подтверждена.';
+    const meta = document.createElement('small');
+    const level = record.data.level ? ` · ${record.data.level}` : '';
+    meta.textContent = `${record.id}${level} · ${new Date(record.created_at).toLocaleString()}`;
+    item.append(title, summary, meta);
+    evidenceBox.append(item);
+  }
+}
+
+function renderReport(payload) {
+  const report = payload.report_metadata;
+  if (!report || payload.report_reason) {
+    reportBox.textContent = `Отчёт недоступен: ${payload.report_reason || 'report_not_available'}.`;
+    return;
+  }
+  reportBox.textContent = `Отчёт ${report.data.report_id || report.id} доступен (${report.data.format || report.data.content_type || 'metadata'}).`;
+}
+
 async function load() {
   const missionId = decodeURIComponent(window.location.pathname.split('/').filter(Boolean).at(-1) || '');
-  const [sessionResponse, missionResponse] = await Promise.all([
+  const [sessionResponse, missionResponse, recordsResponse] = await Promise.all([
     api('/api/auth/me'),
     api(`/api/user/missions/${encodeURIComponent(missionId)}`),
+    api(`/api/user/missions/${encodeURIComponent(missionId)}/records`),
   ]);
   if (!sessionResponse.ok) throw new Error('session_unavailable');
   const user = await sessionResponse.json();
@@ -38,6 +71,8 @@ async function load() {
   if (missionResponse.status === 404) {
     errorBox.textContent = 'Миссия не найдена или недоступна текущему пользователю.';
     errorBox.hidden = false;
+    evidenceBox.textContent = 'Данные недоступны.';
+    reportBox.textContent = 'Данные недоступны.';
     return;
   }
   if (!missionResponse.ok) {
@@ -58,6 +93,15 @@ async function load() {
   guidanceBox.textContent = guidance(mission.state);
   detailBox.hidden = false;
   guidanceBox.hidden = false;
+
+  if (recordsResponse.ok) {
+    const records = await recordsResponse.json();
+    renderEvidence(records.evidence || []);
+    renderReport(records);
+  } else {
+    evidenceBox.textContent = 'Evidence/УДП недоступны.';
+    reportBox.textContent = 'Метаданные отчёта недоступны.';
+  }
 }
 
 load().catch(() => {});
