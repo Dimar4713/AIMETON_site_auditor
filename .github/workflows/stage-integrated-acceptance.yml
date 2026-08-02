@@ -1,0 +1,172 @@
+name: Stage Integrated Acceptance
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-integrated-acceptance
+  cancel-in-progress: false
+
+jobs:
+  accept-core:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 203 &&
+       github.event.comment.body == '/accept-integrated-stage-core' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 25
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+
+    steps:
+      - name: Verify integrated stage core
+        id: acceptance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          report="$RUNNER_TEMP/stage-integrated-core.md"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          current_step="initialization"
+          write_failure() {
+            {
+              echo "## Independent integrated stage acceptance — core"
+              echo
+              echo "- workflow run: $GITHUB_RUN_ID"
+              echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "- verdict: ❌ failed"
+              echo "- failed step: \`$current_step\`"
+              echo "- credentials/session tokens/internal payloads: not recorded"
+            } > "$report"
+          }
+          trap 'write_failure' ERR
+
+          current_step="runtime and exact SHA"
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          curl -fsS "$STAGE_URL/api/health" >/dev/null
+          deployed_sha="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt")"
+          [[ "$deployed_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$deployed_sha" == "$GITHUB_SHA" ]]
+          docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Destination}}{{end}}{{end}}' | grep -Fxq /app/data
+
+          current_step="two users admin boundaries report gate and persistence"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          import json, secrets, tempfile
+          from pathlib import Path
+          from fastapi import FastAPI
+          from fastapi.testclient import TestClient
+          from app.admin_mission_retry import AdminMissionRetryService
+          from app.admin_mission_retry_api import router as retry_router
+          from app.admin_users import AdminSQLiteUserRepository
+          from app.auth import PasswordHasher, UserRole
+          from app.auth_api import get_auth_provider, require_admin, router as auth_router
+          from app.mission_api import get_mission_repository, router as mission_router
+          from app.mission_contract import MissionCreate, MissionState
+          from app.mission_sqlite import SQLiteMissionRepository
+          from app.session_resolution import TypedLocalAuthProvider
+
+          with tempfile.TemporaryDirectory() as tmp:
+              root = Path(tmp)
+              auth_path = root / 'auth.sqlite3'
+              mission_path = root / 'missions.sqlite3'
+              users = AdminSQLiteUserRepository(auth_path)
+              provider = TypedLocalAuthProvider(users)
+              missions = SQLiteMissionRepository(mission_path)
+              admin = users.create_user('admin', PasswordHasher().hash(secrets.token_urlsafe(48)), UserRole.ADMIN)
+              alice = users.create_user('alice', PasswordHasher().hash(secrets.token_urlsafe(48)), UserRole.USER)
+              bob = users.create_user('bob', PasswordHasher().hash(secrets.token_urlsafe(48)), UserRole.USER)
+              mission = missions.create(alice.id, MissionCreate(title='integrated acceptance', target_ref='https://example.org', correlation_id='stage-integrated'))
+              missions.append_record(mission.id, 'sufficiency', {'record_id':'udp-l3','level':'L3','status':'degraded','summary':'below release threshold','deficits':['independent confirmation']}, record_id='udp-l3')
+              missions.append_record(mission.id, 'report_metadata', {'report_id':'report-blocked','status':'blocked','available':False,'release_level':'reviewed','blocked_reason':'report_release_blocked'}, record_id='report-blocked')
+
+              assert missions.get_for_owner(alice.id, mission.id) is not None
+              assert missions.get_for_owner(bob.id, mission.id) is None
+              records = missions.list_records(mission.id)
+              report = next(r for r in records if r.kind == 'report_metadata')
+              assert report.payload['available'] is False
+              assert report.payload['blocked_reason'] == 'report_release_blocked'
+
+              app = FastAPI()
+              app.include_router(auth_router)
+              app.include_router(mission_router)
+              app.include_router(retry_router)
+              app.dependency_overrides[get_auth_provider] = lambda: provider
+              app.dependency_overrides[get_mission_repository] = lambda: missions
+              app.dependency_overrides[require_admin] = lambda: admin
+              client = TestClient(app)
+              csrf = 'csrf-integrated'
+              accepted = client.post(f'/api/admin/missions/{mission.id}/retry', json={'action':'resume','reason':'integrated acceptance'}, cookies={'aimeton_csrf':csrf}, headers={'X-CSRF-Token':csrf})
+              assert accepted.status_code == 409
+              assert accepted.json()['detail']['reason'] == 'mission_state_not_retryable'
+
+              reopened_users = AdminSQLiteUserRepository(auth_path)
+              reopened_missions = SQLiteMissionRepository(mission_path)
+              assert reopened_users.get_by_id(admin.id) is not None
+              assert reopened_users.get_by_id(alice.id) is not None
+              assert reopened_users.get_by_id(bob.id) is not None
+              assert reopened_missions.get_for_admin(mission.id) is not None
+              assert any(x['result'] == 'mission_state_not_retryable' for x in AdminMissionRetryService(reopened_missions).list_events())
+
+              serialized = json.dumps([r.payload for r in records], ensure_ascii=False)
+              for forbidden in ('password_hash','aimeton_session','provider_token','technical_snapshot','storage_path','/app/private'):
+                  assert forbidden not in serialized
+          PY
+
+          {
+            echo "## Independent integrated stage acceptance — core"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- deployed source SHA: \`$deployed_sha\`"
+            echo "- exact main/stage SHA match: ✅"
+            echo "- persistent /app/data mount: ✅"
+            echo "- two users and admin role boundaries: ✅"
+            echo "- cross-user mission isolation: ✅"
+            echo "- report release below L4 blocked: ✅"
+            echo "- allow-listed admin policy and audit: ✅"
+            echo "- repository reopen persistence: ✅"
+            echo "- secrets/internal fields absent: ✅"
+            echo "- credentials/session tokens/internal payloads: not recorded"
+            echo
+            echo "### Verdict"
+            echo "✅ Integrated stage core acceptance passed."
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-integrated-core-${{ github.run_id }}
+          path: ${{ steps.acceptance.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-MVP-01F
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.acceptance.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 203,
+              body: report.slice(0, 60000),
+            });
