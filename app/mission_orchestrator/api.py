@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict
 from app.admin_mission_retry_api import router as admin_mission_retry_router
 from app.admin_workspace_api import router as admin_workspace_router
 from app.mission_api import router as ownership_router
+from app.mission_orchestrator import get_mission_orchestrator
 from app.mission_orchestrator.models import (
     ActionCandidate,
     ActionOutcome,
@@ -14,7 +15,6 @@ from app.mission_orchestrator.models import (
     PolicySnapshot,
     SufficiencyFeedback,
 )
-from app.mission_orchestrator.service import get_mission_orchestrator
 from app.workspace_api import router as workspace_router
 
 
