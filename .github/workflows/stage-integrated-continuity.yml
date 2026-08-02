@@ -1,0 +1,160 @@
+name: Stage Integrated Continuity Acceptance
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-integrated-continuity
+  cancel-in-progress: false
+
+jobs:
+  continuity:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 203 &&
+       github.event.comment.body == '/accept-integrated-stage-continuity' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 20
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+
+    steps:
+      - name: Verify restart continuity
+        id: acceptance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/stage-integrated-continuity.md"
+          before="$RUNNER_TEMP/persistence-before.json"
+          after="$RUNNER_TEMP/persistence-after.json"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          current_step="initialization"
+
+          write_failure() {
+            {
+              echo "## Independent integrated stage acceptance — continuity"
+              echo
+              echo "- workflow run: $GITHUB_RUN_ID"
+              echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "- verdict: ❌ failed"
+              echo "- failed step: \`$current_step\`"
+              echo "- credentials/session tokens/database rows/internal payloads: not recorded"
+            } > "$report"
+          }
+          trap 'write_failure' ERR
+
+          snapshot() {
+            local target="$1"
+            docker exec -i "$CONTAINER" python - > "$target" <<'PY'
+          import hashlib, json, os, sqlite3
+          from pathlib import Path
+
+          def fingerprint(path: Path):
+              assert path.exists(), path
+              with sqlite3.connect(path) as db:
+                  db.row_factory = sqlite3.Row
+                  assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+                  tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+                  result = {}
+                  for table in tables:
+                      rows = [tuple(r) for r in db.execute(f'SELECT * FROM "{table}" ORDER BY rowid')]
+                      digest = hashlib.sha256(repr(rows).encode()).hexdigest()
+                      result[table] = {"rows": len(rows), "digest": digest}
+                  return result
+
+          payload = {
+              "auth": fingerprint(Path(os.environ.get("AIMETON_AUTH_DB", "/app/data/auth.sqlite3"))),
+              "missions": fingerprint(Path(os.environ.get("AIMETON_MISSION_DB", "/app/data/missions.sqlite3"))),
+          }
+          print(json.dumps(payload, sort_keys=True))
+          PY
+          }
+
+          current_step="runtime readiness"
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          curl -fsS "$STAGE_URL/api/health" >/dev/null
+          docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Destination}}{{end}}{{end}}' | grep -Fxq /app/data
+
+          current_step="pre-restart persistence fingerprint"
+          snapshot "$before"
+
+          current_step="controlled container restart"
+          docker restart "$CONTAINER" >/dev/null
+          for attempt in $(seq 1 60); do
+            status="$(docker inspect "$CONTAINER" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+            if [[ "$status" == "healthy" ]] && curl -fsS "$STAGE_URL/api/health" >/dev/null 2>&1; then
+              break
+            fi
+            [[ "$attempt" -lt 60 ]] || exit 1
+            sleep 2
+          done
+
+          current_step="post-restart persistence fingerprint"
+          snapshot "$after"
+
+          current_step="persistence comparison"
+          python3 - "$before" "$after" <<'PY'
+          import json, sys
+          before = json.load(open(sys.argv[1], encoding='utf-8'))
+          after = json.load(open(sys.argv[2], encoding='utf-8'))
+          assert before == after, "persistent database fingerprints changed across restart"
+          required_auth = {"users", "sessions", "auth_audit_events"}
+          assert required_auth.issubset(before["auth"]), before["auth"].keys()
+          assert before["missions"], "mission database has no persistent tables"
+          PY
+
+          deployed_runtime_sha="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt")"
+          {
+            echo "## Independent integrated stage acceptance — continuity"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- deployed runtime SHA: \`$deployed_runtime_sha\`"
+            echo "- persistent /app/data mount: ✅"
+            echo "- auth and mission SQLite integrity before restart: ✅"
+            echo "- controlled container restart and health recovery: ✅"
+            echo "- users, sessions, missions, УДП records and audit fingerprints unchanged: ✅"
+            echo "- credentials/session tokens/database rows/internal payloads: not recorded"
+            echo
+            echo "### Verdict"
+            echo "✅ Integrated stage restart continuity acceptance passed."
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-integrated-continuity-${{ github.run_id }}
+          path: ${{ steps.acceptance.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-MVP-01F
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.acceptance.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 203,
+              body: report.slice(0, 60000),
+            });
