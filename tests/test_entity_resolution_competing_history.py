@@ -4,6 +4,7 @@ from app.entity_resolution import IdentityResolutionState, ProvisionalEntityReso
 from app.mission_orchestrator import (
     ActionCandidate,
     ActionType,
+    MissionOrchestrator,
     PolicySnapshot,
 )
 from tests.test_entity_resolution import (
@@ -12,7 +13,6 @@ from tests.test_entity_resolution import (
     _crawl_plan,
     _record_crawl_and_plan_resolution,
 )
-from app.mission_orchestrator import MissionOrchestrator
 
 
 def _candidate_signature(result):
@@ -114,7 +114,7 @@ def test_reordered_evidence_keeps_deterministic_competing_candidate_ids():
         ogrn="1232400000007",
         digest=DIGEST_B,
     )
-    resolution_plan = _record_crawl_and_plan_resolution(
+    first_plan = _record_crawl_and_plan_resolution(
         orchestrator,
         mission,
         crawl_plan,
@@ -123,16 +123,34 @@ def test_reordered_evidence_keeps_deterministic_competing_candidate_ids():
     first = resolver.resolve(
         orchestrator,
         mission.contract.mission_id,
-        plan=resolution_plan,
+        plan=first_plan,
         bootstrap_results=[first_batch, competing_batch],
     )
-    repeated = resolver.resolve(
+    orchestrator.record_turn(
+        mission.contract.mission_id,
+        plan=first_plan,
+        outcome=first.outcome,
+        feedback=first.recommended_feedback,
+    )
+    second_plan = orchestrator.plan(
+        mission.contract.mission_id,
+        deficits=["identity_conflict"],
+        candidates=[
+            ActionCandidate(
+                action_type=ActionType.RESOLVE_IDENTITY,
+                target=mission.contract.mission_id,
+                deficit_code="identity_conflict",
+            )
+        ],
+        policy=PolicySnapshot(remaining_actions=8),
+    )
+    reordered = resolver.resolve(
         orchestrator,
         mission.contract.mission_id,
-        plan=resolution_plan,
+        plan=second_plan,
         bootstrap_results=[competing_batch, first_batch],
     )
 
-    assert repeated.id == first.id
-    assert _candidate_signature(repeated) == _candidate_signature(first)
-    assert len(resolver.history(mission.contract.mission_id).revisions) == 1
+    assert reordered.supersedes_result_id == first.id
+    assert _candidate_signature(reordered) == _candidate_signature(first)
+    assert len(resolver.history(mission.contract.mission_id).revisions) == 2
