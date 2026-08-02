@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AIMETON — вход</title>
+  <link rel="stylesheet" href="/static/workspace.css">
+</head>
+<body class="workspace-body">
+  <main class="auth-card" aria-labelledby="login-title">
+    <p class="eyebrow">AIMETON Site Auditor</p>
+    <h1 id="login-title">Вход в рабочее пространство</h1>
+    <form id="login-form" novalidate>
+      <label>Имя пользователя<input id="username" autocomplete="username" required maxlength="128"></label>
+      <label>Пароль<input id="password" type="password" autocomplete="current-password" required maxlength="1024"></label>
+      <button type="submit">Войти</button>
+      <p id="login-error" class="message error" role="alert" hidden></p>
+    </form>
+  </main>
+  <script src="/static/login.js" defer></script>
+</body>
+</html>
