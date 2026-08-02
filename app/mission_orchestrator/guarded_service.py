@@ -58,6 +58,7 @@ class MissionOrchestrator(BaseMissionOrchestrator):
             )
             if (
                 candidate.action_type == ActionType.QUERY_PROVIDER
+                and candidate.deficit_code
                 and candidate.deficit_code not in active_deficits
             ):
                 decision = decision.model_copy(
