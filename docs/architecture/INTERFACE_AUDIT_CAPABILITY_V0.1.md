@@ -2,7 +2,7 @@
 
 **Статус:** принято к развитию  
 **Дата:** 2026-08-03  
-**Каноническое основание:** `aimeton-architecture/Docs/ADR/ADR-009_Контур_аудита_интерфейсов_и_управление_внешними_skills.md`  
+**Каноническое основание:** `aimeton-architecture/Docs/ADR/ADR-010_Контур_аудита_интерфейсов_и_управление_внешними_skills.md`  
 **Методический donor:** `jakubkrehel/skills`  
 **Сохранённый fork:** `Dimar4713/skills`  
 **Snapshot:** `a67333399dabbc71d7778962cb9c4fb9b86a00d0`  
