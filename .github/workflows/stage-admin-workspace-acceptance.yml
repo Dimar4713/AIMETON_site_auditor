@@ -52,13 +52,14 @@ jobs:
 
           current_step="isolated admin acceptance scenario"
           docker exec -i "$CONTAINER" python - <<'PY'
-          import json, os, secrets, tempfile
+          import json, secrets, tempfile
           from pathlib import Path
           from fastapi import FastAPI
           from fastapi.testclient import TestClient
-          from app.admin_mission_retry import router as retry_router
+          from app.admin_mission_retry import AdminMissionRetryService
+          from app.admin_mission_retry_api import router as retry_router
           from app.admin_users import AdminSQLiteUserRepository
-          from app.auth import PasswordHasher, User, UserRole
+          from app.auth import PasswordHasher, UserRole
           from app.auth_api import get_auth_provider, require_admin, router as auth_router
           from app.mission_api import get_mission_repository, router as mission_router
           from app.mission_contract import MissionCreate, MissionState
@@ -95,17 +96,17 @@ jobs:
               assert any(x['action'] == 'set_active' and x['target_user_id'] == user.id and x['result'] == 'success' for x in audit)
 
               accepted = client.post(f'/api/admin/missions/{mission.id}/retry', json={'action': 'resume', 'reason': 'stage acceptance retry'}, cookies=cookies, headers=headers)
-              assert accepted.status_code == 200 and accepted.json()['status'] == 'accepted' and accepted.json()['mission_state'] == 'running'
+              assert accepted.status_code == 200 and accepted.json()['state'] == 'running'
               rejected = client.post(f'/api/admin/missions/{mission.id}/retry', json={'action': 'resume', 'reason': 'must reject running'}, cookies=cookies, headers=headers)
-              assert rejected.status_code == 409 and rejected.json()['detail']['reason'] == 'retry_state_not_allowed'
+              assert rejected.status_code == 409 and rejected.json()['detail']['reason'] == 'mission_state_not_retryable'
 
               reopened_auth = AdminSQLiteUserRepository(root / 'auth.sqlite3')
               reopened_missions = SQLiteMissionRepository(root / 'missions.sqlite3')
               assert reopened_auth.get_by_id(user.id) is not None
               assert reopened_missions.get_for_admin(mission.id).state == MissionState.RUNNING
-              events = reopened_missions.list_admin_events(mission.id)
+              events = AdminMissionRetryService(reopened_missions).list_events()
               assert any(x['result'] == 'success' for x in events)
-              assert any(x['result'] == 'rejected' for x in events)
+              assert any(x['result'] == 'mission_state_not_retryable' for x in events)
 
               serialized = json.dumps({'audit': audit, 'events': events}, ensure_ascii=False)
               for forbidden in ('password_hash', 'aimeton_session', 'input_snapshot', 'technical_snapshot', '/app/'):
