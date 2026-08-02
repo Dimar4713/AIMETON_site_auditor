@@ -22,6 +22,11 @@ class SufficiencyDimension(StrEnum):
     EXECUTION_INTEGRITY = "execution_integrity"
 
 
+class ExecutionFailureKind(StrEnum):
+    PROVIDER = "provider_failure"
+    AI = "ai_failure"
+
+
 class DimensionAssessment(SufficiencyModel):
     dimension: SufficiencyDimension
     level: SufficiencyLevel
