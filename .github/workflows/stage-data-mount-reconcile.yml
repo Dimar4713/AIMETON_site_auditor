@@ -38,6 +38,7 @@ jobs:
           report="$RUNNER_TEMP/stage-data-mount-reconcile.md"
           echo "report=$report" >> "$GITHUB_OUTPUT"
 
+          # Recreate with the same stage compose layering used by acceptance.
           test -f docker-compose.yml
           test -f docker-compose.override.yml
           test -f docker-compose.runtime-secrets.yml
