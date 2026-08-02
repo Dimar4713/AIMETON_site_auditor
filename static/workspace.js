@@ -25,7 +25,7 @@ async function api(path, options = {}) {
 }
 
 function stateLabel(state) {
-  return ({running: 'Выполняется', degraded: 'Ограниченный результат', blocked: 'Заблокировано', completed: 'Завершено'})[state] || state;
+  return ({created: 'Создана · запуск не начат', running: 'Выполняется', degraded: 'Ограниченный результат', blocked: 'Заблокировано', completed: 'Завершено'})[state] || state;
 }
 
 function renderMissions(items) {
@@ -97,7 +97,7 @@ form.addEventListener('submit', async (event) => {
     return;
   }
   form.reset();
-  messageBox.textContent = 'Миссия создана и привязана к текущему пользователю.';
+  messageBox.textContent = 'Миссия создана. Выполнение ещё не начато.';
   messageBox.className = 'message success';
   messageBox.hidden = false;
   await loadMissions();

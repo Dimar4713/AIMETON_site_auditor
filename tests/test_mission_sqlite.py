@@ -56,7 +56,7 @@ def test_mission_survives_repository_reopen(tmp_path) -> None:
 
     assert restored is not None
     assert restored.owner_id == 101
-    assert restored.state is MissionState.RUNNING
+    assert restored.state is MissionState.CREATED
     assert records is not None
     assert records[0]["id"] == record_id
     assert records[0]["kind"] == "sufficiency"
@@ -76,7 +76,7 @@ def test_owner_queries_and_mutations_fail_closed(tmp_path) -> None:
 
     unchanged = repository.get_for_owner(1, mission_a.id)
     assert unchanged is not None
-    assert unchanged.state is MissionState.RUNNING
+    assert unchanged.state is MissionState.CREATED
 
 
 def test_owner_state_update_persists_and_preserves_typed_state(tmp_path) -> None:

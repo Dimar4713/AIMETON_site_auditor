@@ -6,12 +6,13 @@ const evidenceBox = document.querySelector('#mission-evidence');
 const reportBox = document.querySelector('#mission-report');
 
 function stateLabel(state) {
-  return ({running: 'Выполняется', degraded: 'Ограниченный результат', blocked: 'Заблокировано', completed: 'Завершено'})[state] || state;
+  return ({created: 'Создана · запуск не начат', running: 'Выполняется', degraded: 'Ограниченный результат', blocked: 'Заблокировано', completed: 'Завершено'})[state] || state;
 }
 
 function guidance(state) {
   return ({
-    running: 'Анализ выполняется. Обновите страницу позже.',
+    created: 'Миссия сохранена, но execution attempt ещё не создан. Анализ не выполняется.',
+    running: 'Анализ выполняется и подтверждён execution-событиями.',
     degraded: 'Получен ограниченный результат. Успешный отчёт не подтверждён.',
     blocked: 'Продолжение заблокировано. Требуется устранить указанную причину.',
     completed: 'Миссия завершена. Доступность отчёта определяется отдельным release-контрактом.',
