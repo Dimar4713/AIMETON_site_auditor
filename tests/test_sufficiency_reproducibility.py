@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from app.mission_orchestrator import ActionType
 from app.sufficiency_evaluator.service import evaluate_targeted_crawl
 from app.sufficiency_evaluator.trace_store import reset_sufficiency_trace_store
 from tests.test_sufficiency_evaluator import _fixture
 
 
 def _stable_projection(result) -> dict:
+    selected = result.next_plan.selected_action
+    action_target = (
+        "<mission>"
+        if selected.action_type == ActionType.STOP
+        else selected.target
+    )
     return {
         "target_level": result.target_level,
         "achieved_level": result.achieved_level,
@@ -24,10 +31,10 @@ def _stable_projection(result) -> dict:
         "report_release_allowed": result.report_release_allowed,
         "stop_reason": result.stop_reason,
         "next_action": (
-            result.next_plan.selected_action.action_type,
-            result.next_plan.selected_action.target,
-            result.next_plan.selected_action.deficit_code,
-            result.next_plan.selected_action.expected_sufficiency_gain,
+            selected.action_type,
+            action_target,
+            selected.deficit_code,
+            selected.expected_sufficiency_gain,
         ),
         "selection_reason": result.next_plan.selection_reason,
     }
