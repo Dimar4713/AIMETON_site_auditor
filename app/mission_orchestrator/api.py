@@ -13,6 +13,7 @@ from app.mission_orchestrator.models import (
     SufficiencyFeedback,
 )
 from app.mission_orchestrator.service import get_mission_orchestrator
+from app.workspace_api import router as workspace_router
 
 
 router = APIRouter()
@@ -86,3 +87,4 @@ def record_turn(mission_id: str, request: RecordTurnRequest):
 
 router.include_router(legacy_router)
 router.include_router(ownership_router)
+router.include_router(workspace_router)
