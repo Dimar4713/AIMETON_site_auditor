@@ -29,3 +29,10 @@ def login_page():
 @router.get("/workspace", include_in_schema=False)
 def user_workspace(_user: User = Depends(current_user)):
     return _no_cache_file("static/workspace.html")
+
+
+@router.get("/workspace/missions/{mission_id}", include_in_schema=False)
+def user_mission_detail(mission_id: str, _user: User = Depends(current_user)):
+    # The HTML shell never resolves ownership itself. The browser must fetch the
+    # owner-scoped API endpoint, which returns the same 404 for absent/foreign IDs.
+    return _no_cache_file("static/mission-detail.html")

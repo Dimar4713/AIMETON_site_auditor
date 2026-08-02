@@ -38,7 +38,10 @@ function renderMissions(items) {
     const card = document.createElement('article');
     card.className = 'mission-card';
     const title = document.createElement('h3');
-    title.textContent = mission.title;
+    const detailLink = document.createElement('a');
+    detailLink.href = `/workspace/missions/${encodeURIComponent(mission.id)}`;
+    detailLink.textContent = mission.title;
+    title.append(detailLink);
     const target = document.createElement('p');
     target.textContent = mission.target_ref;
     const state = document.createElement('span');
