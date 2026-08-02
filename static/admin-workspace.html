@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AIMETON — администрирование</title>
+  <link rel="stylesheet" href="/static/workspace.css">
+</head>
+<body class="workspace-body">
+  <header class="workspace-header">
+    <div><p class="eyebrow">AIMETON Site Auditor</p><h1>Административное пространство</h1></div>
+    <div class="session-box"><span id="session-admin">Загрузка…</span><a class="secondary button-link" href="/workspace">User workspace</a></div>
+  </header>
+  <main class="workspace-grid">
+    <section class="panel" aria-labelledby="users-title">
+      <div class="panel-title"><h2 id="users-title">Пользователи</h2><button id="refresh-users" class="secondary">Обновить</button></div>
+      <p class="message">Показываются только безопасные поля: id, username, role и active state.</p>
+      <div id="admin-users" class="mission-list" aria-live="polite"></div>
+    </section>
+    <section class="panel" aria-labelledby="missions-title">
+      <div class="panel-title"><h2 id="missions-title">Все миссии</h2><button id="refresh-missions" class="secondary">Обновить</button></div>
+      <p class="message">Технические secrets, snapshots и внутренние пути не отображаются.</p>
+      <div id="admin-missions" class="mission-list" aria-live="polite"></div>
+    </section>
+  </main>
+  <script src="/static/admin-workspace.js" defer></script>
+</body>
+</html>
