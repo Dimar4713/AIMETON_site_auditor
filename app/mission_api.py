@@ -16,6 +16,7 @@ from app.mission_contract import (
     MissionUserProjection,
 )
 from app.mission_execution import start_mission_execution
+from app.mission_local_runtime import run_cost_free_local_step
 from app.mission_sqlite import SQLiteMissionRepository
 
 
@@ -67,7 +68,15 @@ class MissionUserRecordsProjection(BaseModel):
 
 
 _SAFE_FIELDS: dict[str, set[str]] = {
-    "turn": {"turn_id", "status", "summary", "source_count", "completed_at"},
+    "turn": {
+        "turn_id",
+        "status",
+        "summary",
+        "source_count",
+        "completed_at",
+        "reason_code",
+        "next_action",
+    },
     "sufficiency": {"record_id", "level", "status", "summary", "deficits", "updated_at"},
     "report_metadata": {
         "report_id",
@@ -119,7 +128,12 @@ def create_owned_mission(
         owner_id=user.id,
         mission=mission,
     )
-    return MissionUserProjection.from_mission(execution.mission)
+    runtime = run_cost_free_local_step(
+        repository,
+        owner_id=user.id,
+        mission=execution.mission,
+    )
+    return MissionUserProjection.from_mission(runtime.mission)
 
 
 @router.get("/api/user/missions", response_model=list[MissionUserProjection])
@@ -214,4 +228,3 @@ def admin_get_mission(
     mission = repository.get_for_admin(mission_id)
     if mission is None:
         raise _not_found()
-    return MissionAdminProjection.from_mission(mission)
