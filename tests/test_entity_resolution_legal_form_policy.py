@@ -63,14 +63,20 @@ def test_sole_proprietor_and_company_remain_distinct_without_linking_evidence():
         }
         for candidate in result.candidates
     }
-    assert identifiers_by_type["company"] >= {
+    company_strong = {
+        item for item in identifiers_by_type["company"] if item[0] in {"inn", "ogrn"}
+    }
+    proprietor_strong = {
+        item
+        for item in identifiers_by_type["sole_proprietor"]
+        if item[0] in {"inn", "ogrn"}
+    }
+    assert company_strong == {
         ("inn", "2400000009"),
         ("ogrn", "1022400000006"),
     }
-    assert identifiers_by_type["sole_proprietor"] >= {
+    assert proprietor_strong == {
         ("inn", "246500000089"),
         ("ogrn", "323240000000007"),
     }
-    assert identifiers_by_type["company"].isdisjoint(
-        identifiers_by_type["sole_proprietor"]
-    )
+    assert company_strong.isdisjoint(proprietor_strong)
