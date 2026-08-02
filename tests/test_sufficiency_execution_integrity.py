@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Regression coverage for crawler execution-integrity projection."""
+
 import pytest
 
 from app.evidence_crawler.models import CrawlStatus
