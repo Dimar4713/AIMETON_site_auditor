@@ -174,8 +174,8 @@ def evaluate_targeted_crawl(
     elif envelope.guard_state == IdentityGuardState.CONFLICTING:
         candidates = [
             ActionCandidate(
-                action_type=ActionType.REVIEW_CONFLICT,
-                target=mission_id,
+                action_type=ActionType.CRAWL_URL,
+                target=target_url,
                 deficit_code="identity_conflict",
                 expected_sufficiency_gain=0.8,
                 ai_priority=1,

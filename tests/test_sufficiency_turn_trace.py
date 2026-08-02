@@ -37,7 +37,7 @@ def test_evaluation_persists_before_after_evidence_and_next_action_reason():
     assert record.correlation_id == mission.contract.correlation_id
 
 
-def test_identity_conflict_trace_keeps_gap_and_review_decision():
+def test_identity_conflict_trace_keeps_gap_and_targeted_recovery_decision():
     from app.evidence_crawler.targeted_api import IdentityGuardState
 
     orchestrator, mission, envelope = _fixture(IdentityGuardState.CONFLICTING)
@@ -54,5 +54,5 @@ def test_identity_conflict_trace_keeps_gap_and_review_decision():
     assert record.before_level == SufficiencyLevel.L1
     assert record.after_level == SufficiencyLevel.L0
     assert "identity_conflict" in record.critical_gaps
-    assert record.next_action_type == ActionType.REVIEW_CONFLICT.value
+    assert record.next_action_type == ActionType.CRAWL_URL.value
     assert record.next_action_deficit == "identity_conflict"
