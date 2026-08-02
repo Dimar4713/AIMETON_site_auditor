@@ -4,6 +4,9 @@ const errorBox = document.querySelector('#mission-error');
 const guidanceBox = document.querySelector('#mission-guidance');
 const evidenceBox = document.querySelector('#mission-evidence');
 const reportBox = document.querySelector('#mission-report');
+const liveFeedBox = document.querySelector('#mission-live-feed');
+const liveNextBox = document.querySelector('#mission-live-next');
+const liveUpdatedBox = document.querySelector('#mission-live-updated');
 
 function stateLabel(state) {
   return ({created: 'Создана · запуск не начат', running: 'Выполняется', degraded: 'Ограниченный результат', blocked: 'Заблокировано', completed: 'Завершено'})[state] || state;
@@ -17,6 +20,20 @@ function guidance(state) {
     blocked: 'Продолжение заблокировано. Требуется устранить указанную причину.',
     completed: 'Миссия завершена. Доступность отчёта определяется отдельным release-контрактом.',
   })[state] || 'Состояние миссии обновлено.';
+}
+
+function eventLabel(summary) {
+  return ({
+    execution_started: 'Запуск миссии подтверждён.',
+    planning_started: 'Формируется план выполнения.',
+    runtime_step_not_configured: 'Рабочий шаг пока не настроен.',
+  })[summary] || summary || 'Операционное событие подтверждено.';
+}
+
+function nextActionLabel(nextAction) {
+  return ({
+    configure_bounded_runtime_worker: 'Следующий шаг: подключить ограниченный рабочий контур выполнения.',
+  })[nextAction] || (nextAction ? `Следующий шаг: ${nextAction}.` : '');
 }
 
 async function api(path) {
@@ -40,13 +57,38 @@ function renderEvidence(records) {
     const title = document.createElement('h3');
     title.textContent = record.kind === 'sufficiency' ? 'УДП' : 'Шаг анализа';
     const summary = document.createElement('p');
-    summary.textContent = record.data.summary || record.data.status || 'Запись подтверждена.';
+    summary.textContent = eventLabel(record.data.summary) || record.data.status || 'Запись подтверждена.';
     const meta = document.createElement('small');
     const level = record.data.level ? ` · ${record.data.level}` : '';
     meta.textContent = `${record.id}${level} · ${new Date(record.created_at).toLocaleString()}`;
     item.append(title, summary, meta);
     evidenceBox.append(item);
   }
+}
+
+function renderLiveFeed(mission, records) {
+  const events = records.evidence || [];
+  const latest = events.at(-1);
+  if (!latest) {
+    liveFeedBox.textContent = mission.state === 'created'
+      ? 'Запуск ещё не подтверждён операционными событиями.'
+      : 'Операционные события пока недоступны.';
+    liveNextBox.hidden = true;
+    liveUpdatedBox.textContent = `Состояние: ${stateLabel(mission.state)}`;
+    return;
+  }
+
+  const data = latest.data || {};
+  liveFeedBox.textContent = `${stateLabel(mission.state)} · ${eventLabel(data.summary)}`;
+  const nextText = nextActionLabel(data.next_action);
+  if (data.reason_code || nextText) {
+    const reason = data.reason_code ? `Причина: ${data.reason_code}.` : '';
+    liveNextBox.textContent = [reason, nextText].filter(Boolean).join(' ');
+    liveNextBox.hidden = false;
+  } else {
+    liveNextBox.hidden = true;
+  }
+  liveUpdatedBox.textContent = `Последнее обновление: ${new Date(latest.created_at).toLocaleString()}`;
 }
 
 function renderReport(payload) {
@@ -72,6 +114,7 @@ async function load() {
   if (missionResponse.status === 404) {
     errorBox.textContent = 'Миссия не найдена или недоступна текущему пользователю.';
     errorBox.hidden = false;
+    liveFeedBox.textContent = 'Данные недоступны.';
     evidenceBox.textContent = 'Данные недоступны.';
     reportBox.textContent = 'Данные недоступны.';
     return;
@@ -97,9 +140,11 @@ async function load() {
 
   if (recordsResponse.ok) {
     const records = await recordsResponse.json();
+    renderLiveFeed(mission, records);
     renderEvidence(records.evidence || []);
     renderReport(records);
   } else {
+    liveFeedBox.textContent = 'Ход миссии недоступен.';
     evidenceBox.textContent = 'Evidence/УДП недоступны.';
     reportBox.textContent = 'Метаданные отчёта недоступны.';
   }
