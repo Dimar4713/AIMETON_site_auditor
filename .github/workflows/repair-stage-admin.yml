@@ -1,0 +1,134 @@
+name: Repair Stage Admin
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-admin-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 164 &&
+       github.event.comment.body == '/repair-admin-stage' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+      AIMETON_BOOTSTRAP_ADMIN_USERNAME: ${{ vars.AIMETON_BOOTSTRAP_ADMIN_USERNAME }}
+      AIMETON_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.AIMETON_BOOTSTRAP_ADMIN_PASSWORD }}
+
+    steps:
+      - name: Validate credential contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$AIMETON_BOOTSTRAP_ADMIN_USERNAME" || {
+            echo "Missing stage variable AIMETON_BOOTSTRAP_ADMIN_USERNAME" >&2
+            exit 1
+          }
+          test -n "$AIMETON_BOOTSTRAP_ADMIN_PASSWORD" || {
+            echo "Missing stage secret AIMETON_BOOTSTRAP_ADMIN_PASSWORD" >&2
+            exit 1
+          }
+          echo "::add-mask::$AIMETON_BOOTSTRAP_ADMIN_USERNAME"
+          echo "::add-mask::$AIMETON_BOOTSTRAP_ADMIN_PASSWORD"
+
+      - name: Reconcile canonical admin in persistent auth database
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          docker exec -i \
+            -e AIMETON_BOOTSTRAP_ADMIN_USERNAME="$AIMETON_BOOTSTRAP_ADMIN_USERNAME" \
+            -e AIMETON_BOOTSTRAP_ADMIN_PASSWORD="$AIMETON_BOOTSTRAP_ADMIN_PASSWORD" \
+            "$CONTAINER" python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from app.admin_users import AdminSQLiteUserRepository
+          from app.auth import PasswordHasher, UserRole
+
+          username = os.environ['AIMETON_BOOTSTRAP_ADMIN_USERNAME'].strip().lower()
+          password = os.environ['AIMETON_BOOTSTRAP_ADMIN_PASSWORD']
+          path = Path(os.environ.get('AIMETON_AUTH_DB', '/app/data/auth.sqlite3'))
+          if not str(path).startswith('/app/data/'):
+              raise RuntimeError('auth database is outside persistent /app/data mount')
+
+          repository = AdminSQLiteUserRepository(path)
+          existing = repository.get_by_username(username)
+          if existing is None:
+              user = repository.create_user(
+                  username,
+                  PasswordHasher().hash(password),
+                  UserRole.ADMIN,
+              )
+              action = 'created'
+          else:
+              user, _ = existing
+              if user.role != UserRole.ADMIN:
+                  raise RuntimeError('canonical bootstrap username exists with non-admin role')
+              repository.update_password(user.id, PasswordHasher().hash(password))
+              repository.set_active(user.id, True)
+              repository.add_audit_event(
+                  user.id,
+                  'stage_admin_reconcile',
+                  user.id,
+                  'owner-authorized stage credential reconciliation',
+                  'success',
+              )
+              action = 'reconciled'
+
+          print(f'stage_admin_repair=ok action={action} user_id={user.id}')
+          PY
+
+      - name: Verify login and admin role without exposing credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cookie_jar="$RUNNER_TEMP/stage-admin-cookie.txt"
+          payload="$RUNNER_TEMP/stage-admin-login.json"
+          python3 - <<'PY' > "$payload"
+          import json, os
+          print(json.dumps({
+              'username': os.environ['AIMETON_BOOTSTRAP_ADMIN_USERNAME'],
+              'password': os.environ['AIMETON_BOOTSTRAP_ADMIN_PASSWORD'],
+          }))
+          PY
+          code="$(curl -sS -o "$RUNNER_TEMP/stage-admin-login-response.json" \
+            -c "$cookie_jar" -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            --data-binary @"$payload" \
+            "$STAGE_URL/api/auth/login")"
+          rm -f "$payload"
+          [[ "$code" == 200 ]]
+          me="$(curl -fsS -b "$cookie_jar" "$STAGE_URL/api/auth/me")"
+          python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["role"]=="admin" and p["is_active"] is True' "$me"
+          rm -f "$cookie_jar" "$RUNNER_TEMP/stage-admin-login-response.json"
+          echo "Stage admin login and role verification passed."
+
+      - name: Publish sanitized result
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Stage admin repair"
+            echo
+            echo "- timestamp UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- credential values: not recorded"
+            echo "- persistent auth database: checked"
+            echo "- canonical admin reconciliation and login verification: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
