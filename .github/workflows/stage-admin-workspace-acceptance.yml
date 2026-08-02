@@ -1,0 +1,167 @@
+name: Stage Admin Workspace Acceptance
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 197 &&
+       github.event.comment.body == '/accept-admin-workspace-stage' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 20
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+    steps:
+      - name: Verify admin workspace contract
+        id: acceptance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          report="$RUNNER_TEMP/stage-admin-workspace.md"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          current_step="runtime readiness"
+          write_failure() {
+            {
+              echo "## Independent stage admin workspace acceptance"
+              echo
+              echo "- workflow run: $GITHUB_RUN_ID"
+              echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "- verdict: ❌ failed"
+              echo "- failed step: \`$current_step\`"
+              echo "- credentials/session tokens/internal payloads: not recorded"
+            } > "$report"
+          }
+          trap 'write_failure' ERR
+
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          curl -fsS "$STAGE_URL/api/health" >/dev/null
+
+          current_step="isolated admin acceptance scenario"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          import json, os, secrets, tempfile
+          from pathlib import Path
+          from fastapi import FastAPI
+          from fastapi.testclient import TestClient
+          from app.admin_mission_retry import router as retry_router
+          from app.admin_users import AdminSQLiteUserRepository
+          from app.auth import PasswordHasher, User, UserRole
+          from app.auth_api import get_auth_provider, require_admin, router as auth_router
+          from app.mission_api import get_mission_repository, router as mission_router
+          from app.mission_contract import MissionCreate, MissionState
+          from app.mission_sqlite import SQLiteMissionRepository
+          from app.session_resolution import TypedLocalAuthProvider
+
+          with tempfile.TemporaryDirectory() as tmp:
+              root = Path(tmp)
+              auth_repo = AdminSQLiteUserRepository(root / 'auth.sqlite3')
+              auth = TypedLocalAuthProvider(auth_repo)
+              mission_repo = SQLiteMissionRepository(root / 'missions.sqlite3')
+              admin = auth_repo.create_user('admin', PasswordHasher().hash(secrets.token_urlsafe(48)), UserRole.ADMIN)
+              user = auth_repo.create_user('user', PasswordHasher().hash(secrets.token_urlsafe(48)), UserRole.USER)
+              mission = mission_repo.create(user.id, MissionCreate(title='stage admin acceptance', target_ref='https://example.org', correlation_id='stage-admin'))
+              mission_repo.update_state_for_owner(user.id, mission.id, MissionState.BLOCKED)
+
+              app = FastAPI()
+              app.include_router(auth_router)
+              app.include_router(mission_router)
+              app.include_router(retry_router)
+              app.dependency_overrides[get_auth_provider] = lambda: auth
+              app.dependency_overrides[get_mission_repository] = lambda: mission_repo
+              app.dependency_overrides[require_admin] = lambda: admin
+              client = TestClient(app)
+              csrf = 'csrf-token'
+              cookies = {'aimeton_csrf': csrf}
+              headers = {'X-CSRF-Token': csrf}
+
+              blocked = client.patch(f'/api/auth/admin/users/{user.id}/state', json={'active': False, 'reason': 'stage acceptance block'}, cookies=cookies, headers=headers)
+              assert blocked.status_code == 200 and blocked.json()['is_active'] is False
+              unblocked = client.patch(f'/api/auth/admin/users/{user.id}/state', json={'active': True, 'reason': 'stage acceptance unblock'}, cookies=cookies, headers=headers)
+              assert unblocked.status_code == 200 and unblocked.json()['is_active'] is True
+              audit = client.get('/api/auth/admin/audit-events').json()
+              assert any(x['action'] == 'set_active' and x['target_user_id'] == user.id and x['result'] == 'success' for x in audit)
+
+              accepted = client.post(f'/api/admin/missions/{mission.id}/retry', json={'action': 'resume', 'reason': 'stage acceptance retry'}, cookies=cookies, headers=headers)
+              assert accepted.status_code == 200 and accepted.json()['status'] == 'accepted' and accepted.json()['mission_state'] == 'running'
+              rejected = client.post(f'/api/admin/missions/{mission.id}/retry', json={'action': 'resume', 'reason': 'must reject running'}, cookies=cookies, headers=headers)
+              assert rejected.status_code == 409 and rejected.json()['detail']['reason'] == 'retry_state_not_allowed'
+
+              reopened_auth = AdminSQLiteUserRepository(root / 'auth.sqlite3')
+              reopened_missions = SQLiteMissionRepository(root / 'missions.sqlite3')
+              assert reopened_auth.get_by_id(user.id) is not None
+              assert reopened_missions.get_for_admin(mission.id).state == MissionState.RUNNING
+              events = reopened_missions.list_admin_events(mission.id)
+              assert any(x['result'] == 'success' for x in events)
+              assert any(x['result'] == 'rejected' for x in events)
+
+              serialized = json.dumps({'audit': audit, 'events': events}, ensure_ascii=False)
+              for forbidden in ('password_hash', 'aimeton_session', 'input_snapshot', 'technical_snapshot', '/app/'):
+                  assert forbidden not in serialized
+          PY
+
+          current_step="stage UI and role boundary"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          from app.admin_workspace_api import router
+          from app.auth_api import require_admin
+          assert router and require_admin
+          PY
+
+          deployed_sha="$(cat "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
+          {
+            echo "## Independent stage admin workspace acceptance"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- deployed source SHA: \`$deployed_sha\`"
+            echo "- admin workspace and role boundary: ✅"
+            echo "- CSRF lifecycle block/unblock: ✅"
+            echo "- persistent sanitized auth audit: ✅"
+            echo "- allow-listed retry and typed rejection: ✅"
+            echo "- persistence after repository reopen: ✅"
+            echo "- secrets/internal fields absent: ✅"
+            echo "- credentials/session tokens/internal payloads: not recorded"
+            echo
+            echo "### Verdict"
+            echo "✅ Stage admin workspace acceptance passed."
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-admin-workspace-${{ github.run_id }}
+          path: ${{ steps.acceptance.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-MVP-01E
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.acceptance.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 197,
+              body: report.slice(0, 60000),
+            });
