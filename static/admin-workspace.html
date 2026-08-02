@@ -14,13 +14,18 @@
   <main class="workspace-grid">
     <section class="panel" aria-labelledby="users-title">
       <div class="panel-title"><h2 id="users-title">Пользователи</h2><button id="refresh-users" class="secondary">Обновить</button></div>
-      <p class="message">Показываются только безопасные поля: id, username, role и active state.</p>
+      <p class="message">Разрешены только блокировка и разблокировка с обязательной причиной и CSRF-защитой.</p>
       <div id="admin-users" class="mission-list" aria-live="polite"></div>
     </section>
     <section class="panel" aria-labelledby="missions-title">
       <div class="panel-title"><h2 id="missions-title">Все миссии</h2><button id="refresh-missions" class="secondary">Обновить</button></div>
       <p class="message">Технические secrets, snapshots и внутренние пути не отображаются.</p>
       <div id="admin-missions" class="mission-list" aria-live="polite"></div>
+    </section>
+    <section class="panel" aria-labelledby="audit-title">
+      <div class="panel-title"><h2 id="audit-title">Журнал действий</h2><button id="refresh-audit" class="secondary">Обновить</button></div>
+      <p class="message">Показывается только sanitized persistent audit projection.</p>
+      <div id="admin-audit" class="mission-list" aria-live="polite"></div>
     </section>
   </main>
   <script src="/static/admin-workspace.js" defer></script>

@@ -6,10 +6,10 @@ import os
 from pathlib import Path
 import secrets
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
-from app.admin_users import AdminOperation, AdminSQLiteUserRepository, AdminUserService
+from app.admin_users import AdminAuditEvent, AdminOperation, AdminSQLiteUserRepository, AdminUserService
 from app.auth import AuthProvider, User, UserRole
 from app.auth_boundary import AdminPolicy, RoleAdminPolicy
 from app.session_resolution import SessionFailure, SessionResolution, TypedLocalAuthProvider
@@ -54,6 +54,20 @@ class UserResponse(BaseModel):
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
         return cls(id=user.id, username=user.username, role=user.role, is_active=user.is_active)
+
+
+class AdminAuditEventResponse(BaseModel):
+    id: int
+    actor_id: int
+    action: str
+    target_user_id: int | None
+    reason: str
+    result: str
+    created_at: str
+
+    @classmethod
+    def from_event(cls, event: AdminAuditEvent) -> "AdminAuditEventResponse":
+        return cls(**event.__dict__)
 
 
 class AdminCreateUserRequest(BaseModel):
@@ -176,6 +190,18 @@ def admin_list_users(
     auth: AuthProvider = Depends(get_auth_provider),
 ):
     return [UserResponse.from_user(user) for user in _admin_service(auth).list_users()]
+
+
+@router.get("/admin/audit-events", response_model=list[AdminAuditEventResponse])
+def admin_list_audit_events(
+    limit: int = Query(default=100, ge=1, le=1000),
+    _admin: User = Depends(require_admin),
+    auth: AuthProvider = Depends(get_auth_provider),
+):
+    return [
+        AdminAuditEventResponse.from_event(event)
+        for event in _admin_service(auth).list_audit_events(limit)
+    ]
 
 
 @router.post("/admin/users", response_model=UserResponse, status_code=201)
