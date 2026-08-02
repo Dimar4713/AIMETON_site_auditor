@@ -30,6 +30,11 @@ jobs:
       STAGE_URL: https://stage-auditor.aimeton.ru
 
     steps:
+      - name: Checkout acceptance contract
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Verify integrated stage core
         id: acceptance
         shell: bash
@@ -52,12 +57,21 @@ jobs:
           }
           trap 'write_failure' ERR
 
-          current_step="runtime and exact SHA"
+          current_step="runtime and acceptance SHA compatibility"
           docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
           curl -fsS "$STAGE_URL/api/health" >/dev/null
           deployed_sha="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt")"
+          acceptance_contract_sha="$GITHUB_SHA"
           [[ "$deployed_sha" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$deployed_sha" == "$GITHUB_SHA" ]]
+          [[ "$acceptance_contract_sha" =~ ^[0-9a-f]{40}$ ]]
+          git -C "$GITHUB_WORKSPACE" merge-base --is-ancestor "$deployed_sha" "$acceptance_contract_sha"
+          runtime_changes="$(git -C "$GITHUB_WORKSPACE" diff --name-only "$deployed_sha" "$acceptance_contract_sha" -- \
+            app static requirements.txt requirements-openstack.txt Dockerfile docker-compose.yml)"
+          test -z "$runtime_changes" || {
+            echo "Runtime files changed after deployed runtime SHA:" >&2
+            printf '%s\n' "$runtime_changes" >&2
+            exit 1
+          }
           docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Destination}}{{end}}{{end}}' | grep -Fxq /app/data
 
           current_step="two users admin boundaries report gate and persistence"
@@ -129,8 +143,10 @@ jobs:
             echo
             echo "- workflow run: $GITHUB_RUN_ID"
             echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "- deployed source SHA: \`$deployed_sha\`"
-            echo "- exact main/stage SHA match: ✅"
+            echo "- deployed runtime SHA: \`$deployed_sha\`"
+            echo "- acceptance contract SHA: \`$acceptance_contract_sha\`"
+            echo "- deployed runtime is ancestor of acceptance contract: ✅"
+            echo "- no runtime-impact changes after deployed runtime SHA: ✅"
             echo "- persistent /app/data mount: ✅"
             echo "- two users and admin role boundaries: ✅"
             echo "- cross-user mission isolation: ✅"
