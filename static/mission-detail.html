@@ -8,14 +8,8 @@
 </head>
 <body class="workspace-body">
   <header class="workspace-header">
-    <div>
-      <p class="eyebrow">AIMETON Site Auditor</p>
-      <h1 id="mission-title">Миссия</h1>
-    </div>
-    <div class="session-box">
-      <a href="/workspace" class="secondary button-link">К списку</a>
-      <span id="session-user">Загрузка…</span>
-    </div>
+    <div><p class="eyebrow">AIMETON Site Auditor</p><h1 id="mission-title">Миссия</h1></div>
+    <div class="session-box"><a href="/workspace" class="secondary button-link">К списку</a><span id="session-user">Загрузка…</span></div>
   </header>
   <main class="workspace-grid single-column">
     <section class="panel" aria-labelledby="mission-title">
@@ -28,6 +22,14 @@
         <div><dt>Обновлена</dt><dd id="mission-updated"></dd></div>
       </dl>
       <div id="mission-guidance" class="message" hidden></div>
+    </section>
+    <section class="panel" aria-labelledby="evidence-title">
+      <h2 id="evidence-title">Evidence и УДП</h2>
+      <div id="mission-evidence" class="mission-list">Загрузка…</div>
+    </section>
+    <section class="panel" aria-labelledby="report-title">
+      <h2 id="report-title">Отчёт</h2>
+      <div id="mission-report" class="message">Загрузка…</div>
     </section>
   </main>
   <script src="/static/mission-detail.js" defer></script>
