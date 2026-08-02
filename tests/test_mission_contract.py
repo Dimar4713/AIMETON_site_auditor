@@ -68,13 +68,21 @@ def test_owner_is_supplied_by_repository_boundary() -> None:
     assert "owner_id" not in request().model_dump()
 
 
+def test_new_mission_is_created_until_execution_evidence_exists() -> None:
+    repository = InMemoryMissionRepository()
+
+    mission = repository.create(1, request())
+
+    assert mission.state == MissionState.CREATED
+
+
 def test_cross_user_reads_and_writes_are_hidden() -> None:
     repository = InMemoryMissionRepository()
     mission = repository.create(1, request())
 
     assert repository.get_for_owner(2, mission.id) is None
     assert repository.update_state_for_owner(2, mission.id, MissionState.COMPLETED) is None
-    assert repository.get_for_owner(1, mission.id).state == MissionState.RUNNING
+    assert repository.get_for_owner(1, mission.id).state == MissionState.CREATED
 
 
 def test_user_projection_excludes_owner_and_technical_snapshot() -> None:
@@ -93,10 +101,12 @@ def test_user_projection_excludes_owner_and_technical_snapshot() -> None:
     assert "input_snapshot" not in payload
     assert "technical_snapshot" not in payload
     assert "provider_secret" not in str(payload)
+    assert payload["state"] == MissionState.CREATED
 
 
 def test_typed_states_cover_product_contract() -> None:
     assert {state.value for state in MissionState} == {
+        "created",
         "running",
         "degraded",
         "blocked",
