@@ -1,0 +1,32 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_workspace_uses_bounded_visible_page_polling() -> None:
+    script = (ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
+
+    assert "POLL_INTERVAL_MS = 15000" in script
+    assert "LIVE_RECORD_LIMIT = 20" in script
+    assert "document.visibilityState === 'visible'" in script
+    assert "loadMissions({silent: true})" in script
+
+
+def test_workspace_projects_latest_sanitized_operational_event() -> None:
+    script = (ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
+
+    assert "/records`" in script
+    assert "latestOperationalEvent" in script
+    assert "eventLabel" in script
+    assert "runtime_step_not_configured" in script
+    assert "input_snapshot" in script  # request input only
+    assert "technical_snapshot" not in script
+    assert "chain-of-thought" not in script
+
+
+def test_workspace_reports_truthful_blocked_launch() -> None:
+    script = (ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
+
+    assert "mission.state === 'blocked'" in script
+    assert "рабочий контур пока не настроен" in script
