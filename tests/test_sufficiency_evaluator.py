@@ -133,7 +133,7 @@ def test_weakest_link_allows_report_only_at_l4_without_critical_gaps():
     assert result.next_plan.selected_action.action_type == ActionType.STOP
 
 
-def test_identity_conflict_forces_l0_and_human_review():
+def test_identity_conflict_forces_l0_and_targeted_recovery():
     orchestrator, mission, envelope = _fixture(IdentityGuardState.CONFLICTING)
     result = evaluate_targeted_crawl(
         orchestrator,
@@ -143,4 +143,6 @@ def test_identity_conflict_forces_l0_and_human_review():
     assert result.achieved_level == SufficiencyLevel.L0
     assert result.report_release_allowed is False
     assert "identity_conflict" in result.critical_gaps
-    assert result.next_plan.selected_action.action_type == ActionType.REVIEW_CONFLICT
+    assert result.next_plan.selected_action.action_type == ActionType.CRAWL_URL
+    assert result.next_plan.selected_action.target == str(mission.contract.target_url)
+    assert result.next_plan.selected_action.deficit_code == "identity_conflict"
