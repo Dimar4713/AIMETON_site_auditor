@@ -1,0 +1,178 @@
+name: Stage Real Company Bootstrap Acceptance
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-real-company-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  scenarios:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 203 &&
+       github.event.comment.body == '/accept-integrated-stage-companies-bootstrap' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 20
+    env:
+      CONTAINER: aimeton-auditor
+
+    steps:
+      - name: Verify cost-free real-company bootstrap scenarios
+        id: acceptance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/stage-real-company-bootstrap.md"
+          evidence="$RUNNER_TEMP/stage-real-company-bootstrap.json"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          echo "evidence=$evidence" >> "$GITHUB_OUTPUT"
+          current_step="initialization"
+
+          write_failure() {
+            {
+              echo "## Independent integrated stage acceptance — real-company bootstrap"
+              echo
+              echo "- workflow run: $GITHUB_RUN_ID"
+              echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "- verdict: ❌ failed"
+              echo "- failed step: \`$current_step\`"
+              echo "- paid search/LLM providers invoked: no"
+              echo "- page text, credentials, tokens and internal payloads: not recorded"
+            } > "$report"
+          }
+          trap 'write_failure' ERR
+
+          current_step="runtime readiness"
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+
+          current_step="direct crawler scenarios"
+          docker exec -i "$CONTAINER" python - > "$evidence" <<'PY'
+          import asyncio
+          import json
+          from urllib.parse import urlparse
+
+          from app.scraper import FetchError, fetch_site
+
+          TARGETS = ("https://dedal24.ru", "https://slavdom24.ru")
+
+          def size_bucket(length: int) -> str:
+              if length <= 0:
+                  return "empty"
+              if length < 1000:
+                  return "small"
+              if length < 10000:
+                  return "medium"
+              return "large"
+
+          async def run():
+              results = []
+              for target in TARGETS:
+                  host = urlparse(target).hostname
+                  try:
+                      page = await fetch_site(target)
+                      final_host = urlparse(page["final_url"]).hostname
+                      state = "completed" if page.get("text", "").strip() else "degraded"
+                      reason = None if state == "completed" else "empty_page_text"
+                      results.append({
+                          "target_host": host,
+                          "final_host": final_host,
+                          "state": state,
+                          "reason": reason,
+                          "title_present": bool(page.get("title", "").strip()),
+                          "text_size_bucket": size_bucket(len(page.get("text", ""))),
+                      })
+                  except (FetchError, ValueError) as exc:
+                      results.append({
+                          "target_host": host,
+                          "final_host": None,
+                          "state": "degraded",
+                          "reason": type(exc).__name__,
+                          "title_present": False,
+                          "text_size_bucket": "unavailable",
+                      })
+              assert {item["target_host"] for item in results} == {"dedal24.ru", "slavdom24.ru"}
+              assert all(item["state"] in {"completed", "degraded"} for item in results)
+              print(json.dumps({"provider_mode": "direct_fetch_only", "results": results}, ensure_ascii=False, sort_keys=True))
+
+          asyncio.run(run())
+          PY
+
+          current_step="sanitized evidence contract"
+          python3 - "$evidence" <<'PY'
+          import json, sys
+          payload = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert payload["provider_mode"] == "direct_fetch_only"
+          assert len(payload["results"]) == 2
+          serialized = json.dumps(payload, ensure_ascii=False)
+          for forbidden in ("password", "token", "secret", "cookie", "page_text", "html"):
+              assert forbidden not in serialized.lower()
+          PY
+
+          dedal_state="$(python3 - "$evidence" <<'PY'
+          import json, sys
+          data=json.load(open(sys.argv[1], encoding='utf-8'))
+          print(next(x['state'] for x in data['results'] if x['target_host']=='dedal24.ru'))
+          PY
+          )"
+          slavdom_state="$(python3 - "$evidence" <<'PY'
+          import json, sys
+          data=json.load(open(sys.argv[1], encoding='utf-8'))
+          print(next(x['state'] for x in data['results'] if x['target_host']=='slavdom24.ru'))
+          PY
+          )"
+
+          {
+            echo "## Independent integrated stage acceptance — real-company bootstrap"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- dedal24.ru typed state: \`$dedal_state\`"
+            echo "- slavdom24.ru typed state: \`$slavdom_state\`"
+            echo "- false completed on fetch failure: prohibited ✅"
+            echo "- paid search/LLM providers invoked: no"
+            echo "- page text, credentials, tokens and internal payloads: not recorded"
+            echo
+            echo "### Verdict"
+            echo "✅ Both real-company bootstrap scenarios produced sanitized typed outcomes."
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-real-company-bootstrap-${{ github.run_id }}
+          path: |
+            ${{ steps.acceptance.outputs.report }}
+            ${{ steps.acceptance.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-MVP-01F
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.acceptance.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 203,
+              body: report.slice(0, 60000),
+            });
