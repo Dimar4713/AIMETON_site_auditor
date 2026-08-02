@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
@@ -49,6 +50,51 @@ class MissionAdminProjection(BaseModel):
         )
 
 
+class MissionEvidenceProjection(BaseModel):
+    id: str
+    kind: str
+    created_at: str
+    digest: str | None = None
+    data: dict[str, Any]
+
+
+class MissionUserRecordsProjection(BaseModel):
+    mission_id: str
+    evidence: list[MissionEvidenceProjection]
+    report_metadata: MissionEvidenceProjection | None = None
+    report_reason: str | None = None
+
+
+_SAFE_FIELDS: dict[str, set[str]] = {
+    "turn": {"turn_id", "status", "summary", "source_count", "completed_at"},
+    "sufficiency": {"record_id", "level", "status", "summary", "deficits", "updated_at"},
+    "report_metadata": {
+        "report_id",
+        "status",
+        "format",
+        "content_type",
+        "available",
+        "release_level",
+        "blocked_reason",
+        "created_at",
+    },
+}
+
+
+def _sanitize_record(record: dict[str, Any]) -> MissionEvidenceProjection:
+    kind = str(record.get("kind", ""))
+    payload = record.get("payload")
+    safe_payload = payload if isinstance(payload, dict) else {}
+    allowed = _SAFE_FIELDS.get(kind, set())
+    return MissionEvidenceProjection(
+        id=str(record.get("id", "")),
+        kind=kind,
+        created_at=str(record.get("created_at", "")),
+        digest=record.get("digest"),
+        data={key: safe_payload[key] for key in allowed if key in safe_payload},
+    )
+
+
 def _not_found() -> HTTPException:
     return HTTPException(status_code=404, detail={"reason": "mission_not_found"})
 
@@ -92,6 +138,37 @@ def get_owned_mission(
     if mission is None:
         raise _not_found()
     return MissionUserProjection.from_mission(mission)
+
+
+@router.get(
+    "/api/user/missions/{mission_id}/records",
+    response_model=MissionUserRecordsProjection,
+)
+def get_owned_mission_records(
+    mission_id: str,
+    user: User = Depends(current_user),
+    repository: MissionRepository = Depends(get_mission_repository),
+) -> MissionUserRecordsProjection:
+    records_reader = getattr(repository, "records_for_owner", None)
+    if not callable(records_reader):
+        raise HTTPException(status_code=500, detail={"reason": "mission_records_unavailable"})
+    records = records_reader(user.id, mission_id)
+    if records is None:
+        raise _not_found()
+    projected = [_sanitize_record(record) for record in records]
+    report = next((record for record in reversed(projected) if record.kind == "report_metadata"), None)
+    evidence = [record for record in projected if record.kind in {"turn", "sufficiency"}]
+    report_reason = None
+    if report is None:
+        report_reason = "report_not_available"
+    elif report.data.get("available") is not True:
+        report_reason = str(report.data.get("blocked_reason") or "report_release_blocked")
+    return MissionUserRecordsProjection(
+        mission_id=mission_id,
+        evidence=evidence,
+        report_metadata=report,
+        report_reason=report_reason,
+    )
 
 
 @router.patch("/api/user/missions/{mission_id}/state", response_model=MissionUserProjection)
