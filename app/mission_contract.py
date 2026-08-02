@@ -17,6 +17,7 @@ def new_mission_id() -> str:
 
 
 class MissionState(StrEnum):
+    CREATED = "created"
     RUNNING = "running"
     DEGRADED = "degraded"
     BLOCKED = "blocked"
@@ -35,7 +36,7 @@ class Mission(BaseModel):
     owner_id: int
     title: str
     target_ref: str
-    state: MissionState = MissionState.RUNNING
+    state: MissionState = MissionState.CREATED
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
     technical_snapshot: dict[str, Any] = Field(default_factory=dict)
     correlation_id: str
