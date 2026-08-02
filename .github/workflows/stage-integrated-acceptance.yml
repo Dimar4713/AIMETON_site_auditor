@@ -72,7 +72,7 @@ jobs:
           from app.auth import PasswordHasher, UserRole
           from app.auth_api import get_auth_provider, require_admin, router as auth_router
           from app.mission_api import get_mission_repository, router as mission_router
-          from app.mission_contract import MissionCreate, MissionState
+          from app.mission_contract import MissionCreate
           from app.mission_sqlite import SQLiteMissionRepository
           from app.session_resolution import TypedLocalAuthProvider
 
@@ -92,10 +92,11 @@ jobs:
 
               assert missions.get_for_owner(alice.id, mission.id) is not None
               assert missions.get_for_owner(bob.id, mission.id) is None
-              records = missions.list_records(mission.id)
-              report = next(r for r in records if r.kind == 'report_metadata')
-              assert report.payload['available'] is False
-              assert report.payload['blocked_reason'] == 'report_release_blocked'
+              records = missions.records_for_owner(alice.id, mission.id)
+              assert records is not None
+              report = next(r for r in records if r['kind'] == 'report_metadata')
+              assert report['payload']['available'] is False
+              assert report['payload']['blocked_reason'] == 'report_release_blocked'
 
               app = FastAPI()
               app.include_router(auth_router)
@@ -118,7 +119,7 @@ jobs:
               assert reopened_missions.get_for_admin(mission.id) is not None
               assert any(x['result'] == 'mission_state_not_retryable' for x in AdminMissionRetryService(reopened_missions).list_events())
 
-              serialized = json.dumps([r.payload for r in records], ensure_ascii=False)
+              serialized = json.dumps([r['payload'] for r in records], ensure_ascii=False)
               for forbidden in ('password_hash','aimeton_session','provider_token','technical_snapshot','storage_path','/app/private'):
                   assert forbidden not in serialized
           PY
