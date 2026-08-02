@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AIMETON — миссия</title>
+  <link rel="stylesheet" href="/static/workspace.css">
+</head>
+<body class="workspace-body">
+  <header class="workspace-header">
+    <div>
+      <p class="eyebrow">AIMETON Site Auditor</p>
+      <h1 id="mission-title">Миссия</h1>
+    </div>
+    <div class="session-box">
+      <a href="/workspace" class="secondary button-link">К списку</a>
+      <span id="session-user">Загрузка…</span>
+    </div>
+  </header>
+  <main class="workspace-grid single-column">
+    <section class="panel" aria-labelledby="mission-title">
+      <p id="mission-error" class="message error" role="alert" hidden></p>
+      <dl id="mission-detail" class="detail-grid" hidden>
+        <div><dt>Цель</dt><dd id="mission-target"></dd></div>
+        <div><dt>Состояние</dt><dd><span id="mission-state" class="state"></span></dd></div>
+        <div><dt>Идентификатор</dt><dd id="mission-id"></dd></div>
+        <div><dt>Создана</dt><dd id="mission-created"></dd></div>
+        <div><dt>Обновлена</dt><dd id="mission-updated"></dd></div>
+      </dl>
+      <div id="mission-guidance" class="message" hidden></div>
+    </section>
+  </main>
+  <script src="/static/mission-detail.js" defer></script>
+</body>
+</html>
