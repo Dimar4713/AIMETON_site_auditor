@@ -8,6 +8,17 @@ from app.auth import PasswordHasher, User, UserRole
 from app.session_resolution import TypedSQLiteUserRepository
 
 
+@dataclass(frozen=True)
+class AdminAuditEvent:
+    id: int
+    actor_id: int
+    action: str
+    target_user_id: int | None
+    reason: str
+    result: str
+    created_at: str
+
+
 class AdminUserRepository(Protocol):
     def create_user(self, username: str, password_hash: str, role: UserRole) -> User: ...
     def get_by_id(self, user_id: int) -> User | None: ...
@@ -15,6 +26,7 @@ class AdminUserRepository(Protocol):
     def set_active(self, user_id: int, active: bool) -> None: ...
     def update_password(self, user_id: int, password_hash: str) -> None: ...
     def add_audit_event(self, actor_id: int, action: str, target_user_id: int | None, reason: str, result: str) -> None: ...
+    def list_audit_events(self, limit: int = 100) -> list[AdminAuditEvent]: ...
 
 
 class AdminSQLiteUserRepository(TypedSQLiteUserRepository):
@@ -62,6 +74,16 @@ class AdminSQLiteUserRepository(TypedSQLiteUserRepository):
                 (actor_id, action, target_user_id, reason.strip()[:500], result, datetime.now(UTC).isoformat()),
             )
 
+    def list_audit_events(self, limit: int = 100) -> list[AdminAuditEvent]:
+        safe_limit = max(1, min(limit, 1000))
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT id, actor_id, action, target_user_id, reason, result, created_at
+                FROM auth_audit_events ORDER BY id DESC LIMIT ?""",
+                (safe_limit,),
+            ).fetchall()
+        return [AdminAuditEvent(**dict(row)) for row in rows]
+
 
 @dataclass(frozen=True)
 class AdminOperation:
@@ -80,6 +102,9 @@ class AdminUserService:
 
     def list_users(self) -> list[User]:
         return self.repository.list_users()
+
+    def list_audit_events(self, limit: int = 100) -> list[AdminAuditEvent]:
+        return self.repository.list_audit_events(limit)
 
     def create_user(self, operation: AdminOperation, username: str, password: str, role: UserRole) -> User:
         try:
