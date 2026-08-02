@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
+from app.admin_mission_retry_api import router as admin_mission_retry_router
 from app.admin_workspace_api import router as admin_workspace_router
 from app.mission_api import router as ownership_router
 from app.mission_orchestrator.models import (
@@ -90,3 +91,4 @@ router.include_router(legacy_router)
 router.include_router(ownership_router)
 router.include_router(workspace_router)
 router.include_router(admin_workspace_router)
+router.include_router(admin_mission_retry_router)
