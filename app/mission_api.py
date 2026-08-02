@@ -228,3 +228,4 @@ def admin_get_mission(
     mission = repository.get_for_admin(mission_id)
     if mission is None:
         raise _not_found()
+    return MissionAdminProjection.from_mission(mission)
