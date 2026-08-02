@@ -15,6 +15,7 @@ from app.mission_contract import (
     MissionState,
     MissionUserProjection,
 )
+from app.mission_execution import start_mission_execution
 from app.mission_sqlite import SQLiteMissionRepository
 
 
@@ -113,7 +114,12 @@ def create_owned_mission(
 ) -> MissionUserProjection:
     _require_csrf(csrf_cookie, csrf_header)
     mission = repository.create(user.id, payload)
-    return MissionUserProjection.from_mission(mission)
+    execution = start_mission_execution(
+        repository,
+        owner_id=user.id,
+        mission=mission,
+    )
+    return MissionUserProjection.from_mission(execution.mission)
 
 
 @router.get("/api/user/missions", response_model=list[MissionUserProjection])
