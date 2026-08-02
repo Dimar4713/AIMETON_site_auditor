@@ -1,0 +1,121 @@
+name: Stage Data Mount Reconcile
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-data-mount-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 177 &&
+       github.event.comment.body == '/reconcile-stage-data-mount' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+
+    steps:
+      - name: Reconcile persistent mount and initialize mission DB
+        id: reconcile
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          report="$RUNNER_TEMP/stage-data-mount-reconcile.md"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+
+          # Recreate with the same stage compose layering used by acceptance.
+          test -f docker-compose.yml
+          test -f docker-compose.override.yml
+          test -f docker-compose.runtime-secrets.yml
+
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.override.yml \
+            -f docker-compose.runtime-secrets.yml \
+            up -d --force-recreate auditor
+
+          deadline=$((SECONDS + 240))
+          while (( SECONDS < deadline )); do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+            [[ "$status" == healthy ]] && break
+            [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]] && exit 1
+            sleep 5
+          done
+          [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == healthy ]]
+
+          data_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
+          [[ -n "$data_mount" ]]
+
+          integrity="$(docker exec -i "$CONTAINER" python - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+          from app.mission_sqlite import SQLiteMissionRepository
+
+          repository = SQLiteMissionRepository()
+          path = Path(os.environ.get("AIMETON_MISSION_DB", "/app/data/missions.sqlite3"))
+          assert path.exists()
+          with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+              print(db.execute("PRAGMA integrity_check").fetchone()[0])
+          PY
+          )"
+          [[ "$integrity" == ok ]]
+          deployed_sha="$(cat app-source-sha.txt 2>/dev/null || echo unavailable)"
+
+          {
+            echo "## Stage data mount reconcile"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- deployed source SHA: \`$deployed_sha\`"
+            echo "- /app/data mount: ✅"
+            echo "- mission DB initialized: ✅"
+            echo "- mission DB integrity: \`$integrity\`"
+            echo "- credentials/tokens/internal payloads: not collected"
+            echo
+            echo "### Verdict"
+            echo "✅ Persistent stage data mount reconciled."
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-data-mount-reconcile-${{ github.run_id }}
+          path: ${{ steps.reconcile.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-MVP-01C
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.reconcile.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 177,
+              body: report.slice(0, 60000),
+            });
