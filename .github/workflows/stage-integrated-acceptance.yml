@@ -1,0 +1,142 @@
+name: Stage Integrated Acceptance
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-stage-integrated-acceptance
+  cancel-in-progress: false
+
+jobs:
+  accept-foundation:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 203 &&
+       github.event.comment.body == '/accept-integrated-stage' &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 20
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+
+    steps:
+      - name: Verify integrated acceptance foundation
+        id: acceptance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          report="$RUNNER_TEMP/stage-integrated-foundation.md"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          current_step="initialization"
+
+          write_failure() {
+            {
+              echo "## Integrated stage acceptance foundation"
+              echo
+              echo "- workflow run: $GITHUB_RUN_ID"
+              echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "- verdict: ❌ failed"
+              echo "- failed step: \`$current_step\`"
+              echo "- credentials/session tokens/internal payloads: not recorded"
+            } > "$report"
+          }
+          trap 'write_failure' ERR
+
+          current_step="runtime readiness"
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          curl -fsS "$STAGE_URL/api/health" >/dev/null
+
+          current_step="exact deployed SHA"
+          deployed_sha="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt")"
+          [[ "$deployed_sha" =~ ^[0-9a-f]{40}$ ]]
+          git ls-remote https://github.com/Dimar4713/AIMETON_site_auditor.git "refs/heads/main" | awk '{print $1}' | grep -Fxq "$deployed_sha"
+
+          current_step="auth mission admin boundaries"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          from app.admin_workspace_api import router as admin_router
+          from app.auth_api import require_admin, router as auth_router
+          from app.mission_api import MissionUserRecordsProjection, router as mission_router
+          from app.admin_mission_retry_api import router as retry_router
+          assert all((admin_router, auth_router, mission_router, retry_router, require_admin, MissionUserRecordsProjection))
+          PY
+
+          current_step="persistent database integrity"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+          for env_name, default in (
+              ("AIMETON_AUTH_DB", "/app/data/auth.sqlite3"),
+              ("AIMETON_MISSION_DB", "/app/data/missions.sqlite3"),
+          ):
+              path = Path(os.environ.get(env_name, default))
+              assert path.exists(), path
+              with sqlite3.connect(path) as db:
+                  result = db.execute("PRAGMA integrity_check").fetchone()[0]
+                  assert result == "ok", (path, result)
+          PY
+
+          current_step="typed report release gate"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          from app.mission_api import _SAFE_FIELDS
+          required = {"available", "release_level", "blocked_reason", "status"}
+          assert required.issubset(_SAFE_FIELDS["report_metadata"])
+          assert "storage_path" not in _SAFE_FIELDS["report_metadata"]
+          assert "signed_url" not in _SAFE_FIELDS["report_metadata"]
+          PY
+
+          {
+            echo "## Integrated stage acceptance foundation"
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- deployed source SHA: \`$deployed_sha\`"
+            echo "- deployed SHA belongs to current main history: ✅"
+            echo "- runtime health and container readiness: ✅"
+            echo "- auth/user/admin/mission/retry boundaries import: ✅"
+            echo "- auth and mission SQLite integrity: ✅"
+            echo "- typed report release gate and sanitized projection: ✅"
+            echo "- credentials/session tokens/internal payloads: not recorded"
+            echo
+            echo "### Verdict"
+            echo "✅ Integrated stage acceptance foundation passed."
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-integrated-foundation-${{ github.run_id }}
+          path: ${{ steps.acceptance.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-MVP-01F
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.acceptance.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 203,
+              body: report.slice(0, 60000),
+            });
