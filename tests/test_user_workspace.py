@@ -1,0 +1,47 @@
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.auth import User, UserRole
+from app.auth_api import current_user
+from app.workspace_api import router
+
+
+def _app() -> FastAPI:
+    app = FastAPI()
+    app.include_router(router)
+    return app
+
+
+def test_login_page_is_public() -> None:
+    response = TestClient(_app()).get("/login")
+    assert response.status_code == 200
+    assert "Вход в рабочее пространство" in response.text
+
+
+def test_workspace_requires_authenticated_session() -> None:
+    response = TestClient(_app()).get("/workspace")
+    assert response.status_code == 401
+    assert response.json()["detail"]["reason"] == "unauthenticated"
+
+
+def test_workspace_serves_shell_for_authenticated_user() -> None:
+    app = _app()
+    app.dependency_overrides[current_user] = lambda: User(
+        id=42,
+        username="workspace-user",
+        role=UserRole.USER,
+        is_active=True,
+    )
+    response = TestClient(app).get("/workspace")
+    assert response.status_code == 200
+    assert "Мои миссии" in response.text
+    assert "/static/workspace.js" in response.text
+
+
+def test_workspace_client_uses_owned_api_and_server_session() -> None:
+    source = open("static/workspace.js", encoding="utf-8").read()
+    assert "/api/auth/me" in source
+    assert "/api/user/missions" in source
+    assert "X-CSRF-Token" in source
+    assert "owner_id" not in source
+    assert "/api/admin/" not in source

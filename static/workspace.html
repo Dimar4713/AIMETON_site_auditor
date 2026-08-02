@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AIMETON — рабочее пространство</title>
+  <link rel="stylesheet" href="/static/workspace.css">
+</head>
+<body class="workspace-body">
+  <header class="workspace-header">
+    <div><p class="eyebrow">AIMETON Site Auditor</p><h1>Мои миссии</h1></div>
+    <div class="session-box"><span id="session-user">Загрузка…</span><button id="logout" class="secondary">Выйти</button></div>
+  </header>
+  <main class="workspace-grid">
+    <section class="panel" aria-labelledby="new-mission-title">
+      <h2 id="new-mission-title">Новый анализ</h2>
+      <form id="mission-form" novalidate>
+        <label>Название<input id="mission-title" required maxlength="300" placeholder="Аудит компании"></label>
+        <label>Сайт или идентификатор компании<input id="target-ref" required maxlength="1000" placeholder="https://example.ru"></label>
+        <button type="submit">Запустить</button>
+        <p id="mission-message" class="message" role="status" hidden></p>
+      </form>
+    </section>
+    <section class="panel" aria-labelledby="mission-list-title">
+      <div class="panel-title"><h2 id="mission-list-title">История</h2><button id="refresh" class="secondary">Обновить</button></div>
+      <div id="missions" class="mission-list" aria-live="polite"></div>
+    </section>
+  </main>
+  <script src="/static/workspace.js" defer></script>
+</body>
+</html>
