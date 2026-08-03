@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
+
+from pydantic import BaseModel, Field
 
 
 DEFAULT_STALL_AFTER_SECONDS = 90
+GapReason = Literal[
+    "not_searched",
+    "not_found_after_sufficient_search",
+    "blocked",
+    "degraded",
+]
 
 
 @dataclass(frozen=True)
@@ -14,6 +22,54 @@ class MissionRuntimeObservation:
     heartbeat_status: str
     stalled: bool
     reason_code: str | None
+
+
+class SafeOperationalMetadata(BaseModel):
+    component: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_.-]+$")
+    field_key: str = Field(min_length=1, max_length=128, pattern=r"^[a-z0-9_.-]+$")
+    latency_ms: int | None = Field(default=None, ge=0)
+    retry_count: int = Field(default=0, ge=0)
+    cache_hit: bool | None = None
+    attempted_cost: float | None = Field(default=None, ge=0)
+    billed_cost: float | None = Field(default=None, ge=0)
+    accepted_cost: float | None = Field(default=None, ge=0)
+
+
+class GapObservation(BaseModel):
+    mission_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
+    reason: GapReason
+    metadata: SafeOperationalMetadata
+    client_release_eligible: Literal[False] = False
+
+
+def observe_gap(
+    *,
+    mission_id: str,
+    reason: GapReason,
+    component: str,
+    field_key: str,
+    latency_ms: int | None = None,
+    retry_count: int = 0,
+    cache_hit: bool | None = None,
+    attempted_cost: float | None = None,
+    billed_cost: float | None = None,
+    accepted_cost: float | None = None,
+) -> GapObservation:
+    """Create a typed redacted gap observation without raw input material."""
+    return GapObservation(
+        mission_id=mission_id,
+        reason=reason,
+        metadata=SafeOperationalMetadata(
+            component=component,
+            field_key=field_key,
+            latency_ms=latency_ms,
+            retry_count=retry_count,
+            cache_hit=cache_hit,
+            attempted_cost=attempted_cost,
+            billed_cost=billed_cost,
+            accepted_cost=accepted_cost,
+        ),
+    )
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
