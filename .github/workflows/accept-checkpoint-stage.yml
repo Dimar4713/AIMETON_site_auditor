@@ -1,0 +1,199 @@
+name: Accept Checkpoint Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to accept
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-accept-checkpoint-stage
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 88 &&
+       startsWith(github.event.comment.body, '/accept-checkpoint-stage ') &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 20
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      ACCEPTANCE_DB: /app/data/sr07-checkpoint-acceptance.sqlite3
+      ACCEPTANCE_BACKUP: /app/data/sr07-checkpoint-acceptance.sqlite3.bak
+      ACCEPTANCE_RESTORE: /app/data/sr07-checkpoint-acceptance.restored.sqlite3
+
+    steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            expected='${{ inputs.expected_sha }}'
+          else
+            expected="${{ github.event.comment.body }}"
+            expected="${expected#'/accept-checkpoint-stage '}"
+          fi
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Seed checkpoint in dedicated stage acceptance store
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
+          docker exec -i "$CONTAINER" python - <<'PY'
+          from pathlib import Path
+          from app.mission_checkpoint import MissionCheckpoint, checkpoint_digest
+          from app.mission_checkpoint_store import save_checkpoint
+          from app.runtime_core.backup import backup_runtime_database
+          from app.runtime_core.models import TaskCreate
+          from app.runtime_core.storage import RuntimeStore
+
+          db = Path('/app/data/sr07-checkpoint-acceptance.sqlite3')
+          backup = Path('/app/data/sr07-checkpoint-acceptance.sqlite3.bak')
+          restored = Path('/app/data/sr07-checkpoint-acceptance.restored.sqlite3')
+          for path in (db, backup, restored):
+              path.unlink(missing_ok=True)
+          store = RuntimeStore(db)
+          task = store.create_task(TaskCreate(
+              title='SR-07 stage checkpoint acceptance',
+              actor_ref='actor:stage-acceptance',
+              mandate_ref='mandate:sr07-stage-acceptance',
+              commitment='Checkpoint survives stage force recreate',
+              completion_criteria=['checkpoint survives restart and restore'],
+              correlation_id='corr-sr07-stage-acceptance',
+          ))
+          checkpoint = MissionCheckpoint(
+              mission_id='mission-sr07-stage-acceptance',
+              sequence=7,
+              phase='evidence_fetch',
+              state_digest=checkpoint_digest({'phase': 'evidence_fetch', 'cursor': 7}),
+              document_ids=('doc-stage-1',),
+              evidence_ids=('ev-stage-1',),
+          )
+          save_checkpoint(
+              store,
+              task_id=task.id,
+              checkpoint=checkpoint,
+              actor_ref=task.actor_ref,
+              mandate_ref=task.mandate_ref,
+              correlation_id=task.correlation_id,
+          )
+          backup_runtime_database(db, backup)
+          Path('/app/data/sr07-checkpoint-task-id.txt').write_text(task.id, encoding='utf-8')
+          PY
+
+      - name: Force recreate stage auditor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.override.yml \
+            -f docker-compose.runtime-secrets.yml \
+            up -d --force-recreate auditor
+          deadline=$((SECONDS + 240))
+          while (( SECONDS < deadline )); do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+            [[ "$status" == healthy ]] && break
+            [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]] && exit 1
+            sleep 5
+          done
+          [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == healthy ]]
+
+      - name: Verify checkpoint after recreate and isolated restore
+        id: verify
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/sr07-stage-checkpoint-acceptance.md"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          from pathlib import Path
+          from app.mission_checkpoint_store import latest_checkpoint
+          from app.runtime_core.backup import restore_runtime_database
+          from app.runtime_core.storage import RuntimeStore
+
+          db = Path('/app/data/sr07-checkpoint-acceptance.sqlite3')
+          backup = Path('/app/data/sr07-checkpoint-acceptance.sqlite3.bak')
+          restored = Path('/app/data/sr07-checkpoint-acceptance.restored.sqlite3')
+          task_id = Path('/app/data/sr07-checkpoint-task-id.txt').read_text(encoding='utf-8').strip()
+          live = latest_checkpoint(RuntimeStore(db), task_id=task_id)
+          assert live is not None
+          assert live.sequence == 7
+          assert live.document_ids == ('doc-stage-1',)
+          assert live.evidence_ids == ('ev-stage-1',)
+          restore_runtime_database(backup, restored)
+          recovered = latest_checkpoint(RuntimeStore(restored), task_id=task_id)
+          assert recovered == live
+          PY
+          {
+            echo '## SR-07 stage checkpoint acceptance'
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- exact deployed source SHA: \`${{ steps.expected.outputs.sha }}\`"
+            echo '- dedicated checkpoint survived force recreate: ✅'
+            echo '- isolated backup restore preserved checkpoint: ✅'
+            echo '- duplicate production/client data collected: no'
+            echo '- credentials, tokens, URL query, raw documents: not collected'
+            echo
+            echo '### Verdict'
+            echo '✅ Stage restart/redeploy checkpoint acceptance passed.'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup dedicated acceptance files
+        if: always()
+        shell: bash
+        run: |
+          docker exec -i "$CONTAINER" sh -lc 'rm -f /app/data/sr07-checkpoint-acceptance.sqlite3 /app/data/sr07-checkpoint-acceptance.sqlite3-* /app/data/sr07-checkpoint-acceptance.sqlite3.bak /app/data/sr07-checkpoint-acceptance.restored.sqlite3 /app/data/sr07-checkpoint-acceptance.restored.sqlite3-* /app/data/sr07-checkpoint-task-id.txt' || true
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sr07-stage-checkpoint-acceptance-${{ github.run_id }}
+          path: ${{ steps.verify.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to SA-SR-07
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.verify.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = process.env.REPORT_PATH;
+            const body = path && fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `## SR-07 stage checkpoint acceptance\n\nWorkflow ${context.runId} failed before sanitized evidence was produced.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 88,
+              body: body.slice(0, 60000),
+            });
