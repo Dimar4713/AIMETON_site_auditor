@@ -41,6 +41,7 @@ def test_results_preserve_document_evidence_locator_and_digest() -> None:
     assert result.evidence_id == source.evidence_id
     assert result.locator == source.locator
     assert result.digest == source.digest
+    assert result.text == source.text
     assert len(result.digest) == 64
 
 
