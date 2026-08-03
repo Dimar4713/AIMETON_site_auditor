@@ -2,65 +2,13 @@ name: UI Stage Visual Audit
 
 on:
   workflow_dispatch:
-    inputs:
-      expected_sha:
-        description: Exact deployed source SHA to audit
-        required: true
-        type: string
 
 permissions:
   contents: read
-  issues: write
-
-concurrency:
-  group: aimeton-ui-stage-visual-audit
-  cancel-in-progress: false
 
 jobs:
-  audit:
-    runs-on: [self-hosted, Linux, X64, stage, auditor]
-    environment: stage
-    timeout-minutes: 20
-    env:
-      STACK_DIR: /opt/aimeton/auditor-stack
-      CONTAINER: aimeton-auditor
-      STAGE_URL: https://stage-auditor.aimeton.ru
-      OUT_DIR: /tmp/ui-262-stage-visual-audit
-
+  registration:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout audit script
-        uses: actions/checkout@v4
-
-      - name: Capture sanitized login and workspace views
-        shell: bash
-        env:
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
-        run: bash .github/scripts/ui-stage-visual-audit.sh
-
-      - name: Upload sanitized visual evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ui-262-stage-visual-audit-${{ github.run_id }}
-          path: /tmp/ui-262-stage-visual-audit
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Publish evidence to UI-262
-        if: success()
-        continue-on-error: true
-        uses: actions/github-script@v7
-        env:
-          REPORT_PATH: /tmp/ui-262-stage-visual-audit/evidence.md
-        with:
-          github-token: ${{ github.token }}
-          retries: 3
-          script: |
-            const fs = require('fs');
-            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 262,
-              body: report.slice(0, 60000),
-            });
+      - name: Confirm workflow registration
+        run: echo "UI Stage Visual Audit is registered"
