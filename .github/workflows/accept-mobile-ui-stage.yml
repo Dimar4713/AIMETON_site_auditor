@@ -1,0 +1,142 @@
+name: Accept Mobile UI Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to accept
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-accept-mobile-ui-stage
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 223 &&
+       startsWith(github.event.comment.body, '/accept-mobile-ui-stage ') &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+
+    steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            expected='${{ inputs.expected_sha }}'
+          else
+            expected="${{ github.event.comment.body }}"
+            expected="${expected#'/accept-mobile-ui-stage '}"
+          fi
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact deployed SHA and healthy auditor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$status" == healthy ]]
+
+      - name: Verify mobile UI contract in deployed container
+        id: verify
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/ui-223-mobile-stage-acceptance.md"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          from pathlib import Path
+
+          root = Path('/app/static')
+          workspace = (root / 'workspace.html').read_text(encoding='utf-8')
+          detail = (root / 'mission-detail.html').read_text(encoding='utf-8')
+          registry = (root / 'mission-events.js').read_text(encoding='utf-8')
+          bindings = (root / 'mission-events-bindings.js').read_text(encoding='utf-8')
+
+          for name, html in {'workspace': workspace, 'mission-detail': detail}.items():
+              assert 'name="viewport"' in html, f'{name}: viewport metadata missing'
+              assert 'mission-events.js' in html, f'{name}: shared event registry missing'
+              assert 'mission-events-bindings.js' in html, f'{name}: shared bindings missing'
+
+          for state in ('running', 'stalled', 'blocked', 'degraded', 'completed'):
+              assert state in registry, f'event registry: typed state {state} missing'
+
+          for token in ('reason', 'nextAction', 'heartbeat'):
+              assert token in registry or token in bindings, f'event narration token {token} missing'
+
+          forbidden = ('chain-of-thought', 'raw_prompt', 'provider_payload', 'access_token', 'secret_key')
+          projected = '\n'.join((workspace, detail, registry, bindings)).lower()
+          for token in forbidden:
+              assert token not in projected, f'unsafe UI token present: {token}'
+          PY
+          {
+            echo '## UI-223 mobile stage contract acceptance'
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- exact deployed source SHA: \`${{ steps.expected.outputs.sha }}\`"
+            echo '- stage auditor health: ✅'
+            echo '- workspace and mission detail declare mobile viewport: ✅'
+            echo '- shared typed event registry/bindings loaded in both views: ✅'
+            echo '- running/stalled/blocked/degraded/completed states present: ✅'
+            echo '- reason, next action and heartbeat narration contract present: ✅'
+            echo '- forbidden internal projection tokens absent: ✅'
+            echo
+            echo '### Verdict'
+            echo '✅ Mobile UI stage contract acceptance passed.'
+            echo
+            echo '> This gate verifies deployed static/UI contracts. Human visual review on a real handset remains a separate product sign-off when required.'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-223-mobile-stage-acceptance-${{ github.run_id }}
+          path: ${{ steps.verify.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to UI-223
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.verify.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = process.env.REPORT_PATH;
+            const body = path && fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `## UI-223 mobile stage contract acceptance\n\nWorkflow ${context.runId} failed before sanitized evidence was produced.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 223,
+              body: body.slice(0, 60000),
+            });
