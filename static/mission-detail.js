@@ -30,6 +30,23 @@ function eventLabel(summary) {
   })[summary] || summary || 'Операционное событие подтверждено.';
 }
 
+function heartbeatLabel(payload) {
+  return ({
+    fresh: 'Связь с исполнением подтверждена свежим событием.',
+    stalled: 'Миссия не обновлялась в установленный срок и считается остановившейся.',
+    missing: 'Нет достоверного времени heartbeat; активность не подтверждена.',
+    not_applicable: 'Heartbeat не требуется для текущего терминального состояния.',
+  })[payload.heartbeat_status] || '';
+}
+
+function reasonLabel(reason) {
+  return ({
+    heartbeat_stalled: 'События выполнения перестали обновляться.',
+    heartbeat_missing: 'Отсутствует корректная временная метка события.',
+    runtime_step_not_configured: 'Рабочий шаг пока не настроен.',
+  })[reason] || reason || '';
+}
+
 function nextActionLabel(nextAction) {
   return ({
     configure_bounded_runtime_worker: 'Следующий шаг: подключить ограниченный рабочий контур выполнения.',
@@ -69,26 +86,31 @@ function renderEvidence(records) {
 function renderLiveFeed(mission, records) {
   const events = records.evidence || [];
   const latest = events.at(-1);
+  const heartbeat = heartbeatLabel(records);
   if (!latest) {
     liveFeedBox.textContent = mission.state === 'created'
       ? 'Запуск ещё не подтверждён операционными событиями.'
-      : 'Операционные события пока недоступны.';
-    liveNextBox.hidden = true;
+      : heartbeat || 'Операционные события пока недоступны.';
+    const reason = reasonLabel(records.runtime_reason);
+    liveNextBox.textContent = reason ? `Причина: ${reason}` : '';
+    liveNextBox.hidden = !reason;
     liveUpdatedBox.textContent = `Состояние: ${stateLabel(mission.state)}`;
     return;
   }
 
   const data = latest.data || {};
-  liveFeedBox.textContent = `${stateLabel(mission.state)} · ${eventLabel(data.summary)}`;
+  liveFeedBox.textContent = [stateLabel(mission.state), eventLabel(data.summary), heartbeat].filter(Boolean).join(' · ');
   const nextText = nextActionLabel(data.next_action);
-  if (data.reason_code || nextText) {
-    const reason = data.reason_code ? `Причина: ${data.reason_code}.` : '';
+  const typedReason = records.runtime_reason || data.reason_code;
+  if (typedReason || nextText) {
+    const reason = typedReason ? `Причина: ${reasonLabel(typedReason)}.` : '';
     liveNextBox.textContent = [reason, nextText].filter(Boolean).join(' ');
     liveNextBox.hidden = false;
   } else {
     liveNextBox.hidden = true;
   }
-  liveUpdatedBox.textContent = `Последнее обновление: ${new Date(latest.created_at).toLocaleString()}`;
+  const updatedAt = records.last_event_at || latest.created_at;
+  liveUpdatedBox.textContent = `Последнее обновление: ${new Date(updatedAt).toLocaleString()}`;
 }
 
 function renderReport(payload) {
