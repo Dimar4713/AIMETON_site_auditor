@@ -32,6 +32,7 @@ jobs:
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       CONTAINER: aimeton-auditor
+      REPORT: ${{ runner.temp }}/ui-223-mobile-stage-acceptance.md
 
     steps:
       - name: Resolve exact expected SHA
@@ -48,74 +49,76 @@ jobs:
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
           echo "sha=$expected" >> "$GITHUB_OUTPUT"
 
+      - name: Initialize sanitized evidence
+        shell: bash
+        run: |
+          {
+            echo '## UI-223 mobile stage contract acceptance'
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- expected source SHA: `${{ steps.expected.outputs.sha }}`"
+          } > "$REPORT"
+
       - name: Verify exact deployed SHA and healthy auditor
         shell: bash
         run: |
           set -Eeuo pipefail
           cd "$STACK_DIR"
           deployed="$(cat app-source-sha.txt)"
-          [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
-          [[ "$status" == healthy ]]
+          {
+            echo "- deployed source SHA: `$deployed`"
+            echo "- stage auditor status: `$status`"
+          } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
+          if [[ "$deployed" != "${{ steps.expected.outputs.sha }}" ]]; then
+            echo '- verdict: ❌ exact deployed SHA mismatch' | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [[ "$status" != healthy ]]; then
+            echo '- verdict: ❌ stage auditor is not healthy' | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: Verify mobile UI contract in deployed container
-        id: verify
         shell: bash
         run: |
           set -Eeuo pipefail
-          report="$RUNNER_TEMP/ui-223-mobile-stage-acceptance.md"
-          echo "report=$report" >> "$GITHUB_OUTPUT"
           docker exec -i "$CONTAINER" python - <<'PY'
           from pathlib import Path
-
           root = Path('/app/static')
           workspace = (root / 'workspace.html').read_text(encoding='utf-8')
           detail = (root / 'mission-detail.html').read_text(encoding='utf-8')
           registry = (root / 'mission-events.js').read_text(encoding='utf-8')
           bindings = (root / 'mission-events-bindings.js').read_text(encoding='utf-8')
-
           for name, html in {'workspace': workspace, 'mission-detail': detail}.items():
               assert 'name="viewport"' in html, f'{name}: viewport metadata missing'
               assert 'mission-events.js' in html, f'{name}: shared event registry missing'
               assert 'mission-events-bindings.js' in html, f'{name}: shared bindings missing'
-
           for state in ('running', 'stalled', 'blocked', 'degraded', 'completed'):
               assert state in registry, f'event registry: typed state {state} missing'
-
           for token in ('reason', 'nextAction', 'heartbeat'):
               assert token in registry or token in bindings, f'event narration token {token} missing'
-
           forbidden = ('chain-of-thought', 'raw_prompt', 'provider_payload', 'access_token', 'secret_key')
           projected = '\n'.join((workspace, detail, registry, bindings)).lower()
           for token in forbidden:
               assert token not in projected, f'unsafe UI token present: {token}'
           PY
           {
-            echo '## UI-223 mobile stage contract acceptance'
-            echo
-            echo "- workflow run: $GITHUB_RUN_ID"
-            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "- exact deployed source SHA: \`${{ steps.expected.outputs.sha }}\`"
-            echo '- stage auditor health: ✅'
-            echo '- workspace and mission detail declare mobile viewport: ✅'
-            echo '- shared typed event registry/bindings loaded in both views: ✅'
-            echo '- running/stalled/blocked/degraded/completed states present: ✅'
-            echo '- reason, next action and heartbeat narration contract present: ✅'
+            echo '- mobile viewport contract: ✅'
+            echo '- shared typed event registry/bindings: ✅'
+            echo '- running/stalled/blocked/degraded/completed coverage: ✅'
+            echo '- reason, next action and heartbeat narration: ✅'
             echo '- forbidden internal projection tokens absent: ✅'
-            echo
-            echo '### Verdict'
-            echo '✅ Mobile UI stage contract acceptance passed.'
-            echo
-            echo '> This gate verifies deployed static/UI contracts. Human visual review on a real handset remains a separate product sign-off when required.'
-          } > "$report"
-          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            echo '- verdict: ✅ Mobile UI stage contract acceptance passed.'
+          } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ui-223-mobile-stage-acceptance-${{ github.run_id }}
-          path: ${{ steps.verify.outputs.report }}
+          path: ${{ env.REPORT }}
           if-no-files-found: error
           retention-days: 30
 
@@ -124,7 +127,7 @@ jobs:
         continue-on-error: true
         uses: actions/github-script@v7
         env:
-          REPORT_PATH: ${{ steps.verify.outputs.report }}
+          REPORT_PATH: ${{ env.REPORT }}
         with:
           github-token: ${{ github.token }}
           retries: 3
