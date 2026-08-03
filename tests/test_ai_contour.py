@@ -1,7 +1,13 @@
 import pytest
 from pydantic import BaseModel, Field
 
-from app.ai_contour import SourceBoundFact, run_schema_bound_step, validate_source_bound_facts
+from app.ai_contour import (
+    SourceBoundFact,
+    SynthesisClaim,
+    run_schema_bound_step,
+    validate_source_bound_facts,
+    validate_source_bound_synthesis,
+)
 
 
 class ExtractedFact(BaseModel):
@@ -109,3 +115,54 @@ def test_same_snapshot_produces_stable_fact_order():
     second = validate_source_bound_facts(reversed(facts), **kwargs)
     assert first.model_dump(mode="json") == second.model_dump(mode="json")
     assert first.client_release_eligible is True
+
+
+def synthesis_kwargs():
+    return dict(
+        allowed_claims={"Company revenue is 100"},
+        allowed_source_ids={"doc-1"},
+        allowed_entity_ids={"company-1"},
+        evidence_digest=EVIDENCE_DIGEST,
+        model="deterministic-fixture",
+        schema_version="synthesis-v1",
+        input_digest="sha256:input",
+    )
+
+
+def test_synthesis_rejects_claim_absent_from_ledger_snapshot():
+    result = validate_source_bound_synthesis(
+        [SynthesisClaim(claim="Company revenue is 999", source_ids=["doc-1"], entity_ids=["company-1"])],
+        **synthesis_kwargs(),
+    )
+    assert result.status == "blocked"
+    assert result.reason_code == "unsupported_claim"
+    assert result.client_release_eligible is False
+
+
+def test_synthesis_rejects_invented_source():
+    result = validate_source_bound_synthesis(
+        [SynthesisClaim(claim="Company revenue is 100", source_ids=["invented"], entity_ids=["company-1"])],
+        **synthesis_kwargs(),
+    )
+    assert result.reason_code == "unsupported_source"
+    assert result.client_release_eligible is False
+
+
+def test_synthesis_rejects_invented_entity():
+    result = validate_source_bound_synthesis(
+        [SynthesisClaim(claim="Company revenue is 100", source_ids=["doc-1"], entity_ids=["invented"])],
+        **synthesis_kwargs(),
+    )
+    assert result.reason_code == "unsupported_entity"
+    assert result.client_release_eligible is False
+
+
+def test_synthesis_accepts_only_snapshot_bound_claims():
+    result = validate_source_bound_synthesis(
+        [SynthesisClaim(claim="Company revenue is 100", source_ids=["doc-1"], entity_ids=["company-1"])],
+        **synthesis_kwargs(),
+    )
+    assert result.status == "accepted"
+    assert result.reason_code == "accepted"
+    assert result.client_release_eligible is True
+    assert result.evidence_digest == EVIDENCE_DIGEST
