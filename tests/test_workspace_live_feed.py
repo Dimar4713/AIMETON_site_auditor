@@ -13,13 +13,15 @@ def test_workspace_uses_bounded_visible_page_polling() -> None:
     assert "loadMissions({silent: true})" in script
 
 
-def test_workspace_projects_latest_sanitized_operational_event() -> None:
+def test_workspace_projects_latest_sanitized_operational_status() -> None:
     script = (ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
 
     assert "/records`" in script
-    assert "latestOperationalEvent" in script
+    assert "latestOperationalStatus" in script
     assert "eventLabel" in script
-    assert "runtime_step_not_configured" in script
+    assert "heartbeatLabel" in script
+    assert "heartbeat_status" in script
+    assert "observation.stalled" in script
     assert "input_snapshot" in script  # request input only
     assert "technical_snapshot" not in script
     assert "chain-of-thought" not in script
