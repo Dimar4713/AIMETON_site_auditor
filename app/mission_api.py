@@ -17,6 +17,7 @@ from app.mission_contract import (
 )
 from app.mission_execution import start_mission_execution
 from app.mission_local_runtime import run_cost_free_local_step
+from app.mission_observability import derive_runtime_observation
 from app.mission_sqlite import SQLiteMissionRepository
 
 
@@ -65,6 +66,10 @@ class MissionUserRecordsProjection(BaseModel):
     evidence: list[MissionEvidenceProjection]
     report_metadata: MissionEvidenceProjection | None = None
     report_reason: str | None = None
+    last_event_at: str | None = None
+    heartbeat_status: str
+    stalled: bool
+    runtime_reason: str | None = None
 
 
 _SAFE_FIELDS: dict[str, set[str]] = {
@@ -175,6 +180,7 @@ def get_owned_mission_records(
     records = records_reader(user.id, mission_id)
     if records is None:
         raise _not_found()
+    observation = derive_runtime_observation(records)
     projected = [_sanitize_record(record) for record in records]
     report = next((record for record in reversed(projected) if record.kind == "report_metadata"), None)
     evidence = [record for record in projected if record.kind in {"turn", "sufficiency"}]
@@ -188,6 +194,10 @@ def get_owned_mission_records(
         evidence=evidence,
         report_metadata=report,
         report_reason=report_reason,
+        last_event_at=observation.last_event_at,
+        heartbeat_status=observation.heartbeat_status,
+        stalled=observation.stalled,
+        runtime_reason=observation.reason_code,
     )
 
 
