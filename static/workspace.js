@@ -39,12 +39,21 @@ function eventLabel(summary) {
   })[summary] || summary || 'Событие подтверждено';
 }
 
-async function latestOperationalEvent(missionId) {
+function heartbeatLabel(payload) {
+  return ({
+    fresh: 'heartbeat свежий',
+    stalled: 'выполнение остановилось',
+    missing: 'heartbeat не подтверждён',
+    not_applicable: '',
+  })[payload && payload.heartbeat_status] || '';
+}
+
+async function latestOperationalStatus(missionId) {
   const response = await api(`/api/user/missions/${encodeURIComponent(missionId)}/records`);
   if (!response.ok) return null;
   const payload = await response.json();
   const evidence = payload.evidence || [];
-  return evidence.at(-1) || null;
+  return {event: evidence.at(-1) || null, observation: payload};
 }
 
 async function renderMissions(items) {
@@ -54,12 +63,12 @@ async function renderMissions(items) {
     return;
   }
 
-  const liveEvents = new Map();
+  const liveStatuses = new Map();
   await Promise.all(items.slice(0, LIVE_RECORD_LIMIT).map(async (mission) => {
     try {
-      liveEvents.set(mission.id, await latestOperationalEvent(mission.id));
+      liveStatuses.set(mission.id, await latestOperationalStatus(mission.id));
     } catch (_) {
-      liveEvents.set(mission.id, null);
+      liveStatuses.set(mission.id, null);
     }
   }));
 
@@ -76,12 +85,20 @@ async function renderMissions(items) {
     const state = document.createElement('span');
     state.className = `state state-${mission.state}`;
     state.textContent = stateLabel(mission.state);
-    const latest = liveEvents.get(mission.id);
+    const status = liveStatuses.get(mission.id);
+    const latest = status && status.event;
+    const observation = status && status.observation;
+    const heartbeat = heartbeatLabel(observation);
     const live = document.createElement('p');
-    live.className = 'message';
-    live.textContent = latest
-      ? `${eventLabel(latest.data && latest.data.summary)} · ${new Date(latest.created_at).toLocaleString()}`
-      : 'Операционные события пока недоступны.';
+    live.className = observation && observation.stalled ? 'message error' : 'message';
+    if (latest) {
+      const updatedAt = observation.last_event_at || latest.created_at;
+      live.textContent = [eventLabel(latest.data && latest.data.summary), heartbeat, new Date(updatedAt).toLocaleString()].filter(Boolean).join(' · ');
+    } else if (heartbeat) {
+      live.textContent = heartbeat;
+    } else {
+      live.textContent = 'Операционные события пока недоступны.';
+    }
     const meta = document.createElement('small');
     meta.textContent = `${mission.id} · ${new Date(mission.updated_at).toLocaleString()}`;
     card.append(title, target, state, live, meta);
