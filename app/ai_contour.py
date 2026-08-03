@@ -41,6 +41,23 @@ class SourceBoundFactsResult(BaseModel):
     client_release_eligible: bool
 
 
+class SynthesisClaim(BaseModel):
+    claim: str
+    source_ids: list[str] = Field(min_length=1)
+    entity_ids: list[str] = Field(default_factory=list)
+
+
+class SourceBoundSynthesisResult(BaseModel):
+    status: Literal["accepted", "blocked"]
+    reason_code: Literal["accepted", "unsupported_claim", "unsupported_source", "unsupported_entity"]
+    claims: list[SynthesisClaim]
+    evidence_digest: str
+    model: str
+    schema_version: str
+    input_digest: str
+    client_release_eligible: bool
+
+
 def run_schema_bound_step(
     responses: Iterable[object],
     *,
@@ -137,4 +154,40 @@ def validate_source_bound_facts(
         schema_version=schema_version,
         input_digest=input_digest,
         client_release_eligible=not has_preliminary,
+    )
+
+
+def validate_source_bound_synthesis(
+    claims: Iterable[SynthesisClaim | dict[str, Any]],
+    *,
+    allowed_claims: set[str],
+    allowed_source_ids: set[str],
+    allowed_entity_ids: set[str],
+    evidence_digest: str,
+    model: str,
+    schema_version: str,
+    input_digest: str,
+) -> SourceBoundSynthesisResult:
+    """Accept synthesis only when every claim, source and entity exists in the accepted snapshot."""
+    validated = [SynthesisClaim.model_validate(claim) for claim in claims]
+    validated.sort(key=lambda item: (item.claim, tuple(sorted(item.source_ids)), tuple(sorted(item.entity_ids))))
+
+    reason_code: Literal["accepted", "unsupported_claim", "unsupported_source", "unsupported_entity"] = "accepted"
+    if any(item.claim not in allowed_claims for item in validated):
+        reason_code = "unsupported_claim"
+    elif any(set(item.source_ids) - allowed_source_ids for item in validated):
+        reason_code = "unsupported_source"
+    elif any(set(item.entity_ids) - allowed_entity_ids for item in validated):
+        reason_code = "unsupported_entity"
+
+    accepted = reason_code == "accepted"
+    return SourceBoundSynthesisResult(
+        status="accepted" if accepted else "blocked",
+        reason_code=reason_code,
+        claims=validated,
+        evidence_digest=evidence_digest,
+        model=model,
+        schema_version=schema_version,
+        input_digest=input_digest,
+        client_release_eligible=accepted,
     )
