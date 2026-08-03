@@ -1,7 +1,11 @@
 name: UI Stage Visual Audit
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ui-stage-visual-audit.yml
 
 permissions:
   contents: read
