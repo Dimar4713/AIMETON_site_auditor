@@ -32,7 +32,7 @@ jobs:
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       CONTAINER: aimeton-auditor
-      REPORT: ${{ runner.temp }}/ui-223-mobile-stage-acceptance.md
+      REPORT: /tmp/ui-223-mobile-stage-acceptance-${{ github.run_id }}.md
 
     steps:
       - name: Resolve exact expected SHA
@@ -57,7 +57,7 @@ jobs:
             echo
             echo "- workflow run: $GITHUB_RUN_ID"
             echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "- expected source SHA: `${{ steps.expected.outputs.sha }}`"
+            printf '%s\n' '- expected source SHA: `${{ steps.expected.outputs.sha }}`'
           } > "$REPORT"
 
       - name: Verify exact deployed SHA and healthy auditor
@@ -68,8 +68,8 @@ jobs:
           deployed="$(cat app-source-sha.txt)"
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
           {
-            echo "- deployed source SHA: `$deployed`"
-            echo "- stage auditor status: `$status`"
+            printf '%s\n' "- deployed source SHA: \`$deployed\`"
+            printf '%s\n' "- stage auditor status: \`$status\`"
           } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
           if [[ "$deployed" != "${{ steps.expected.outputs.sha }}" ]]; then
             echo '- verdict: ❌ exact deployed SHA mismatch' | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
