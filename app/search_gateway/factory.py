@@ -5,9 +5,9 @@ from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 
 from app.search_gateway.factory_helpers import first_nonempty_env
-from app.search_gateway.gateway import SearchGateway
 from app.search_gateway.models import SearchPolicy
 from app.search_gateway.providers import SearxngProvider, TavilyProvider, YandexProvider
+from app.search_gateway.traced_gateway import TracedSearchGateway
 
 
 def _decimal_env(name: str, default: str = "0") -> Decimal:
@@ -83,7 +83,7 @@ def identity_search_policy_from_env() -> SearchPolicy:
 
 
 @lru_cache(maxsize=1)
-def get_search_gateway() -> SearchGateway:
+def get_search_gateway() -> TracedSearchGateway:
     quotas = {
         provider: quota
         for provider, quota in {
@@ -93,7 +93,7 @@ def get_search_gateway() -> SearchGateway:
         }.items()
         if quota is not None
     }
-    return SearchGateway(
+    return TracedSearchGateway(
         [
             YandexProvider(
                 os.getenv("YANDEX_SEARCH_API_KEY"),
