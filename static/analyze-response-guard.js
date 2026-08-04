@@ -76,4 +76,9 @@
       button.disabled = false;
     }
   };
+
+  const humanReport = document.createElement('script');
+  humanReport.src = '/static/human-report.js?v=20260804a';
+  humanReport.defer = true;
+  document.head.appendChild(humanReport);
 })();
