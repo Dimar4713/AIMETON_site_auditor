@@ -2,6 +2,8 @@ const adminBox = document.querySelector('#session-admin');
 const usersBox = document.querySelector('#admin-users');
 const missionsBox = document.querySelector('#admin-missions');
 const auditBox = document.querySelector('#admin-audit');
+const createUserForm = document.querySelector('#create-user-form');
+const createUserMessage = document.querySelector('#create-user-message');
 
 function cookie(name) {
   return document.cookie.split('; ').find((item) => item.startsWith(`${name}=`))?.split('=').slice(1).join('=') || '';
@@ -45,6 +47,34 @@ async function loadSession() {
   adminBox.textContent = `${user.username} · admin`;
 }
 
+async function createUser(event) {
+  event.preventDefault();
+  createUserMessage.textContent = 'Создание…';
+  const csrf = decodeURIComponent(cookie('aimeton_csrf'));
+  const payload = {
+    username: document.querySelector('#create-username').value.trim(),
+    password: document.querySelector('#create-password').value,
+    role: document.querySelector('#create-role').value,
+    reason: document.querySelector('#create-reason').value.trim(),
+  };
+  const response = await api('/api/auth/admin/users', {
+    method: 'POST',
+    allowPolicyError: true,
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    createUserMessage.textContent = body?.detail?.reason || `Создание отклонено (${response.status}).`;
+    return;
+  }
+  const user = await response.json();
+  createUserForm.reset();
+  document.querySelector('#create-reason').value = 'Создание пользователя администратором';
+  createUserMessage.textContent = `Пользователь ${user.username} создан. Передайте временный пароль вне журнала и попросите сменить его.`;
+  await Promise.all([loadUsers(), loadAudit()]);
+}
+
 async function changeUserState(user) {
   const reason = window.prompt(`Причина: ${user.is_active ? 'блокировка' : 'разблокировка'} ${user.username}`)?.trim();
   if (!reason) return;
@@ -63,6 +93,27 @@ async function changeUserState(user) {
   await Promise.all([loadUsers(), loadAudit()]);
 }
 
+async function resetUserPassword(user) {
+  const password = window.prompt(`Новый временный пароль для ${user.username} (не менее 12 символов)`);
+  if (!password) return;
+  const reason = window.prompt(`Причина сброса пароля для ${user.username}`)?.trim();
+  if (!reason) return;
+  const csrf = decodeURIComponent(cookie('aimeton_csrf'));
+  const response = await api(`/api/auth/admin/users/${user.id}/reset-password`, {
+    method: 'POST',
+    allowPolicyError: true,
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+    body: JSON.stringify({password, reason}),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    window.alert(payload?.detail?.reason || `Сброс отклонён (${response.status})`);
+    return;
+  }
+  window.alert('Временный пароль установлен, прежние активные сессии отозваны.');
+  await loadAudit();
+}
+
 async function loadUsers() {
   usersBox.textContent = 'Загрузка…';
   const response = await api('/api/auth/admin/users');
@@ -77,11 +128,15 @@ async function loadUsers() {
       `Роль: ${user.role}`,
       `Состояние: ${user.is_active ? 'активен' : 'заблокирован'}`,
     ]);
-    const button = document.createElement('button');
-    button.className = 'secondary';
-    button.textContent = user.is_active ? 'Заблокировать' : 'Разблокировать';
-    button.addEventListener('click', () => changeUserState(user));
-    node.append(button);
+    const stateButton = document.createElement('button');
+    stateButton.className = 'secondary';
+    stateButton.textContent = user.is_active ? 'Заблокировать' : 'Разблокировать';
+    stateButton.addEventListener('click', () => changeUserState(user));
+    const passwordButton = document.createElement('button');
+    passwordButton.className = 'secondary';
+    passwordButton.textContent = 'Сбросить пароль';
+    passwordButton.addEventListener('click', () => resetUserPassword(user));
+    node.append(stateButton, passwordButton);
     return node;
   }));
 }
@@ -120,6 +175,7 @@ async function loadAudit() {
   ])));
 }
 
+createUserForm.addEventListener('submit', createUser);
 document.querySelector('#refresh-users').addEventListener('click', loadUsers);
 document.querySelector('#refresh-missions').addEventListener('click', loadMissions);
 document.querySelector('#refresh-audit').addEventListener('click', loadAudit);
