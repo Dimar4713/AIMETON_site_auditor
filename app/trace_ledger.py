@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 MAX_SUMMARY_LENGTH = 500
 MAX_METADATA_BYTES = 4096
+MAX_METADATA_STRING_LENGTH = 4096
 _SECRET_KEY = re.compile(r"(api[_-]?key|authorization|cookie|password|secret|token|prompt|chain[_-]?of[_-]?thought)", re.I)
 
 
@@ -66,15 +67,18 @@ def sanitize_metadata(value: dict[str, Any]) -> dict[str, Any]:
     """Return an allow-safe bounded projection, never raw secrets or payloads."""
     cleaned: dict[str, Any] = {}
     for key, item in value.items():
-        if _SECRET_KEY.search(str(key)):
-            cleaned[str(key)] = "[REDACTED]"
+        safe_key = str(key)
+        if _SECRET_KEY.search(safe_key):
+            cleaned[safe_key] = "[REDACTED]"
             continue
-        if isinstance(item, (str, int, float, bool)) or item is None:
-            cleaned[str(key)] = item if not isinstance(item, str) else item[:500]
+        if isinstance(item, str):
+            cleaned[safe_key] = item[:MAX_METADATA_STRING_LENGTH]
+        elif isinstance(item, (int, float, bool)) or item is None:
+            cleaned[safe_key] = item
         elif isinstance(item, list):
-            cleaned[str(key)] = [str(entry)[:200] for entry in item[:20]]
+            cleaned[safe_key] = [str(entry)[:200] for entry in item[:20]]
         else:
-            cleaned[str(key)] = str(item)[:500]
+            cleaned[safe_key] = str(item)[:MAX_METADATA_STRING_LENGTH]
     encoded = json.dumps(cleaned, ensure_ascii=False, sort_keys=True).encode("utf-8")
     if len(encoded) > MAX_METADATA_BYTES:
         return {"truncated": True, "digest": hashlib.sha256(encoded).hexdigest()}
@@ -163,9 +167,14 @@ class SQLiteTraceLedger:
                     request.deployed_sha, request.runtime_version, created_at.isoformat(),
                 ),
             )
+        event_data = request.model_dump()
+        event_data["metadata"] = safe_metadata
         return TraceEvent(
-            **request.model_dump(), event_id=event_id, sequence=sequence,
-            created_at=created_at, metadata=safe_metadata, metadata_digest=metadata_digest,
+            **event_data,
+            event_id=event_id,
+            sequence=sequence,
+            created_at=created_at,
+            metadata_digest=metadata_digest,
         )
 
     def list_attempt(self, mission_id: str, attempt_id: str) -> list[TraceEvent]:
