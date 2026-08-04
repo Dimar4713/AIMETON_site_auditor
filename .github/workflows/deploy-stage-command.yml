@@ -7,7 +7,6 @@ on:
 permissions:
   contents: read
   actions: write
-  issues: write
 
 concurrency:
   group: aimeton-deploy-stage-command
@@ -66,16 +65,3 @@ jobs:
               inputs: {commit_sha: process.env.TARGET_SHA},
             });
             core.info(`Deploy Stage dispatched for ${process.env.TARGET_SHA}`);
-
-      - name: Acknowledge command
-        uses: actions/github-script@v7
-        env:
-          TARGET_SHA: ${{ steps.target.outputs.sha }}
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 173,
-              body: `Deploy Stage dispatch accepted for exact SHA \`${process.env.TARGET_SHA}\`. Command workflow: ${context.runId}.`,
-            });
