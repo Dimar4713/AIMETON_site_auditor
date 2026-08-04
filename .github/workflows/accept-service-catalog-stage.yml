@@ -1,0 +1,157 @@
+name: Accept Service Catalog Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to accept
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-accept-service-catalog-stage
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 274 &&
+       startsWith(github.event.comment.body, '/accept-service-catalog-stage ') &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      REPORT: /tmp/ui-274-service-catalog-stage-${{ github.run_id }}.md
+
+    steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            expected='${{ inputs.expected_sha }}'
+          else
+            expected="${{ github.event.comment.body }}"
+            expected="${expected#'/accept-service-catalog-stage '}"
+          fi
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Initialize sanitized evidence
+        shell: bash
+        run: |
+          {
+            echo '## UI-274 service catalog stage acceptance'
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '%s\n' '- expected source SHA: `${{ steps.expected.outputs.sha }}`'
+          } > "$REPORT"
+
+      - name: Verify exact deployed SHA and healthy auditor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          {
+            printf '%s\n' "- deployed source SHA: \`$deployed\`"
+            printf '%s\n' "- stage auditor status: \`$status\`"
+          } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
+          [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
+          [[ "$status" == healthy ]]
+
+      - name: Verify deployed service catalog contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i "$CONTAINER" python - <<'PY'
+          from pathlib import Path
+
+          root = Path('/app/static')
+          index = (root / 'index.html').read_text(encoding='utf-8')
+          catalog = (root / 'service-catalog.js').read_text(encoding='utf-8')
+          app = (root / 'app.js').read_text(encoding='utf-8')
+          combined = '\n'.join((index, catalog, app))
+
+          for service in ('audit', 'company', 'hunter', 'interface'):
+              assert f'data-service-card="{service}"' in index, f'missing service card: {service}'
+
+          for panel in ('audit', 'company', 'hunter'):
+              assert f'data-service-panel="{panel}"' in index, f'missing service panel: {panel}'
+
+          assert '/api/analyze/start' in app, 'audit launcher is not bound to live analysis start'
+          assert '/api/company-intelligence' in catalog, 'company intelligence endpoint binding missing'
+          assert '/api/hunt' in catalog, 'hunter endpoint binding missing'
+          assert 'companyIntelligenceForm' in catalog, 'company form submit handler missing'
+          assert 'hunterForm' in catalog, 'hunter form submit handler missing'
+          assert 'event.preventDefault()' in catalog, 'explicit submit boundary missing'
+          assert 'clearSelection();' in catalog, 'catalog-first initial state missing'
+          assert 'disabled' in index and 'Beta' in index, 'interface audit beta guard missing'
+
+          auto_call_tokens = ('postJson(\'/api/company-intelligence\'', 'postJson(\'/api/hunt\'')
+          for token in auto_call_tokens:
+              position = catalog.find(token)
+              assert position >= 0, f'endpoint call missing: {token}'
+              submit_position = catalog.rfind("addEventListener('submit'", 0, position)
+              assert submit_position >= 0, f'endpoint call occurs outside explicit submit handler: {token}'
+
+          forbidden = ('access_token', 'secret_key', 'raw_prompt', 'chain-of-thought')
+          lowered = combined.lower()
+          for token in forbidden:
+              assert token not in lowered, f'unsafe projection token present: {token}'
+          PY
+          {
+            echo '- four service cards: ✅'
+            echo '- three real service forms: ✅'
+            echo '- audit/company/hunter endpoint bindings: ✅'
+            echo '- explicit submit-only provider boundary: ✅'
+            echo '- catalog-first mobile entry state: ✅'
+            echo '- interface audit beta guard: ✅'
+            echo '- unsafe internal projection tokens absent: ✅'
+            echo '- verdict: ✅ Service catalog stage contract acceptance passed.'
+          } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-274-service-catalog-stage-${{ github.run_id }}
+          path: ${{ env.REPORT }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to UI-274
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ env.REPORT }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = process.env.REPORT_PATH;
+            const body = path && fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `## UI-274 service catalog stage acceptance\n\nWorkflow ${context.runId} failed before sanitized evidence was produced.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 274,
+              body: body.slice(0, 60000),
+            });
