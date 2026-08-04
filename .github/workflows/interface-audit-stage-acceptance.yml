@@ -1,0 +1,98 @@
+name: Interface Audit Stage Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to audit
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/interface-audit-stage-acceptance.yml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-interface-audit-stage
+  cancel-in-progress: false
+
+jobs:
+  registration:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Interface Audit Stage Acceptance is registered"
+
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 291 &&
+       startsWith(github.event.comment.body, '/accept-interface-audit-stage ') &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 20
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+      OUT_DIR: /tmp/ia-291-${{ github.run_id }}
+
+    steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            expected='${{ inputs.expected_sha }}'
+          else
+            expected="${{ github.event.comment.body }}"
+            expected="${expected#'/accept-interface-audit-stage '}"
+          fi
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Run exact-SHA self-audit plumbing
+        env:
+          EXPECTED_SHA: ${{ steps.expected.outputs.sha }}
+        run: bash .github/scripts/interface-audit-stage-smoke.sh
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ia-291-stage-self-audit-${{ github.run_id }}
+          path: ${{ env.OUT_DIR }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to IA-03
+        if: success()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ env.OUT_DIR }}/evidence.md
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 291,
+              body: report.slice(0, 60000),
+            });
