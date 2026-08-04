@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 import hashlib
 import json
@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import sqlite3
 from threading import RLock
-from typing import Any
+from typing import Any, Iterable
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -30,6 +30,23 @@ class TraceState(StrEnum):
     CANCELLED = "cancelled"
 
 
+class RetentionClass(StrEnum):
+    EMERGENCY = "emergency"
+    OPERATIONAL = "operational"
+    DIAGNOSTIC = "diagnostic"
+    TRACE = "trace"
+    FORENSIC = "forensic"
+
+
+DEFAULT_RETENTION = {
+    RetentionClass.EMERGENCY: timedelta(days=365),
+    RetentionClass.OPERATIONAL: timedelta(days=180),
+    RetentionClass.DIAGNOSTIC: timedelta(days=30),
+    RetentionClass.TRACE: timedelta(days=7),
+    RetentionClass.FORENSIC: timedelta(hours=24),
+}
+
+
 class TraceEventCreate(BaseModel):
     mission_id: str = Field(min_length=1, max_length=128)
     attempt_id: str = Field(min_length=1, max_length=128)
@@ -47,6 +64,11 @@ class TraceEventCreate(BaseModel):
     event_key: str = Field(min_length=1, max_length=256)
     deployed_sha: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     runtime_version: str | None = Field(default=None, max_length=64)
+    retention_class: RetentionClass = RetentionClass.TRACE
+    policy_version: str = Field(default="logging-retention-v1", min_length=1, max_length=64)
+    retain_until: datetime | None = None
+    frozen: bool = False
+    legal_hold: bool = False
 
     @field_validator("counters")
     @classmethod
@@ -61,6 +83,12 @@ class TraceEvent(TraceEventCreate):
     sequence: int
     created_at: datetime
     metadata_digest: str
+
+
+class CleanupResult(BaseModel):
+    deleted: int
+    protected: int
+    cutoff_utc: datetime
 
 
 def sanitize_metadata(value: dict[str, Any]) -> dict[str, Any]:
@@ -86,7 +114,7 @@ def sanitize_metadata(value: dict[str, Any]) -> dict[str, Any]:
 
 
 class SQLiteTraceLedger:
-    """Append-only, idempotent and restart-safe technological trace ledger."""
+    """Append-only trace ledger with minimum-retention and expired-only cleanup."""
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -99,6 +127,12 @@ class SQLiteTraceLedger:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA journal_mode = WAL")
         return db
+
+    @staticmethod
+    def _ensure_column(db: sqlite3.Connection, name: str, ddl: str) -> None:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(mission_trace_events)")}
+        if name not in columns:
+            db.execute(f"ALTER TABLE mission_trace_events ADD COLUMN {name} {ddl}")
 
     def _migrate(self) -> None:
         with self._lock, self._connect() as db:
@@ -125,17 +159,37 @@ class SQLiteTraceLedger:
                     deployed_sha TEXT,
                     runtime_version TEXT,
                     created_at TEXT NOT NULL,
+                    retention_class TEXT NOT NULL DEFAULT 'trace',
+                    policy_version TEXT NOT NULL DEFAULT 'logging-retention-v1',
+                    retain_until TEXT,
+                    frozen INTEGER NOT NULL DEFAULT 0,
+                    legal_hold INTEGER NOT NULL DEFAULT 0,
                     UNIQUE(mission_id, attempt_id, sequence)
                 );
                 CREATE INDEX IF NOT EXISTS idx_trace_mission_attempt
                     ON mission_trace_events(mission_id, attempt_id, sequence);
+                CREATE INDEX IF NOT EXISTS idx_trace_retention
+                    ON mission_trace_events(retain_until, frozen, legal_hold);
                 """
+            )
+            self._ensure_column(db, "retention_class", "TEXT NOT NULL DEFAULT 'trace'")
+            self._ensure_column(db, "policy_version", "TEXT NOT NULL DEFAULT 'logging-retention-v1'")
+            self._ensure_column(db, "retain_until", "TEXT")
+            self._ensure_column(db, "frozen", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(db, "legal_hold", "INTEGER NOT NULL DEFAULT 0")
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trace_retention ON mission_trace_events(retain_until, frozen, legal_hold)"
             )
 
     def append(self, request: TraceEventCreate) -> TraceEvent:
         safe_metadata = sanitize_metadata(request.metadata)
         metadata_json = json.dumps(safe_metadata, ensure_ascii=False, sort_keys=True)
         metadata_digest = hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
+        created_at = datetime.now(UTC)
+        retain_until = request.retain_until or created_at + DEFAULT_RETENTION[request.retention_class]
+        if retain_until.tzinfo is None:
+            retain_until = retain_until.replace(tzinfo=UTC)
+
         with self._lock, self._connect() as db:
             existing = db.execute(
                 "SELECT * FROM mission_trace_events WHERE event_key = ?", (request.event_key,)
@@ -148,15 +202,15 @@ class SQLiteTraceLedger:
             ).fetchone()
             sequence = int(row["next_sequence"])
             event_id = f"trace_{uuid4().hex}"
-            created_at = datetime.now(UTC)
             db.execute(
                 """
                 INSERT INTO mission_trace_events (
                     event_id, event_key, mission_id, attempt_id, sequence, parent_event_id,
                     component, operation, state, reason_code, summary, provider, vertical,
                     duration_ms, counters_json, metadata_json, metadata_digest,
-                    deployed_sha, runtime_version, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    deployed_sha, runtime_version, created_at, retention_class, policy_version,
+                    retain_until, frozen, legal_hold
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id, request.event_key, request.mission_id, request.attempt_id,
@@ -165,10 +219,13 @@ class SQLiteTraceLedger:
                     request.vertical, request.duration_ms,
                     json.dumps(request.counters, sort_keys=True), metadata_json, metadata_digest,
                     request.deployed_sha, request.runtime_version, created_at.isoformat(),
+                    request.retention_class.value, request.policy_version, retain_until.isoformat(),
+                    int(request.frozen), int(request.legal_hold),
                 ),
             )
         event_data = request.model_dump()
         event_data["metadata"] = safe_metadata
+        event_data["retain_until"] = retain_until
         return TraceEvent(
             **event_data,
             event_id=event_id,
@@ -185,8 +242,48 @@ class SQLiteTraceLedger:
             ).fetchall()
         return [self._row(row) for row in rows]
 
+    def cleanup_expired(
+        self,
+        *,
+        now: datetime | None = None,
+        batch_size: int = 1000,
+        protected_mission_ids: Iterable[str] = (),
+    ) -> CleanupResult:
+        """Delete only expired, unfrozen, non-held events outside active/protected missions."""
+        if batch_size < 1 or batch_size > 10_000:
+            raise ValueError("batch_size must be between 1 and 10000")
+        cutoff = now or datetime.now(UTC)
+        if cutoff.tzinfo is None:
+            cutoff = cutoff.replace(tzinfo=UTC)
+        protected = tuple(dict.fromkeys(protected_mission_ids))
+
+        where = "retain_until IS NOT NULL AND retain_until < ? AND frozen = 0 AND legal_hold = 0"
+        params: list[Any] = [cutoff.isoformat()]
+        if protected:
+            placeholders = ",".join("?" for _ in protected)
+            where += f" AND mission_id NOT IN ({placeholders})"
+            params.extend(protected)
+
+        with self._lock, self._connect() as db:
+            protected_count = db.execute(
+                "SELECT COUNT(*) FROM mission_trace_events WHERE retain_until IS NOT NULL AND retain_until < ? AND (frozen = 1 OR legal_hold = 1)",
+                (cutoff.isoformat(),),
+            ).fetchone()[0]
+            rows = db.execute(
+                f"SELECT event_id FROM mission_trace_events WHERE {where} ORDER BY retain_until LIMIT ?",
+                (*params, batch_size),
+            ).fetchall()
+            event_ids = [row["event_id"] for row in rows]
+            if event_ids:
+                placeholders = ",".join("?" for _ in event_ids)
+                db.execute(f"DELETE FROM mission_trace_events WHERE event_id IN ({placeholders})", event_ids)
+        return CleanupResult(deleted=len(event_ids), protected=int(protected_count), cutoff_utc=cutoff)
+
     @staticmethod
     def _row(row: sqlite3.Row) -> TraceEvent:
+        retention_class = row["retention_class"] if "retention_class" in row.keys() else "trace"
+        policy_version = row["policy_version"] if "policy_version" in row.keys() else "logging-retention-v1"
+        retain_until_raw = row["retain_until"] if "retain_until" in row.keys() else None
         return TraceEvent(
             event_id=row["event_id"], event_key=row["event_key"], mission_id=row["mission_id"],
             attempt_id=row["attempt_id"], sequence=row["sequence"], parent_event_id=row["parent_event_id"],
@@ -196,4 +293,8 @@ class SQLiteTraceLedger:
             counters=json.loads(row["counters_json"]), metadata=json.loads(row["metadata_json"]),
             metadata_digest=row["metadata_digest"], deployed_sha=row["deployed_sha"],
             runtime_version=row["runtime_version"], created_at=datetime.fromisoformat(row["created_at"]),
+            retention_class=RetentionClass(retention_class), policy_version=policy_version,
+            retain_until=datetime.fromisoformat(retain_until_raw) if retain_until_raw else None,
+            frozen=bool(row["frozen"]) if "frozen" in row.keys() else False,
+            legal_hold=bool(row["legal_hold"]) if "legal_hold" in row.keys() else False,
         )
