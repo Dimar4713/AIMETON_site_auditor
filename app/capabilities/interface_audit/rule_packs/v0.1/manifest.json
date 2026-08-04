@@ -1,0 +1,24 @@
+{
+  "rule_pack_version": "0.1.0",
+  "capability": "interface_audit",
+  "snapshot": "a67333399dabbc71d7778962cb9c4fb9b86a00d0",
+  "sources": [
+    {
+      "name": "jakubkrehel/skills",
+      "role": "donor",
+      "license": "MIT",
+      "locator": "github:jakubkrehel/skills@a67333399dabbc71d7778962cb9c4fb9b86a00d0"
+    },
+    {
+      "name": "Dimar4713/skills",
+      "role": "preserved fork",
+      "license": "MIT",
+      "locator": "github:Dimar4713/skills"
+    }
+  ],
+  "runtime_dependency_on_sources": false,
+  "authority_policy": {
+    "gate_eligible": ["standard", "aimeton_policy"],
+    "advisory_only": ["best_practice", "heuristic"]
+  }
+}

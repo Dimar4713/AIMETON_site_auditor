@@ -1,0 +1,41 @@
+{
+  "rule_pack_version": "0.1.0",
+  "rules": [
+    {
+      "rule_id": "IA-A11Y-001",
+      "rule_version": "1.0.0",
+      "domain": "accessibility",
+      "authority": "standard",
+      "severity": "high",
+      "source": "WCAG 2.2 2.4.7 Focus Visible",
+      "rationale": "Keyboard users must be able to identify the currently focused control."
+    },
+    {
+      "rule_id": "IA-LAYOUT-001",
+      "rule_version": "1.0.0",
+      "domain": "layout",
+      "authority": "aimeton_policy",
+      "severity": "high",
+      "source": "AIMETON Interface Audit v0.1: narrow viewport contract",
+      "rationale": "Primary actions and content must remain usable on a 320 px viewport without hidden mandatory controls."
+    },
+    {
+      "rule_id": "IA-WRITING-001",
+      "rule_version": "1.0.0",
+      "domain": "writing",
+      "authority": "best_practice",
+      "severity": "medium",
+      "source": "jakubkrehel/skills snapshot a67333399dabbc71d7778962cb9c4fb9b86a00d0",
+      "rationale": "Labels and actions should explain the user outcome instead of exposing implementation terminology."
+    },
+    {
+      "rule_id": "IA-OBS-001",
+      "rule_version": "1.0.0",
+      "domain": "observability",
+      "authority": "aimeton_policy",
+      "severity": "high",
+      "source": "AIMETON mission live-report contract",
+      "rationale": "A long-running operation must show current phase, heartbeat and a truthful terminal or blocked state."
+    }
+  ]
+}
