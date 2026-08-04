@@ -7,6 +7,8 @@ on:
         description: Exact deployed source SHA to audit
         required: true
         type: string
+  issue_comment:
+    types: [created]
   push:
     branches: [main]
     paths:
@@ -29,7 +31,12 @@ jobs:
         run: echo "UI Stage Visual Audit is registered"
 
   audit:
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 262 &&
+       startsWith(github.event.comment.body, '/accept-ui-stage ') &&
+       github.event.comment.user.login == 'Dimar4713')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 20
@@ -40,6 +47,20 @@ jobs:
       OUT_DIR: /tmp/ui-262-${{ github.run_id }}
 
     steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            expected='${{ inputs.expected_sha }}'
+          else
+            expected="${{ github.event.comment.body }}"
+            expected="${expected#'/accept-ui-stage '}"
+          fi
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
       - name: Checkout current audit script
         uses: actions/checkout@v4
         with:
@@ -48,7 +69,7 @@ jobs:
       - name: Capture sanitized full user path
         shell: bash
         env:
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_SHA: ${{ steps.expected.outputs.sha }}
         run: bash .github/scripts/ui-stage-visual-audit.sh
 
       - name: Upload sanitized visual evidence
