@@ -87,10 +87,10 @@ jobs:
           app = (root / 'app.js').read_text(encoding='utf-8')
           combined = '\n'.join((index, catalog, app))
 
-          for service in ('audit', 'company', 'hunter', 'interface'):
+          for service in ('site-audit', 'company-intelligence', 'hunter', 'interface-audit'):
               assert f'data-service-card="{service}"' in index, f'missing service card: {service}'
 
-          for panel in ('audit', 'company', 'hunter'):
+          for panel in ('site-audit', 'company-intelligence', 'hunter'):
               assert f'data-service-panel="{panel}"' in index, f'missing service panel: {panel}'
 
           assert '/api/analyze/start' in app, 'audit launcher is not bound to live analysis start'
@@ -100,7 +100,7 @@ jobs:
           assert 'hunterForm' in catalog, 'hunter form submit handler missing'
           assert 'event.preventDefault()' in catalog, 'explicit submit boundary missing'
           assert 'clearSelection();' in catalog, 'catalog-first initial state missing'
-          assert 'disabled' in index and 'Beta' in index, 'interface audit beta guard missing'
+          assert 'data-service-card="interface-audit"' in index and 'disabled' in index and 'Beta' in index, 'interface audit beta guard missing'
 
           auto_call_tokens = ('postJson(\'/api/company-intelligence\'', 'postJson(\'/api/hunt\'')
           for token in auto_call_tokens:
