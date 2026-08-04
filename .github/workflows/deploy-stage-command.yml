@@ -1,0 +1,80 @@
+name: Deploy Stage Command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: aimeton-deploy-stage-command
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.issue.number == 173 &&
+      startsWith(github.event.comment.body, '/deploy-stage ') &&
+      github.event.comment.user.login == 'Dimar4713'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Resolve exact deployment SHA
+        id: target
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -Eeuo pipefail
+          sha="${COMMENT_BODY#'/deploy-stage '}"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "Invalid deployment SHA: $sha" >&2
+            exit 1
+          }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Verify commit exists
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        with:
+          script: |
+            const sha = process.env.TARGET_SHA;
+            const {data: commit} = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+            });
+            if (commit.sha !== sha) {
+              core.setFailed(`Resolved commit mismatch: ${commit.sha}`);
+            }
+
+      - name: Dispatch exact-SHA Deploy Stage
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy-stage.yml',
+              ref: 'main',
+              inputs: {commit_sha: process.env.TARGET_SHA},
+            });
+            core.info(`Deploy Stage dispatched for ${process.env.TARGET_SHA}`);
+
+      - name: Acknowledge command
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 173,
+              body: `Deploy Stage dispatch accepted for exact SHA \`${process.env.TARGET_SHA}\`. Command workflow: ${context.runId}.`,
+            });
