@@ -26,6 +26,9 @@
   let elapsedTimer = null;
   let startedAt = null;
   let current = null;
+  let latestEvents = [];
+  let latestState = 'queued';
+  let latestUpdatedAt = null;
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -39,10 +42,17 @@
     style.id = 'liveAnalysisStyles';
     style.textContent = `
       .mission-reporter{margin-top:16px;padding:16px;border:1px solid #dfe3f5;border-radius:16px;background:#f8f9ff;text-align:left}
-      .mission-reporter__head{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+      .mission-reporter__head{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
       .mission-reporter__title{font-weight:750;color:#172033}
-      .mission-reporter__meta{font-size:12px;color:#68708a;margin-top:3px}
+      .mission-reporter__meta{font-size:12px;color:#68708a;margin-top:3px;overflow-wrap:anywhere}
       .mission-reporter__state{padding:5px 9px;border-radius:999px;background:#e9ebff;color:#4148ba;font-size:12px;font-weight:700;white-space:nowrap}
+      .mission-heartbeat{display:grid;grid-template-columns:12px 1fr;gap:9px;align-items:start;margin:0 0 12px;padding:10px 11px;border:1px solid #dfe3f5;border-radius:11px;background:#fff;color:#38405a;font-size:13px;line-height:1.35}
+      .mission-heartbeat__dot{width:10px;height:10px;margin-top:3px;border-radius:50%;background:#5b61e6;box-shadow:0 0 0 0 rgba(91,97,230,.35);animation:missionPulse 1.6s infinite}
+      .mission-heartbeat__title{font-weight:700;color:#202943}
+      .mission-heartbeat__detail{margin-top:2px;color:#68708a}
+      .mission-heartbeat[data-stale="true"]{border-color:#f0d59a;background:#fffaf0}
+      .mission-heartbeat[data-stale="true"] .mission-heartbeat__dot{background:#c18412}
+      @keyframes missionPulse{0%{box-shadow:0 0 0 0 rgba(91,97,230,.35)}70%{box-shadow:0 0 0 7px rgba(91,97,230,0)}100%{box-shadow:0 0 0 0 rgba(91,97,230,0)}}
       .mission-reporter__events{display:grid;gap:8px;margin:0;padding:0;list-style:none}
       .mission-event{display:grid;grid-template-columns:24px 1fr;gap:8px;padding:9px 10px;border-radius:10px;background:#fff;border:1px solid #eaecf6}
       .mission-event__message{font-weight:650;color:#202943}
@@ -51,7 +61,7 @@
       .mission-reporter[data-state="blocked"] .mission-reporter__state,.mission-reporter[data-state="failed"] .mission-reporter__state{background:#ffe8e8;color:#a12828}
       .mission-reporter[data-state="degraded"] .mission-reporter__state,.mission-reporter[data-state="stalled"] .mission-reporter__state{background:#fff1d6;color:#855b00}
       .mission-reporter[data-state="completed"] .mission-reporter__state{background:#e0f6e8;color:#176b37}
-      @media (max-width:640px){.mission-reporter__head{display:block}.mission-reporter__state{display:inline-block;margin-top:8px}}
+      @media (max-width:640px){.mission-reporter__head{display:block}.mission-reporter__state{display:inline-block;margin-top:8px}.mission-reporter{padding:14px}.mission-heartbeat{font-size:12px}}
     `;
     document.head.appendChild(style);
   }
@@ -61,10 +71,50 @@
     return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
   }
 
+  function eventAgeSeconds(events, updatedAt) {
+    const lastEvent = events.at(-1)?.timestamp;
+    const source = lastEvent || updatedAt;
+    if (!source) return 0;
+    const value = new Date(source).getTime();
+    return Number.isFinite(value) ? Math.max(0, Math.floor((Date.now() - value) / 1000)) : 0;
+  }
+
+  function heartbeatText(events, state, age) {
+    if (TERMINAL.has(state)) {
+      return {title: 'Миссия завершила выполнение.', detail: 'Итоговое состояние получено от сервера.', stale: false};
+    }
+    const last = events.at(-1);
+    const currentWork = last?.next_action || last?.detail || last?.message || 'Ожидаем первый этап миссии.';
+    if (age >= 45) {
+      return {
+        title: 'Длительная операция продолжается, новых этапов пока нет.',
+        detail: `Последний сигнал ${age} сек. назад. Сейчас: ${currentWork} Проверка сервера выполняется каждые 1,2 сек.`,
+        stale: true,
+      };
+    }
+    if (age >= 15) {
+      return {
+        title: 'Система работает, ожидаем завершение текущей подзадачи.',
+        detail: `Последний сигнал ${age} сек. назад. Сейчас: ${currentWork}`,
+        stale: false,
+      };
+    }
+    return {
+      title: 'Связь с миссией активна.',
+      detail: `Последний сигнал ${age} сек. назад. Сейчас: ${currentWork}`,
+      stale: false,
+    };
+  }
+
   function renderReporter(events = [], state = 'queued', updatedAt = null) {
     installStyles();
-    const visible = events.slice(-8);
+    latestEvents = Array.isArray(events) ? events : [];
+    latestState = state;
+    latestUpdatedAt = updatedAt;
+    const visible = latestEvents.slice(-8);
     const lastUpdate = updatedAt ? new Date(updatedAt) : new Date();
+    const age = eventAgeSeconds(latestEvents, updatedAt);
+    const heartbeat = heartbeatText(latestEvents, state, age);
     statusNode.innerHTML = `
       <div class="mission-reporter" data-state="${escapeHtml(state)}" role="status" aria-live="polite">
         <div class="mission-reporter__head">
@@ -73,6 +123,10 @@
             <div class="mission-reporter__meta">Миссия ${escapeHtml(current?.mission_id || 'создаётся')} · прошло <span id="missionElapsed">${secondsSinceStart()}</span> сек. · обновлено ${escapeHtml(lastUpdate.toLocaleTimeString('ru-RU'))}</div>
           </div>
           <span class="mission-reporter__state">${escapeHtml(stateLabels[state] || state)}</span>
+        </div>
+        <div class="mission-heartbeat" data-stale="${heartbeat.stale}">
+          <span class="mission-heartbeat__dot" aria-hidden="true"></span>
+          <div><div class="mission-heartbeat__title">${escapeHtml(heartbeat.title)}</div><div class="mission-heartbeat__detail">${escapeHtml(heartbeat.detail)}</div></div>
         </div>
         <ol class="mission-reporter__events">
           ${visible.map(event => `
@@ -87,6 +141,11 @@
             </li>`).join('')}
         </ol>
       </div>`;
+  }
+
+  function refreshClockAndHeartbeat() {
+    if (!current) return;
+    renderReporter(latestEvents, latestState, latestUpdatedAt);
   }
 
   function rememberActive(value) {
@@ -143,10 +202,7 @@
     renderReporter([], payload.state, new Date().toISOString());
     await poll();
     pollTimer = setInterval(poll, 1200);
-    elapsedTimer = setInterval(() => {
-      const node = document.querySelector('#missionElapsed');
-      if (node) node.textContent = String(secondsSinceStart());
-    }, 1000);
+    elapsedTimer = setInterval(refreshClockAndHeartbeat, 1000);
   }
 
   form.addEventListener('submit', async event => {
@@ -175,10 +231,7 @@
       button.disabled = true;
       poll();
       pollTimer = setInterval(poll, 1200);
-      elapsedTimer = setInterval(() => {
-        const node = document.querySelector('#missionElapsed');
-        if (node) node.textContent = String(secondsSinceStart());
-      }, 1000);
+      elapsedTimer = setInterval(refreshClockAndHeartbeat, 1000);
     }
   } catch {
     rememberActive(null);
