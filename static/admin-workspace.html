@@ -14,7 +14,16 @@
   <main class="workspace-grid">
     <section class="panel" aria-labelledby="users-title">
       <div class="panel-title"><h2 id="users-title">Пользователи</h2><button id="refresh-users" class="secondary">Обновить</button></div>
-      <p class="message">Разрешены только блокировка и разблокировка с обязательной причиной и CSRF-защитой.</p>
+      <form id="create-user-form" class="auth-form">
+        <h3>Создать пользователя</h3>
+        <label>Логин<input id="create-username" name="username" minlength="1" maxlength="128" autocomplete="off" required></label>
+        <label>Временный пароль<input id="create-password" name="password" type="password" minlength="12" maxlength="1024" autocomplete="new-password" required></label>
+        <label>Роль<select id="create-role" name="role"><option value="user">Пользователь</option><option value="admin">Администратор</option></select></label>
+        <label>Причина<input id="create-reason" name="reason" minlength="1" maxlength="500" value="Создание пользователя администратором" required></label>
+        <button type="submit">Создать пользователя</button>
+        <p id="create-user-message" class="message" aria-live="polite"></p>
+      </form>
+      <p class="message">Пароль показывается и передаётся только в форме создания; хеши и токены в UI не выводятся. Блокировка отзывает активные сессии.</p>
       <div id="admin-users" class="mission-list" aria-live="polite"></div>
     </section>
     <section class="panel" aria-labelledby="missions-title">
