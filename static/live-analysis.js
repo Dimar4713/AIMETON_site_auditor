@@ -1,0 +1,186 @@
+(() => {
+  const ACTIVE_KEY = 'aimeton_active_analysis_v1';
+  const TERMINAL = new Set(['completed', 'degraded', 'blocked', 'failed']);
+  const form = document.querySelector('#form');
+  const statusNode = document.querySelector('#status');
+  const button = document.querySelector('#analyzeBtn');
+  if (!form || !statusNode || !button) return;
+
+  const stateLabels = {
+    queued: 'В очереди',
+    running: 'Выполняется',
+    stalled: 'Нет новых событий',
+    degraded: 'Завершено с ограничениями',
+    blocked: 'Остановлено',
+    completed: 'Завершено',
+    failed: 'Ошибка',
+  };
+
+  const iconLabels = {
+    inbox: '📥', globe: '🌐', check: '✓', building: '🏢',
+    search: '🔎', brain: '🧠', briefcase: '💼', file: '📄',
+    'check-circle': '✅', 'alert-triangle': '⚠️', clock: '🕒',
+  };
+
+  let pollTimer = null;
+  let elapsedTimer = null;
+  let startedAt = null;
+  let current = null;
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[char]));
+  }
+
+  function installStyles() {
+    if (document.querySelector('#liveAnalysisStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'liveAnalysisStyles';
+    style.textContent = `
+      .mission-reporter{margin-top:16px;padding:16px;border:1px solid #dfe3f5;border-radius:16px;background:#f8f9ff;text-align:left}
+      .mission-reporter__head{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+      .mission-reporter__title{font-weight:750;color:#172033}
+      .mission-reporter__meta{font-size:12px;color:#68708a;margin-top:3px}
+      .mission-reporter__state{padding:5px 9px;border-radius:999px;background:#e9ebff;color:#4148ba;font-size:12px;font-weight:700;white-space:nowrap}
+      .mission-reporter__events{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+      .mission-event{display:grid;grid-template-columns:24px 1fr;gap:8px;padding:9px 10px;border-radius:10px;background:#fff;border:1px solid #eaecf6}
+      .mission-event__message{font-weight:650;color:#202943}
+      .mission-event__detail,.mission-event__next{font-size:13px;color:#68708a;margin-top:3px}
+      .mission-event__time{font-size:11px;color:#8d94aa;margin-top:4px}
+      .mission-reporter[data-state="blocked"] .mission-reporter__state,.mission-reporter[data-state="failed"] .mission-reporter__state{background:#ffe8e8;color:#a12828}
+      .mission-reporter[data-state="degraded"] .mission-reporter__state,.mission-reporter[data-state="stalled"] .mission-reporter__state{background:#fff1d6;color:#855b00}
+      .mission-reporter[data-state="completed"] .mission-reporter__state{background:#e0f6e8;color:#176b37}
+      @media (max-width:640px){.mission-reporter__head{display:block}.mission-reporter__state{display:inline-block;margin-top:8px}}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function secondsSinceStart() {
+    if (!startedAt) return 0;
+    return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  }
+
+  function renderReporter(events = [], state = 'queued', updatedAt = null) {
+    installStyles();
+    const visible = events.slice(-8);
+    const lastUpdate = updatedAt ? new Date(updatedAt) : new Date();
+    statusNode.innerHTML = `
+      <div class="mission-reporter" data-state="${escapeHtml(state)}" role="status" aria-live="polite">
+        <div class="mission-reporter__head">
+          <div>
+            <div class="mission-reporter__title">Живой репортаж миссии</div>
+            <div class="mission-reporter__meta">Миссия ${escapeHtml(current?.mission_id || 'создаётся')} · прошло <span id="missionElapsed">${secondsSinceStart()}</span> сек. · обновлено ${escapeHtml(lastUpdate.toLocaleTimeString('ru-RU'))}</div>
+          </div>
+          <span class="mission-reporter__state">${escapeHtml(stateLabels[state] || state)}</span>
+        </div>
+        <ol class="mission-reporter__events">
+          ${visible.map(event => `
+            <li class="mission-event">
+              <span aria-hidden="true">${escapeHtml(iconLabels[event.icon_key] || '•')}</span>
+              <div>
+                <div class="mission-event__message">${escapeHtml(event.message)}</div>
+                ${event.detail ? `<div class="mission-event__detail">${escapeHtml(event.detail)}</div>` : ''}
+                ${event.next_action ? `<div class="mission-event__next">Далее: ${escapeHtml(event.next_action)}</div>` : ''}
+                <div class="mission-event__time">${escapeHtml(new Date(event.timestamp).toLocaleTimeString('ru-RU'))}</div>
+              </div>
+            </li>`).join('')}
+        </ol>
+      </div>`;
+  }
+
+  function rememberActive(value) {
+    if (value) localStorage.setItem(ACTIVE_KEY, JSON.stringify(value));
+    else localStorage.removeItem(ACTIVE_KEY);
+  }
+
+  async function readJson(url) {
+    const response = await fetch(url, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }
+
+  async function poll() {
+    if (!current) return;
+    try {
+      const [status, events] = await Promise.all([
+        readJson(current.status_url), readJson(current.events_url)
+      ]);
+      renderReporter(events, status.state, status.updated_at);
+      if (TERMINAL.has(status.state)) {
+        clearInterval(pollTimer);
+        clearInterval(elapsedTimer);
+        pollTimer = null;
+        elapsedTimer = null;
+        button.disabled = false;
+        rememberActive(null);
+        if (status.result) {
+          analysis = status.result;
+          activeAnalysisId = ensureAnalysisId(analysis);
+          setChatSession([]);
+          renderChatSession();
+          render();
+          saveToHistory(analysis);
+        }
+      }
+    } catch (error) {
+      renderReporter([{ timestamp: new Date().toISOString(), icon_key: 'alert-triangle', message: 'Не удалось получить обновление миссии.', detail: error.message, next_action: 'Повторная проверка выполняется автоматически.' }], 'stalled');
+    }
+  }
+
+  async function launch(url) {
+    const response = await fetch('/api/analyze/start', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+    current = payload;
+    startedAt = Date.now();
+    rememberActive({ ...payload, started_at: startedAt });
+    renderReporter([], payload.state, new Date().toISOString());
+    await poll();
+    pollTimer = setInterval(poll, 1200);
+    elapsedTimer = setInterval(() => {
+      const node = document.querySelector('#missionElapsed');
+      if (node) node.textContent = String(secondsSinceStart());
+    }, 1000);
+  }
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    clearInterval(pollTimer);
+    clearInterval(elapsedTimer);
+    button.disabled = true;
+    document.querySelector('#result')?.classList.add('hidden');
+    document.querySelector('#chat')?.classList.add('hidden');
+    try {
+      await launch(document.querySelector('#url').value);
+    } catch (error) {
+      button.disabled = false;
+      current = null;
+      rememberActive(null);
+      renderReporter([{ timestamp: new Date().toISOString(), icon_key: 'alert-triangle', message: 'Миссия не запущена.', detail: error.message, next_action: 'Проверьте адрес сайта и повторите запуск.' }], 'failed');
+    }
+  }, true);
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(ACTIVE_KEY) || 'null');
+    if (saved?.analysis_id && saved?.status_url && saved?.events_url) {
+      current = saved;
+      startedAt = Number(saved.started_at) || Date.now();
+      button.disabled = true;
+      poll();
+      pollTimer = setInterval(poll, 1200);
+      elapsedTimer = setInterval(() => {
+        const node = document.querySelector('#missionElapsed');
+        if (node) node.textContent = String(secondsSinceStart());
+      }, 1000);
+    }
+  } catch {
+    rememberActive(null);
+  }
+})();
