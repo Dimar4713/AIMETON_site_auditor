@@ -2,11 +2,17 @@
   const cards = [...document.querySelectorAll('[data-service-card]')];
   const panels = [...document.querySelectorAll('[data-service-panel]')];
 
+  function clearSelection() {
+    cards.forEach(card => card.setAttribute('aria-pressed', 'false'));
+    panels.forEach(panel => { panel.hidden = true; });
+  }
+
   function selectService(name) {
     cards.forEach(card => card.setAttribute('aria-pressed', String(card.dataset.serviceCard === name)));
     panels.forEach(panel => { panel.hidden = panel.dataset.servicePanel !== name; });
     const active = panels.find(panel => panel.dataset.servicePanel === name);
-    active?.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    active?.scrollIntoView({behavior: 'smooth', block: 'start'});
+    active?.querySelector('input')?.focus({preventScroll: true});
   }
 
   cards.forEach(card => {
@@ -118,5 +124,5 @@
     }
   });
 
-  selectService('site-audit');
+  clearSelection();
 })();
