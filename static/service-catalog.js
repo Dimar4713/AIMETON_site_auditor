@@ -39,6 +39,16 @@
     return data;
   }
 
+  function safeHttpUrl(value) {
+    if (!value) return '';
+    try {
+      const url = new URL(String(value));
+      return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+    } catch {
+      return '';
+    }
+  }
+
   function appendItem(container, title, text, meta = '') {
     const item = document.createElement('article');
     item.className = 'service-summary__item';
@@ -53,6 +63,60 @@
       small.textContent = meta;
       item.append(small);
     }
+    container.append(item);
+  }
+
+  function handoffCandidate(candidate, fallbackRegion) {
+    const name = String(candidate.company_name || '').trim();
+    const url = safeHttpUrl(candidate.url || candidate.official_url || candidate.website);
+    const region = String(candidate.region || fallbackRegion || '').trim();
+    document.querySelector('#companyName').value = name;
+    document.querySelector('#companyUrl').value = url;
+    document.querySelector('#companyRegion').value = region;
+    selectService('company-intelligence');
+    const status = document.querySelector('#companyIntelligenceStatus');
+    setStatus(status, 'Данные кандидата перенесены. Проверьте их и явно запустите исследование.', 'success');
+    document.querySelector('#companyName').focus({preventScroll: true});
+  }
+
+  function appendCandidate(container, candidate, fallbackRegion) {
+    const item = document.createElement('article');
+    item.className = 'service-summary__item service-summary__candidate';
+    const name = String(candidate.company_name || candidate.url || 'Компания без названия').trim();
+    const url = safeHttpUrl(candidate.url || candidate.official_url || candidate.website);
+    const region = String(candidate.region || fallbackRegion || '').trim();
+    const summary = candidate.recommended_solution || candidate.business_summary || '';
+    const score = candidate.final_score ?? candidate.preliminary_score;
+    const qualification = candidate.qualification || 'не определена';
+    const nameOnly = !url && !summary && score == null;
+
+    const heading = document.createElement('strong');
+    heading.textContent = name;
+    const body = document.createElement('div');
+    body.textContent = summary || 'Недостаточно данных: найдено только название компании.';
+    item.append(heading, body);
+
+    if (url) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = url;
+      link.className = 'service-summary__url';
+      item.append(link);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'service-summary__meta';
+    meta.textContent = `${region ? `Регион: ${region} · ` : ''}Приоритет: ${score ?? '—'} · ${qualification}${nameOnly ? ' · Недостаточно данных' : ''}`;
+    item.append(meta);
+
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'btn-ghost btn-sm';
+    action.textContent = 'Исследовать компанию';
+    action.addEventListener('click', () => handoffCandidate(candidate, fallbackRegion));
+    item.append(action);
     container.append(item);
   }
 
@@ -112,9 +176,7 @@
       };
       const data = await postJson('/api/hunt', payload);
       appendItem(list, 'Результат поиска', `Обнаружено компаний: ${data.discovered ?? 0}`, `Регион: ${data.region || region}`);
-      (data.candidates || []).slice(0, 10).forEach(candidate => {
-        appendItem(list, candidate.company_name || candidate.url, candidate.recommended_solution || candidate.business_summary || 'Кандидат для дальнейшего анализа', `Приоритет: ${candidate.final_score ?? candidate.preliminary_score ?? '—'} · ${candidate.qualification || 'не определена'}`);
-      });
+      (data.candidates || []).slice(0, 10).forEach(candidate => appendCandidate(list, candidate, data.region || region));
       output.hidden = false;
       setStatus(status, 'Список кандидатов подготовлен.', 'success');
     } catch (error) {
