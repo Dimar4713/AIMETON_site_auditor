@@ -6,7 +6,7 @@
   <title>AIMETON AI Studio</title>
   <link rel="stylesheet" href="/static/style.css?v=20260729a">
   <link rel="stylesheet" href="/static/auth-ui.css?v=20260803c">
-  <link rel="stylesheet" href="/static/service-catalog.css?v=20260804a">
+  <link rel="stylesheet" href="/static/service-catalog.css?v=20260804b">
 </head>
 <body>
 <section id="authGate" class="auth-shell" aria-labelledby="loginTitle" hidden>
@@ -59,33 +59,37 @@
   <section class="service-catalog" aria-labelledby="serviceCatalogTitle">
     <div class="service-catalog__heading">
       <h2 id="serviceCatalogTitle">Какую задачу нужно решить?</h2>
-      <p>Выберите услугу. Запуск произойдёт только после заполнения формы и явного подтверждения.</p>
+      <p>Выберите услугу. Форма откроется после выбора, запуск — только после явного подтверждения.</p>
     </div>
     <div class="service-grid">
-      <button class="service-card" type="button" data-service-card="site-audit" aria-pressed="true">
+      <button class="service-card" type="button" data-service-card="site-audit" aria-pressed="false">
         <span class="service-card__top"><span class="service-card__icon" aria-hidden="true">🔍</span><span class="service-card__badge">Доступно</span></span>
         <h3>AI-аудит сайта</h3>
         <p>Профиль бизнеса, evidence, коммерческие сигналы и AI-возможности по URL.</p>
+        <span class="service-card__action">Проверить сайт →</span>
       </button>
       <button class="service-card" type="button" data-service-card="company-intelligence" aria-pressed="false">
         <span class="service-card__top"><span class="service-card__icon" aria-hidden="true">🏢</span><span class="service-card__badge">Доступно</span></span>
         <h3>Исследование компании</h3>
         <p>Компания 360°: открытые источники, коммерческий приоритет и рекомендуемое решение.</p>
+        <span class="service-card__action">Исследовать компанию →</span>
       </button>
       <button class="service-card" type="button" data-service-card="hunter" aria-pressed="false">
         <span class="service-card__top"><span class="service-card__icon" aria-hidden="true">🎯</span><span class="service-card__badge">Доступно</span></span>
         <h3>Поиск клиентов</h3>
         <p>Компании выбранного региона и отрасли с предварительным ранжированием.</p>
+        <span class="service-card__action">Найти клиентов →</span>
       </button>
       <button class="service-card" type="button" data-service-card="interface-audit" aria-pressed="false" disabled>
         <span class="service-card__top"><span class="service-card__icon" aria-hidden="true">🖥️</span><span class="service-card__badge service-card__badge--beta">Beta</span></span>
         <h3>Аудит интерфейса</h3>
         <p>UX, accessibility и визуальные дефекты. Публичный запуск готовится.</p>
+        <span class="service-card__action">Скоро доступно</span>
       </button>
     </div>
   </section>
 
-  <section class="panel service-panel" data-service-panel="site-audit">
+  <section class="panel service-panel" data-service-panel="site-audit" hidden>
     <h2>AI-аудит сайта</h2>
     <p class="service-panel__intro">Введите URL. После запуска появится mission_id и живой репортаж этапов анализа.</p>
     <form id="form">
@@ -146,7 +150,7 @@
 <script src="/static/response-guard.js?v=20260803b"></script>
 <script src="/static/app.js?v=20260803e"></script>
 <script src="/static/live-analysis.js?v=20260804a"></script>
-<script src="/static/service-catalog.js?v=20260804a"></script>
+<script src="/static/service-catalog.js?v=20260804b"></script>
 <script src="/static/analyze-response-guard.js?v=20260803b"></script>
 <script src="/static/sources.js?v=20260720e"></script>
 </body>

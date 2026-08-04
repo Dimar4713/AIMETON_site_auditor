@@ -33,3 +33,18 @@ def test_service_catalog_is_mobile_and_safe_by_construction() -> None:
     for forbidden in ("chain-of-thought", "raw_prompt", "provider_payload", "access_token", "secret_key"):
         assert forbidden not in index.lower()
         assert forbidden not in script
+
+
+def test_catalog_is_initial_experience_and_forms_open_only_after_selection() -> None:
+    index = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "service-catalog.js").read_text(encoding="utf-8")
+
+    for service in ("site-audit", "company-intelligence", "hunter"):
+        assert f'data-service-panel="{service}" hidden' in index
+
+    for action in ("Проверить сайт →", "Исследовать компанию →", "Найти клиентов →"):
+        assert action in index
+
+    assert "clearSelection();" in script
+    assert "selectService('site-audit')" not in script
+    assert "panel.hidden = true" in script
