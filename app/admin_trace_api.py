@@ -148,7 +148,7 @@ def trace_timeline(
     return [_event(row) for row in rows]
 
 
-@router.get("/{mission_id}/trace/attempts/{attempt_id}.jsonl")
+@router.get("/{mission_id}/trace/attempts/{attempt_id}/bundle.jsonl")
 def trace_jsonl_bundle(
     mission_id: str,
     attempt_id: str,
