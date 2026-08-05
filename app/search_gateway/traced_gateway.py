@@ -7,7 +7,7 @@ from pathlib import Path
 from app.search_gateway.gateway import SearchGateway, request_fingerprint
 from app.search_gateway.models import SearchPolicy, SearchRequest, SearchResponse
 from app.search_gateway.trace_bridge import persist_provider_waterfall
-from app.trace_ledger import SQLiteTraceLedger
+from app.trace_write_metrics import InstrumentedSQLiteTraceLedger
 
 
 class TracedSearchGateway(SearchGateway):
@@ -23,7 +23,7 @@ class TracedSearchGateway(SearchGateway):
             "AIMETON_TRACE_DB",
             os.getenv("AIMETON_RUNTIME_DB", "data/runtime-core.sqlite3"),
         )
-        self._trace_ledger = SQLiteTraceLedger(configured)
+        self._trace_ledger = InstrumentedSQLiteTraceLedger(configured)
 
     async def search(
         self,
