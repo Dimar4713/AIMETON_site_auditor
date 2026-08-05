@@ -33,6 +33,21 @@ class RetentionPeriodicRunner:
         self._stop = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
 
+    @property
+    def enabled(self) -> bool:
+        """Safe status projection for lifecycle and admin diagnostics."""
+        return self.config.enabled
+
+    @property
+    def interval_seconds(self) -> float:
+        """Configured cadence without exposing mutable runner internals."""
+        return self.config.interval_seconds
+
+    @property
+    def running(self) -> bool:
+        """Whether the background task is currently owned by the lifespan."""
+        return self._task is not None and not self._task.done()
+
     async def start(self) -> None:
         if not self.config.enabled or self._task is not None:
             return
