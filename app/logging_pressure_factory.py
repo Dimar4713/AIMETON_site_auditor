@@ -13,6 +13,7 @@ from app.logging_pressure_sampler import (
     LoggingPressureSampler,
     LoggingPressureSamplerConfig,
 )
+from app.trace_write_metrics import trace_pressure_callbacks
 
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -66,9 +67,14 @@ def build_logging_pressure_runtime(
         ),
         SQLiteLoggingPressureAudit(runtime_db_path),
     )
+    queue_depth, write_p95_ms = trace_pressure_callbacks(runtime_db_path)
     sampler = LoggingPressureSampler(
         owner,
-        LinuxResourceSnapshotProvider(disk_path=resolved.disk_path),
+        LinuxResourceSnapshotProvider(
+            disk_path=resolved.disk_path,
+            queue_depth=queue_depth,
+            write_p95_ms=write_p95_ms,
+        ),
         config=LoggingPressureSamplerConfig(
             enabled=resolved.enabled,
             interval_seconds=resolved.interval_seconds,
