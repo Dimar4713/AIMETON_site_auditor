@@ -48,6 +48,7 @@ from app.models import (
     SiteAnalysis,
 )
 from app.osint_tools import get_osint_tools
+from app.retention_runtime import build_retention_runner
 from app.runtime_core.api import router as runtime_router
 from app.scraper import FetchError, fetch_site
 from app.search_gateway import get_search_gateway, search_policy_from_env
@@ -79,8 +80,15 @@ from app.sef.report import (
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    async with mcp.session_manager.run(), admin_mcp.session_manager.run():
-        yield
+    runtime_db = os.getenv("AIMETON_RUNTIME_DB", "data/runtime-core.sqlite3")
+    retention_runner = build_retention_runner(runtime_db)
+    _app.state.retention_runner = retention_runner
+    await retention_runner.start()
+    try:
+        async with mcp.session_manager.run(), admin_mcp.session_manager.run():
+            yield
+    finally:
+        await retention_runner.stop()
 
 
 app = FastAPI(
