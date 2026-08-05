@@ -1,0 +1,68 @@
+name: AIMETON Command Router
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+concurrency:
+  group: aimeton-command-router
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: >-
+      github.event.issue.number == 337 &&
+      github.event.comment.user.login == 'Dimar4713' &&
+      startsWith(github.event.comment.body, '/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Parse and dispatch one command
+        uses: actions/github-script@v7
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const body = (process.env.COMMENT_BODY || '').trim();
+            const match = body.match(/^\/(deploy-stage|accept-admin-trace-stage|accept-aimeton-self-audit-stage)\s+([0-9a-f]{40})$/);
+            if (!match) {
+              core.setFailed('Unsupported command or invalid exact SHA.');
+              return;
+            }
+
+            const [, command, sha] = match;
+            const routes = {
+              'deploy-stage': {
+                workflow_id: 'deploy-stage.yml',
+                inputs: {commit_sha: sha},
+              },
+              'accept-admin-trace-stage': {
+                workflow_id: 'accept-admin-trace-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-aimeton-self-audit-stage': {
+                workflow_id: 'accept-aimeton-self-audit-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+            };
+
+            const route = routes[command];
+            await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+            });
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: route.workflow_id,
+              ref: 'main',
+              inputs: route.inputs,
+            });
+            core.info(`Dispatched ${route.workflow_id} for exact SHA ${sha}`);
