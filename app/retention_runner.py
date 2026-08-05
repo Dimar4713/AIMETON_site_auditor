@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
+from app.logging_pressure_factory import LoggingPressureRuntime
 from app.retention_service import RetentionLifecycleOwner
 
 
@@ -18,7 +19,7 @@ class RetentionRunnerConfig:
 
 
 class RetentionPeriodicRunner:
-    """Config-gated fail-open periodic runner owned by the application lifespan."""
+    """Single observability lifecycle owner for retention and pressure protection."""
 
     def __init__(
         self,
@@ -26,9 +27,11 @@ class RetentionPeriodicRunner:
         *,
         config: RetentionRunnerConfig,
         protected_mission_ids: Callable[[], Iterable[str]] | None = None,
+        pressure_runtime: LoggingPressureRuntime | None = None,
     ) -> None:
         self.owner = owner
         self.config = config
+        self.pressure_runtime = pressure_runtime
         self._protected_mission_ids = protected_mission_ids or (lambda: ())
         self._stop = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -45,14 +48,28 @@ class RetentionPeriodicRunner:
 
     @property
     def running(self) -> bool:
-        """Whether the background task is currently owned by the lifespan."""
+        """Whether the retention background task is currently owned by lifespan."""
         return self._task is not None and not self._task.done()
 
     def latest_cleanup(self) -> dict[str, object] | None:
-        """Return the compact durable audit summary without storage paths or payloads."""
+        """Return compact durable cleanup evidence without storage internals."""
         return self.owner.audit.latest()
 
+    def pressure_status(self) -> dict[str, object] | None:
+        """Return safe current pressure mode and latest durable transition."""
+        if self.pressure_runtime is None:
+            return None
+        status = self.pressure_runtime.owner.status()
+        return {
+            "enabled": self.pressure_runtime.sampler.enabled,
+            "running": self.pressure_runtime.sampler.running,
+            "mode": status.mode.value,
+            "latest_transition": status.latest_transition,
+        }
+
     async def start(self) -> None:
+        if self.pressure_runtime is not None:
+            await self.pressure_runtime.sampler.start()
         if not self.config.enabled or self._task is not None:
             return
         self._stop.clear()
@@ -60,16 +77,17 @@ class RetentionPeriodicRunner:
 
     async def stop(self) -> None:
         task = self._task
-        if task is None:
-            return
-        self._stop.set()
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        finally:
-            self._task = None
+        if task is not None:
+            self._stop.set()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._task = None
+        if self.pressure_runtime is not None:
+            await self.pressure_runtime.sampler.stop()
 
     async def _run(self) -> None:
         while not self._stop.is_set():
