@@ -57,10 +57,15 @@ async def test_gateway_persists_provider_stages_without_query_or_secret(tmp_path
         "provider_selected",
         "request_started",
         "response_received",
+        "normalized",
     ]
     assert all(event.provider == "searxng" for event in events)
     assert events[-1].state.value == "succeeded"
-    assert events[-1].counters["results_received"] == 1
+    assert events[-1].reason_code == "search_items_normalized"
+    assert events[-1].counters == {
+        "results_received": 1,
+        "results_normalized": 1,
+    }
     serialized = trace_path.read_bytes().decode("utf-8", errors="ignore").lower()
     assert "секретный пользовательский запрос" not in serialized
     assert "authorization" not in serialized
