@@ -16,6 +16,7 @@ from app.mission_orchestrator import (
     record_legacy_site_turn,
 )
 from app.models import CompanyIntelligenceRequest, HuntRequest
+from app.runtime_time import runtime_time_snapshot
 from app.scraper import fetch_site
 
 
@@ -140,6 +141,12 @@ async def start_search_mission(url: str) -> dict:
     return mission.model_dump(mode="json")
 
 
+@mcp.tool(name="runtime.time")
+async def runtime_time() -> dict:
+    """Return the canonical read-only AIMETON UTC time and trust state."""
+    return runtime_time_snapshot().model_dump(mode="json")
+
+
 @mcp.tool()
 async def hunt_companies(
     region: str,
@@ -184,7 +191,13 @@ async def security_profile() -> dict:
     return {
         "profile": "admin",
         "authentication": "bearer-token",
-        "public_tools": ["analyze_site", "hunt_companies", "company_intelligence"],
+        "public_tools": [
+            "analyze_site",
+            "start_search_mission",
+            "runtime.time",
+            "hunt_companies",
+            "company_intelligence",
+        ],
         "admin_tools": ["security_profile"],
         "rate_limit_enabled": True,
         "concurrency_limit_enabled": True,
