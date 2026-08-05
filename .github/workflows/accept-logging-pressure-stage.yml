@@ -64,6 +64,7 @@ jobs:
           set -Eeuo pipefail
           report="$RUNNER_TEMP/obs-trace-pressure-stage-acceptance.md"
           echo "report=$report" >> "$GITHUB_OUTPUT"
+          trap 'if [[ ! -s "$report" ]]; then printf "## OBS-TRACE logging pressure stage acceptance\n\nWorkflow %s failed before sanitized evidence was produced.\n" "$GITHUB_RUN_ID" > "$report"; fi' EXIT
           docker exec -i "$CONTAINER" python - <<'PY'
           from pathlib import Path
 
@@ -75,13 +76,13 @@ jobs:
           )
           from app.logging_pressure_audit import SQLiteLoggingPressureAudit
           from app.logging_pressure_runtime import LoggingPressureRuntimeOwner
-          from app.logging_pressure_runtime_factory import pressure_runtime_config_from_env
+          from app.logging_pressure_factory import logging_pressure_config_from_env
 
           db = Path('/app/data/obs-trace-pressure-acceptance.sqlite3')
           for path in db.parent.glob(db.name + '*'):
               path.unlink(missing_ok=True)
 
-          config = pressure_runtime_config_from_env({})
+          config = logging_pressure_config_from_env({})
           assert config.enabled is False
 
           owner = LoggingPressureRuntimeOwner(
