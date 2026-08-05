@@ -89,7 +89,7 @@ jobs:
               LoggingPressureController(policy=PressurePolicy(recovery_samples=1)),
               SQLiteLoggingPressureAudit(db),
           )
-          assert owner.status()['mode'] == LoggingMode.FULL.value
+          assert owner.status().mode is LoggingMode.FULL
 
           sequence = [
               (ResourceSnapshot(queue_depth=5_000), LoggingMode.THROTTLED),
@@ -107,7 +107,7 @@ jobs:
               observed.append(transition.current_mode.value)
               assert transition.current_mode is expected
 
-          latest = owner.status()['latest_transition']
+          latest = owner.status().latest_transition
           assert latest is not None
           assert latest['current_mode'] == LoggingMode.FULL.value
           assert latest['reason'] == 'recovery_stable'
