@@ -1,0 +1,234 @@
+name: Accept AIMETON Self Audit Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to audit
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-self-audit-stage
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 293 &&
+       startsWith(github.event.comment.body, '/accept-aimeton-self-audit-stage ') &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      REPORT: /tmp/aimeton-self-audit-${{ github.run_id }}.md
+
+    steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            expected='${{ inputs.expected_sha }}'
+          else
+            expected="${{ github.event.comment.body }}"
+            expected="${expected#'/accept-aimeton-self-audit-stage '}"
+          fi
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact deployed SHA and healthy stage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
+          [[ "$status" == healthy ]]
+
+      - name: Run one controlled AIMETON self-audit and summarize trace
+        id: audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          report="$REPORT"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          trap 'if [[ ! -s "$report" ]]; then printf "## AIMETON self-audit stage evidence\n\nWorkflow %s failed before sanitized evidence was produced.\n" "$GITHUB_RUN_ID" > "$report"; fi' EXIT
+          docker exec -i "$CONTAINER" python - <<'PY' > "$RUNNER_TEMP/aimeton-self-audit.json"
+          import json
+          import os
+          import sqlite3
+          import time
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+
+          base = 'http://127.0.0.1:5000'
+
+          def request(path, *, method='GET', payload=None):
+              body = None if payload is None else json.dumps(payload).encode('utf-8')
+              req = Request(base + path, data=body, method=method, headers={'Content-Type': 'application/json'})
+              try:
+                  with urlopen(req, timeout=30) as response:
+                      return response.status, json.loads(response.read().decode('utf-8'))
+              except HTTPError as exc:
+                  raw = exc.read().decode('utf-8')
+                  try:
+                      return exc.code, json.loads(raw)
+                  except json.JSONDecodeError:
+                      return exc.code, {'detail': 'non_json_error'}
+
+          code, started = request('/api/analyze/start', method='POST', payload={'url': 'https://aimeton.ru/'})
+          assert code == 202, (code, started)
+          mission_id = started['mission_id']
+          deadline = time.monotonic() + 420
+          status = None
+          events = []
+          while time.monotonic() < deadline:
+              status_code, status = request(started['status_url'])
+              events_code, events = request(started['events_url'])
+              assert status_code == 200
+              assert events_code == 200
+              if status['state'] in {'failed', 'blocked', 'degraded', 'completed'}:
+                  break
+              time.sleep(2)
+          assert status is not None
+          assert status['state'] in {'failed', 'blocked', 'degraded', 'completed'}, status
+
+          db_path = Path(os.getenv('AIMETON_RUNTIME_DB', '/app/data/runtime-core.sqlite3'))
+          assert db_path.exists()
+          db = sqlite3.connect(db_path)
+          db.row_factory = sqlite3.Row
+          rows = db.execute(
+              '''SELECT attempt_id, sequence, component, operation, state, reason_code,
+                        provider, vertical, duration_ms, counters_json
+                 FROM mission_trace_events
+                 WHERE mission_id = ? ORDER BY attempt_id, sequence''',
+              (mission_id,),
+          ).fetchall()
+          assert rows, 'mission trace missing'
+
+          providers = {}
+          for row in rows:
+              provider = row['provider']
+              if not provider:
+                  continue
+              entry = providers.setdefault(provider, {
+                  'selected': False, 'called': False, 'returned': False,
+                  'accepted': False, 'used_in_report': False,
+                  'terminal_reason': None, 'results_received': 0,
+                  'evidence_accepted': 0, 'evidence_rejected': 0,
+              })
+              op = row['operation']
+              entry['selected'] |= op in {'provider_selected', 'selected'}
+              entry['called'] |= op in {'request_started', 'provider_called', 'request_sent'}
+              entry['returned'] |= op in {'response_received', 'provider_returned', 'results_received'}
+              entry['accepted'] |= op in {'evidence_accepted', 'results_accepted', 'accepted'}
+              entry['used_in_report'] |= op in {'used_in_report', 'report_evidence_used', 'report_used'}
+              if row['state'] in {'failed', 'blocked', 'degraded', 'cancelled'}:
+                  entry['terminal_reason'] = row['reason_code']
+              counters = json.loads(row['counters_json'])
+              for key in ('results_received', 'evidence_accepted', 'evidence_rejected'):
+                  entry[key] = max(entry[key], int(counters.get(key, 0)))
+
+          reasons = {}
+          for row in rows:
+              key = row['reason_code']
+              reasons[key] = reasons.get(key, 0) + 1
+
+          safe = {
+              'mission_id_prefix': mission_id.split('_', 1)[0],
+              'terminal_state': status['state'],
+              'public_event_count': len(events),
+              'trace_event_count': len(rows),
+              'attempt_count': len({row['attempt_id'] for row in rows}),
+              'providers': providers,
+              'reason_counts': dict(sorted(reasons.items())),
+          }
+          print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          PY
+          python - "$RUNNER_TEMP/aimeton-self-audit.json" "$report" '${{ steps.expected.outputs.sha }}' <<'PY'
+          import json
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          data = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+          lines = [
+              '## AIMETON self-audit stage evidence', '',
+              f"- timestamp UTC: {datetime.now(timezone.utc).isoformat()}",
+              f"- exact deployed source SHA: `{sys.argv[3]}`",
+              '- target: `https://aimeton.ru/`',
+              f"- terminal state: `{data['terminal_state']}`",
+              f"- attempts: {data['attempt_count']}",
+              f"- trace events: {data['trace_event_count']}",
+              f"- public progress events: {data['public_event_count']}", '',
+              '### Provider waterfall', '',
+              '| Provider | selected | called | returned | accepted | used in report | results | accepted evidence | rejected evidence | terminal reason |',
+              '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|',
+          ]
+          for provider, entry in sorted(data['providers'].items()):
+              yes = lambda value: '✅' if value else '—'
+              lines.append(
+                  f"| `{provider}` | {yes(entry['selected'])} | {yes(entry['called'])} | "
+                  f"{yes(entry['returned'])} | {yes(entry['accepted'])} | {yes(entry['used_in_report'])} | "
+                  f"{entry['results_received']} | {entry['evidence_accepted']} | {entry['evidence_rejected']} | "
+                  f"`{entry['terminal_reason'] or 'none'}` |"
+              )
+          if not data['providers']:
+              lines.append('| _none_ | — | — | — | — | — | 0 | 0 | 0 | `no_provider_trace` |')
+          lines += ['', '### Typed reason counts', '']
+          for reason, count in data['reason_counts'].items():
+              lines.append(f"- `{reason}`: {count}")
+          lines += ['', '### Safety', '',
+              '- one controlled stage mission only',
+              '- no raw provider payloads, prompts, credentials, cookies or absolute paths published',
+              '- no configuration, budget or provider activation changed',
+          ]
+          Path(sys.argv[2]).write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aimeton-self-audit-${{ github.run_id }}
+          path: ${{ steps.audit.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to OBS-TRACE-01
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.audit.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = process.env.REPORT_PATH;
+            const body = path && fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `## AIMETON self-audit stage evidence\n\nWorkflow ${context.runId} failed before sanitized evidence was produced.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 293,
+              body: body.slice(0, 60000),
+            });
