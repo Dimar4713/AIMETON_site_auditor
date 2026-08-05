@@ -160,7 +160,7 @@ jobs:
           }
           print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
           PY
-          python - "$RUNNER_TEMP/aimeton-self-audit.json" "$report" '${{ steps.expected.outputs.sha }}' <<'PY'
+          python3 - "$RUNNER_TEMP/aimeton-self-audit.json" "$report" '${{ steps.expected.outputs.sha }}' <<'PY'
           import json
           import sys
           from datetime import datetime, timezone
