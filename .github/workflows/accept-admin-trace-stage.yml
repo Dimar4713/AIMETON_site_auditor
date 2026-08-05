@@ -57,7 +57,7 @@ jobs:
           deployed="$(cat app-source-sha.txt)"
           [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
 
-      - name: Prove admin trace diagnostics contract
+      - name: Prove admin trace diagnostics and provider waterfall contract
         id: verify
         shell: bash
         run: |
@@ -72,7 +72,8 @@ jobs:
           from fastapi import FastAPI
           from fastapi.testclient import TestClient
 
-          from app.admin_trace_api import router
+          from app.admin_trace_api import router as trace_router
+          from app.admin_trace_waterfall_api import router as waterfall_router
           from app.auth import User, UserRole
           from app.auth_api import require_admin
           from app.trace_ledger import SQLiteTraceLedger, TraceEventCreate, TraceState
@@ -82,27 +83,57 @@ jobs:
               item.unlink(missing_ok=True)
 
           ledger = SQLiteTraceLedger(path)
-          ledger.append(TraceEventCreate(
-              mission_id='acceptance-mission', attempt_id='acceptance-attempt',
-              component='search', operation='provider_selected',
-              state=TraceState.STARTED, reason_code='selected',
-              summary='Provider selected', provider='searxng',
-              counters={'requested': 1},
-              metadata={'authorization': 'must-not-leak', 'query_kind': 'company'},
-              event_key='acceptance-event-1',
-          ))
-          ledger.append(TraceEventCreate(
-              mission_id='acceptance-mission', attempt_id='acceptance-attempt',
-              component='search', operation='response_received',
-              state=TraceState.SUCCEEDED, reason_code='results_received',
-              summary='Results received', provider='searxng', duration_ms=10,
-              counters={'results_received': 2}, event_key='acceptance-event-2',
-          ))
+          events = [
+              TraceEventCreate(
+                  mission_id='acceptance-mission', attempt_id='acceptance-attempt',
+                  component='search', operation='provider_selected',
+                  state=TraceState.STARTED, reason_code='selected',
+                  summary='Provider selected', provider='searxng',
+                  counters={'requested': 1},
+                  metadata={'authorization': 'must-not-leak', 'query_kind': 'company'},
+                  event_key='acceptance-event-1',
+              ),
+              TraceEventCreate(
+                  mission_id='acceptance-mission', attempt_id='acceptance-attempt',
+                  component='search', operation='request_started',
+                  state=TraceState.STARTED, reason_code='request_started',
+                  summary='Provider request started', provider='searxng',
+                  counters={'requested': 1}, event_key='acceptance-event-2',
+              ),
+              TraceEventCreate(
+                  mission_id='acceptance-mission', attempt_id='acceptance-attempt',
+                  component='search', operation='response_received',
+                  state=TraceState.SUCCEEDED, reason_code='results_received',
+                  summary='Results received', provider='searxng', duration_ms=10,
+                  counters={'results_received': 2}, event_key='acceptance-event-3',
+              ),
+              TraceEventCreate(
+                  mission_id='acceptance-mission', attempt_id='acceptance-attempt',
+                  component='evidence', operation='evidence_accepted',
+                  state=TraceState.SUCCEEDED, reason_code='accepted',
+                  summary='Evidence accepted', provider='searxng',
+                  counters={'evidence_accepted': 1}, event_key='acceptance-event-4',
+              ),
+              TraceEventCreate(
+                  mission_id='acceptance-mission', attempt_id='acceptance-attempt',
+                  component='report', operation='used_in_report',
+                  state=TraceState.SUCCEEDED, reason_code='used_in_report',
+                  summary='Evidence used in report', provider='searxng',
+                  counters={'evidence_accepted': 1}, event_key='acceptance-event-5',
+              ),
+          ]
+          for event in events:
+              ledger.append(event)
 
           app = FastAPI()
-          app.include_router(router)
+          app.include_router(trace_router)
+          app.include_router(waterfall_router)
           unauth = TestClient(app).get('/api/admin/missions/acceptance-mission/trace/attempts')
           assert unauth.status_code in {401, 403}
+          unauth_waterfall = TestClient(app).get(
+              '/api/admin/missions/acceptance-mission/trace/attempts/acceptance-attempt/provider-waterfall'
+          )
+          assert unauth_waterfall.status_code in {401, 403}
 
           app.dependency_overrides[require_admin] = lambda: User(
               id=1, username='admin', role=UserRole.ADMIN, is_active=True,
@@ -110,16 +141,36 @@ jobs:
           client = TestClient(app)
           attempts = client.get('/api/admin/missions/acceptance-mission/trace/attempts')
           assert attempts.status_code == 200
-          assert attempts.json()[0]['event_count'] == 2
+          assert attempts.json()[0]['event_count'] == 5
           assert attempts.json()[0]['terminal_state'] == 'succeeded'
 
           timeline = client.get('/api/admin/missions/acceptance-mission/trace/attempts/acceptance-attempt')
           assert timeline.status_code == 200
           payload = timeline.json()
-          assert [event['sequence'] for event in payload] == [1, 2]
+          assert [event['sequence'] for event in payload] == [1, 2, 3, 4, 5]
           assert payload[0]['metadata']['authorization'] == '[REDACTED]'
           assert 'must-not-leak' not in timeline.text
           assert 'admin-trace-acceptance.sqlite3' not in timeline.text
+
+          waterfall = client.get(
+              '/api/admin/missions/acceptance-mission/trace/attempts/acceptance-attempt/provider-waterfall'
+          )
+          assert waterfall.status_code == 200
+          providers = waterfall.json()
+          assert len(providers) == 1
+          provider = providers[0]
+          assert provider['provider'] == 'searxng'
+          assert [provider[name]['reached'] for name in (
+              'selected', 'called', 'returned', 'accepted', 'used_in_report'
+          )] == [True, True, True, True, True]
+          assert [provider[name]['sequence'] for name in (
+              'selected', 'called', 'returned', 'accepted', 'used_in_report'
+          )] == [1, 2, 3, 4, 5]
+          assert provider['returned']['counters']['results_received'] == 2
+          assert provider['accepted']['counters']['evidence_accepted'] == 1
+          assert provider['terminal_reason'] is None
+          assert 'must-not-leak' not in waterfall.text
+          assert 'admin-trace-acceptance.sqlite3' not in waterfall.text
 
           bundle = client.get('/api/admin/missions/acceptance-mission/trace/attempts/acceptance-attempt/bundle.jsonl?limit=1')
           assert bundle.status_code == 200
@@ -128,6 +179,12 @@ jobs:
           assert len(lines) == 1
           assert json.loads(lines[0])['sequence'] == 1
           assert 'must-not-leak' not in bundle.text
+
+          ui_source = Path('/app/static/admin-workspace.js').read_text(encoding='utf-8')
+          assert 'provider-waterfall' in ui_source
+          assert 'encodeURIComponent' in ui_source
+          for forbidden in ('password_hash', 'authorization', 'runtime-core.sqlite3'):
+              assert forbidden not in ui_source
           PY
           {
             echo '## Admin trace stage acceptance'
@@ -135,14 +192,16 @@ jobs:
             echo "- workflow run: $GITHUB_RUN_ID"
             echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "- exact deployed source SHA: \`${{ steps.expected.outputs.sha }}\`"
-            echo '- ordinary user denied internal diagnostics: ✅'
+            echo '- ordinary user denied internal diagnostics and waterfall: ✅'
             echo '- owner/admin attempt list and ordered timeline: ✅'
+            echo '- provider waterfall selected → called → returned → accepted → used_in_report: ✅'
+            echo '- minimal admin waterfall UI contract and encoded identifiers: ✅'
             echo '- safe bounded JSONL bundle: ✅'
             echo '- redaction and no runtime path exposure: ✅'
             echo '- dedicated synthetic SQLite only; client data touched: no'
             echo
             echo '### Verdict'
-            echo '✅ Exact-SHA admin trace diagnostics acceptance passed.'
+            echo '✅ Exact-SHA admin trace diagnostics and provider waterfall acceptance passed.'
           } > "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
 
