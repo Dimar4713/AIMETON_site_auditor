@@ -58,7 +58,7 @@ def test_initial_event_is_sanitized_actionable_and_umel_canonical() -> None:
     assert event["state"] == "queued"
     assert event["message"] == "Задача принята и поставлена в очередь."
     assert event["next_action"] == "Начать подключение к сайту."
-    assert event["timestamp"].endswith("+00:00")
+    assert event["timestamp"].endswith("Z")
     serialized = str(event).lower()
     assert "secret" not in serialized
     assert "prompt" not in serialized
