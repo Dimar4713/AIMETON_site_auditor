@@ -56,11 +56,11 @@ def test_provider_waterfall_is_persisted_idempotently_with_canonical_stages(tmp_
 
     assert [event.event_id for event in duplicate] == [event.event_id for event in first]
     events = ledger.list_attempt("mission-1", "attempt-1")
-    assert [event.sequence for event in events] == list(range(1, 9))
+    assert [event.sequence for event in events] == list(range(1, 8))
     assert [event.operation for event in events] == [
         "provider_selected", "request_started", "response_received",
         "provider_selected", "request_started", "response_received",
-        "provider_selected", "provider_skipped",
+        "provider_skipped",
     ]
 
     yandex_returned = events[2]
@@ -69,6 +69,7 @@ def test_provider_waterfall_is_persisted_idempotently_with_canonical_stages(tmp_
     assert yandex_returned.counters["results_received"] == 0
 
     searxng_selected = events[3]
+    assert searxng_selected.reason_code == "provider_selected"
     assert searxng_selected.metadata == {
         "cost_amount": "0",
         "cost_currency": "USD",
@@ -77,9 +78,14 @@ def test_provider_waterfall_is_persisted_idempotently_with_canonical_stages(tmp_
     }
     assert events[5].counters["results_received"] == 4
 
-    tavily_skipped = events[7]
+    tavily_skipped = events[6]
     assert tavily_skipped.state.value == "skipped"
     assert tavily_skipped.reason_code == "policy_blocked"
+    assert tavily_skipped.metadata["final_selected"] is False
+    assert not any(
+        event.provider == "tavily" and event.operation == "provider_selected"
+        for event in events
+    )
 
     serialized = str([event.model_dump() for event in events]).lower()
     assert "query" not in serialized.replace("query_index", "")
