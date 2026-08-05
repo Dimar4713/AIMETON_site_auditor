@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Mapping
 
 from app.retention_audit import SQLiteRetentionAuditLedger
-from app.retention_runner import RetentionPeriodicRunner
+from app.retention_runner import RetentionPeriodicRunner, RetentionRunnerConfig
 from app.retention_service import RetentionLifecycleOwner
 from app.retention_worker import RetentionCleanupWorker
 from app.trace_ledger import SQLiteTraceLedger
@@ -64,6 +64,8 @@ def build_retention_runner(
     owner = RetentionLifecycleOwner(worker, SQLiteRetentionAuditLedger(path))
     return RetentionPeriodicRunner(
         owner,
-        enabled=resolved.enabled,
-        interval_seconds=resolved.interval_seconds,
+        config=RetentionRunnerConfig(
+            enabled=resolved.enabled,
+            interval_seconds=resolved.interval_seconds,
+        ),
     )
