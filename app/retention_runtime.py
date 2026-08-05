@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Mapping
 
+from app.logging_pressure_factory import build_logging_pressure_runtime
 from app.retention_audit import SQLiteRetentionAuditLedger
 from app.retention_runner import RetentionPeriodicRunner, RetentionRunnerConfig
 from app.retention_service import RetentionLifecycleOwner
@@ -48,11 +49,7 @@ def build_retention_runner(
     *,
     config: RetentionRuntimeConfig | None = None,
 ) -> RetentionPeriodicRunner:
-    """Build the one retention runner used by the application lifecycle.
-
-    The returned runner remains disabled unless explicitly enabled in config.
-    SQLite trace and audit ledgers intentionally share the durable runtime DB.
-    """
+    """Build the one observability runner used by the application lifecycle."""
     resolved = config or retention_runtime_config_from_env()
     path = Path(runtime_db_path)
     worker = RetentionCleanupWorker(
@@ -68,4 +65,5 @@ def build_retention_runner(
             enabled=resolved.enabled,
             interval_seconds=resolved.interval_seconds,
         ),
+        pressure_runtime=build_logging_pressure_runtime(path),
     )
