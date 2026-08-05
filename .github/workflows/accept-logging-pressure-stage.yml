@@ -1,0 +1,170 @@
+name: Accept Logging Pressure Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to accept
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-accept-logging-pressure-stage
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 293 &&
+       startsWith(github.event.comment.body, '/accept-logging-pressure-stage ') &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      ACCEPTANCE_DB: /app/data/obs-trace-pressure-acceptance.sqlite3
+
+    steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            expected='${{ inputs.expected_sha }}'
+          else
+            expected="${{ github.event.comment.body }}"
+            expected="${expected#'/accept-logging-pressure-stage '}"
+          fi
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact deployed SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
+
+      - name: Prove disabled default and synthetic transitions
+        id: verify
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/obs-trace-pressure-stage-acceptance.md"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          from pathlib import Path
+
+          from app.logging_pressure import (
+              LoggingMode,
+              LoggingPressureController,
+              PressurePolicy,
+              ResourceSnapshot,
+          )
+          from app.logging_pressure_audit import SQLiteLoggingPressureAudit
+          from app.logging_pressure_runtime import LoggingPressureRuntimeOwner
+          from app.logging_pressure_runtime_factory import pressure_runtime_config_from_env
+
+          db = Path('/app/data/obs-trace-pressure-acceptance.sqlite3')
+          for path in db.parent.glob(db.name + '*'):
+              path.unlink(missing_ok=True)
+
+          config = pressure_runtime_config_from_env({})
+          assert config.enabled is False
+
+          owner = LoggingPressureRuntimeOwner(
+              LoggingPressureController(policy=PressurePolicy(recovery_samples=1)),
+              SQLiteLoggingPressureAudit(db),
+          )
+          assert owner.status()['mode'] == LoggingMode.FULL.value
+
+          sequence = [
+              (ResourceSnapshot(queue_depth=5_000), LoggingMode.THROTTLED),
+              (ResourceSnapshot(queue_depth=20_000), LoggingMode.MINIMAL),
+              (ResourceSnapshot(disk_free_percent=4.0), LoggingMode.EMERGENCY_ONLY),
+              (ResourceSnapshot(storage_failed=True), LoggingMode.WRITE_DISABLED),
+              (ResourceSnapshot(), LoggingMode.EMERGENCY_ONLY),
+              (ResourceSnapshot(), LoggingMode.MINIMAL),
+              (ResourceSnapshot(), LoggingMode.THROTTLED),
+              (ResourceSnapshot(), LoggingMode.FULL),
+          ]
+          observed = []
+          for snapshot, expected in sequence:
+              transition = owner.evaluate(snapshot)
+              observed.append(transition.current_mode.value)
+              assert transition.current_mode is expected
+
+          latest = owner.status()['latest_transition']
+          assert latest is not None
+          assert latest['current_mode'] == LoggingMode.FULL.value
+          assert latest['reason'] == 'recovery_stable'
+          assert observed == [
+              'throttled', 'minimal', 'emergency_only', 'write_disabled',
+              'emergency_only', 'minimal', 'throttled', 'full',
+          ]
+          PY
+          {
+            echo '## OBS-TRACE logging pressure stage acceptance'
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- exact deployed source SHA: \`${{ steps.expected.outputs.sha }}\`"
+            echo '- live pressure sampler default remains disabled: ✅'
+            echo '- synthetic FULL → THROTTLED → MINIMAL → EMERGENCY_ONLY → WRITE_DISABLED: ✅'
+            echo '- deterministic one-step recovery back to FULL: ✅'
+            echo '- transition audit used only a dedicated acceptance SQLite file: ✅'
+            echo '- production/client data, credentials, tokens and raw payloads collected: no'
+            echo
+            echo '### Verdict'
+            echo '✅ Isolated logging pressure stage acceptance passed.'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup dedicated acceptance files
+        if: always()
+        shell: bash
+        run: |
+          docker exec -i "$CONTAINER" sh -lc 'rm -f /app/data/obs-trace-pressure-acceptance.sqlite3 /app/data/obs-trace-pressure-acceptance.sqlite3-*' || true
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-trace-pressure-stage-acceptance-${{ github.run_id }}
+          path: ${{ steps.verify.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to OBS-TRACE-01
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.verify.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = process.env.REPORT_PATH;
+            const body = path && fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `## OBS-TRACE logging pressure stage acceptance\n\nWorkflow ${context.runId} failed before sanitized evidence was produced.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 293,
+              body: body.slice(0, 60000),
+            });
