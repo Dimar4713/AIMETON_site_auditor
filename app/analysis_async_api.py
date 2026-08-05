@@ -17,6 +17,7 @@ from app.mission_orchestrator import (
 )
 from app.models import AnalyzeRequest
 from app.scraper import FetchError, fetch_site
+from app.trace_context import bind_trace_identity
 
 
 router = APIRouter(prefix="/api/analyze", tags=["analysis-runtime"])
@@ -124,11 +125,12 @@ async def _run_analysis(
             heartbeat=True,
             next_action="Синтезировать evidence и AI-возможности.",
         )
-        result = await run_enriched_site_analysis(
-            page["final_url"],
-            page["title"],
-            page["text"],
-        )
+        with bind_trace_identity(mission_id, analysis_id):
+            result = await run_enriched_site_analysis(
+                page["final_url"],
+                page["title"],
+                page["text"],
+            )
         record_legacy_site_turn(
             orchestrator,
             mission_id,
