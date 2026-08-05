@@ -25,11 +25,28 @@ class RetentionCleanupProjection(BaseModel):
     stopped_reason: str
 
 
+class LoggingPressureTransitionProjection(BaseModel):
+    transition_id: str
+    previous_mode: str
+    current_mode: str
+    reason: str
+    recovery_samples: int
+    created_at: str
+
+
+class LoggingPressureStatusProjection(BaseModel):
+    enabled: bool
+    running: bool
+    mode: str
+    latest_transition: LoggingPressureTransitionProjection | None = None
+
+
 class RetentionStatusProjection(BaseModel):
     enabled: bool
     running: bool
     interval_seconds: float
     latest_cleanup: RetentionCleanupProjection | None = None
+    logging_pressure: LoggingPressureStatusProjection | None = None
 
 
 @router.get("/admin/workspace", include_in_schema=False)
@@ -59,6 +76,7 @@ def admin_retention_status(
             detail={"reason": "retention_runner_unavailable"},
         )
     latest = runner.latest_cleanup()
+    pressure = runner.pressure_status()
     return RetentionStatusProjection(
         enabled=runner.enabled,
         running=runner.running,
@@ -66,6 +84,11 @@ def admin_retention_status(
         latest_cleanup=(
             RetentionCleanupProjection.model_validate(latest)
             if latest is not None
+            else None
+        ),
+        logging_pressure=(
+            LoggingPressureStatusProjection.model_validate(pressure)
+            if pressure is not None
             else None
         ),
     )
