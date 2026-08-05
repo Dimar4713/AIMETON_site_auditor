@@ -16,8 +16,10 @@ from app.mission_orchestrator import (
     record_legacy_site_turn,
 )
 from app.models import AnalyzeRequest
+from app.runtime_time import runtime_time_snapshot
 from app.scraper import FetchError, fetch_site
 from app.trace_context import bind_trace_identity
+from app.umel import get_umel_event
 
 
 router = APIRouter(prefix="/api/analyze", tags=["analysis-runtime"])
@@ -41,6 +43,8 @@ class AnalysisEvent(ApiModel):
     sequence: int
     timestamp: datetime
     phase: str
+    event_code: str
+    icon: str
     state: Literal[
         "queued",
         "running",
@@ -57,10 +61,16 @@ class AnalysisEvent(ApiModel):
     next_action: str | None = None
 
 
+def _canonical_now() -> datetime:
+    value = runtime_time_snapshot().utc.replace("Z", "+00:00")
+    return datetime.fromisoformat(value).astimezone(UTC)
+
+
 def _append_event(
     analysis_id: str,
     *,
     phase: str,
+    event_code: str,
     state: str,
     icon_key: str,
     message: str,
@@ -68,14 +78,20 @@ def _append_event(
     heartbeat: bool = False,
     next_action: str | None = None,
 ) -> None:
+    umel = get_umel_event(event_code)
+    if umel is None:
+        raise ValueError(f"unknown_umel_event:{event_code}")
+    now = _canonical_now()
     with _LOCK:
         record = _ANALYSES[analysis_id]
         events = record["events"]
         events.append(
             AnalysisEvent(
                 sequence=len(events) + 1,
-                timestamp=datetime.now(UTC),
+                timestamp=now,
                 phase=phase,
+                event_code=event_code,
+                icon=umel.icon,
                 state=state,
                 icon_key=icon_key,
                 message=message,
@@ -85,7 +101,7 @@ def _append_event(
             ).model_dump(mode="json")
         )
         record["state"] = state
-        record["updated_at"] = datetime.now(UTC).isoformat()
+        record["updated_at"] = now.isoformat()
 
 
 async def _run_analysis(
@@ -100,6 +116,7 @@ async def _run_analysis(
         _append_event(
             analysis_id,
             phase="site_fetch_started",
+            event_code="provider.requested",
             state="running",
             icon_key="globe",
             message="Подключаемся к сайту.",
@@ -111,6 +128,7 @@ async def _run_analysis(
         _append_event(
             analysis_id,
             phase="site_fetch_completed",
+            event_code="data.received",
             state="running",
             icon_key="check",
             message="Сайт получен. Восстанавливаем профиль компании.",
@@ -119,6 +137,7 @@ async def _run_analysis(
         _append_event(
             analysis_id,
             phase="company_profile_started",
+            event_code="picture.assembled",
             state="running",
             icon_key="building",
             message="Восстанавливаем профиль компании и коммерческий контекст.",
@@ -144,6 +163,7 @@ async def _run_analysis(
         _append_event(
             analysis_id,
             phase="completed",
+            event_code="mission.completed",
             state="completed",
             icon_key="check-circle",
             message="Анализ завершён. Результат готов.",
@@ -158,6 +178,7 @@ async def _run_analysis(
         _append_event(
             analysis_id,
             phase="failed",
+            event_code="mission.failed",
             state="failed",
             icon_key="alert-triangle",
             message="Анализ не завершён.",
@@ -179,7 +200,7 @@ async def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks)
     )
     mission_id = mission.contract.mission_id
     analysis_id = mission.contract.analysis_id
-    now = datetime.now(UTC).isoformat()
+    now = _canonical_now().isoformat()
     with _LOCK:
         _ANALYSES[analysis_id] = {
             "analysis_id": analysis_id,
@@ -193,6 +214,7 @@ async def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks)
     _append_event(
         analysis_id,
         phase="mission_accepted",
+        event_code="mission.received",
         state="queued",
         icon_key="inbox",
         message="Задача принята и поставлена в очередь.",

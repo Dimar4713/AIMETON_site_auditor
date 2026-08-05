@@ -38,7 +38,7 @@ def test_start_returns_immediate_identifiers_and_relative_urls() -> None:
     assert status["result"] is None
 
 
-def test_initial_event_is_sanitized_and_actionable() -> None:
+def test_initial_event_is_sanitized_actionable_and_umel_canonical() -> None:
     background_tasks = BackgroundTasks()
     response = asyncio.run(
         start_analysis(
@@ -52,9 +52,13 @@ def test_initial_event_is_sanitized_and_actionable() -> None:
     assert len(events) == 1
     event = events[0]
     assert event["phase"] == "mission_accepted"
+    assert event["event_code"] == "mission.received"
+    assert event["icon"] == "🧭"
+    assert event["icon_key"] == "inbox"
     assert event["state"] == "queued"
     assert event["message"] == "Задача принята и поставлена в очередь."
     assert event["next_action"] == "Начать подключение к сайту."
+    assert event["timestamp"].endswith("Z")
     serialized = str(event).lower()
     assert "secret" not in serialized
     assert "prompt" not in serialized
