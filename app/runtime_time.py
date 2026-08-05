@@ -55,31 +55,29 @@ def _safe_status_path() -> Path | None:
     return path
 
 
-def _load_trusted_status() -> dict[str, object] | None:
-    path = _safe_status_path()
-    if path is None or not path.is_file():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return payload
+def _fallback(utc: str, unix_ms: int, reason_code: str) -> RuntimeTimeSnapshot:
+    return RuntimeTimeSnapshot(
+        utc=utc,
+        unix_ms=unix_ms,
+        source="system_clock",
+        synced=False,
+        quality="fallback",
+        reason_code=reason_code,
+    )
 
 
 def runtime_time_snapshot() -> RuntimeTimeSnapshot:
     utc, unix_ms = _utc_now()
-    payload = _load_trusted_status()
-    if payload is None:
-        return RuntimeTimeSnapshot(
-            utc=utc,
-            unix_ms=unix_ms,
-            source="system_clock",
-            synced=False,
-            quality="fallback",
-            reason_code="canonical_status_unavailable",
-        )
+    path = _safe_status_path()
+    if path is None or not path.is_file():
+        return _fallback(utc, unix_ms, "canonical_status_unavailable")
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return _fallback(utc, unix_ms, "canonical_status_invalid")
+    if not isinstance(payload, dict):
+        return _fallback(utc, unix_ms, "canonical_status_invalid")
 
     try:
         synced = bool(payload["synced"])
@@ -87,14 +85,7 @@ def runtime_time_snapshot() -> RuntimeTimeSnapshot:
         stratum = int(payload["stratum"])
         source = str(payload.get("source", "chrony"))
     except (KeyError, TypeError, ValueError):
-        return RuntimeTimeSnapshot(
-            utc=utc,
-            unix_ms=unix_ms,
-            source="system_clock",
-            synced=False,
-            quality="fallback",
-            reason_code="canonical_status_invalid",
-        )
+        return _fallback(utc, unix_ms, "canonical_status_invalid")
 
     max_offset = float(os.getenv("AIMETON_TIME_MAX_OFFSET_MS", "50"))
     max_stratum = int(os.getenv("AIMETON_TIME_MAX_STRATUM", "4"))
