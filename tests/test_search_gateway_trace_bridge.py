@@ -56,10 +56,10 @@ def test_provider_waterfall_is_persisted_idempotently_with_canonical_stages(tmp_
 
     assert [event.event_id for event in duplicate] == [event.event_id for event in first]
     events = ledger.list_attempt("mission-1", "attempt-1")
-    assert [event.sequence for event in events] == list(range(1, 8))
+    assert [event.sequence for event in events] == list(range(1, 9))
     assert [event.operation for event in events] == [
         "provider_selected", "request_started", "response_received",
-        "provider_selected", "request_started", "response_received",
+        "provider_selected", "request_started", "response_received", "normalized",
         "provider_skipped",
     ]
 
@@ -78,7 +78,15 @@ def test_provider_waterfall_is_persisted_idempotently_with_canonical_stages(tmp_
     }
     assert events[5].counters["results_received"] == 4
 
-    tavily_skipped = events[6]
+    normalized = events[6]
+    assert normalized.reason_code == "search_items_normalized"
+    assert normalized.state.value == "succeeded"
+    assert normalized.counters == {
+        "results_received": 4,
+        "results_normalized": 4,
+    }
+
+    tavily_skipped = events[7]
     assert tavily_skipped.state.value == "skipped"
     assert tavily_skipped.reason_code == "policy_blocked"
     assert tavily_skipped.metadata["final_selected"] is False
