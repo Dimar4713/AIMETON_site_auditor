@@ -93,7 +93,7 @@ def test_admin_trace_jsonl_is_bounded_safe_projection(monkeypatch, tmp_path) -> 
     monkeypatch.setenv("AIMETON_RUNTIME_DB", str(path))
     _seed(path)
     response = TestClient(_app(admin=True)).get(
-        "/api/admin/missions/mission-1/trace/attempts/attempt-1.jsonl?limit=1"
+        "/api/admin/missions/mission-1/trace/attempts/attempt-1/bundle.jsonl?limit=1"
     )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/x-ndjson")
