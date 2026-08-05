@@ -22,6 +22,7 @@ from app.runtime_time import (
     runtime_time_health,
     runtime_time_snapshot,
 )
+from app.umel import UMEL_VERSION, UmelEvent, list_umel_events
 
 router = APIRouter(prefix="/api/runtime", tags=["runtime-core"])
 store = RuntimeStore()
@@ -40,6 +41,14 @@ def runtime_time() -> RuntimeTimeSnapshot:
 @router.get("/time/health", response_model=RuntimeTimeHealth)
 def runtime_time_status() -> RuntimeTimeHealth:
     return runtime_time_health()
+
+
+@router.get("/umel")
+def runtime_umel_registry() -> dict[str, object]:
+    return {
+        "version": UMEL_VERSION,
+        "events": [event.model_dump(mode="json") for event in list_umel_events()],
+    }
 
 
 @router.post("/tasks", response_model=Task, status_code=201)
