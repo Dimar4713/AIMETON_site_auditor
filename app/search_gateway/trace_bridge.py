@@ -137,6 +137,29 @@ def persist_provider_waterfall(
                     runtime_version=runtime_version,
                 )
             )
+            if row["state"] == AttemptState.SUCCEEDED.value and row["results_received"] > 0:
+                events.append(
+                    _append_stage(
+                        ledger,
+                        mission_id=mission_id,
+                        attempt_id=attempt_id,
+                        provider=provider,
+                        provider_index=provider_index,
+                        query_index=query_index,
+                        operation="normalized",
+                        state=TraceState.SUCCEEDED,
+                        reason_code="search_items_normalized",
+                        summary=f"Provider {provider} results normalized by search gateway",
+                        counters={
+                            "results_received": row["results_received"],
+                            "results_normalized": row["results_received"],
+                        },
+                        metadata=common_metadata,
+                        vertical=vertical,
+                        deployed_sha=deployed_sha,
+                        runtime_version=runtime_version,
+                    )
+                )
         else:
             events.append(
                 _append_stage(
