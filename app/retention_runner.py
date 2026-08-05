@@ -48,6 +48,10 @@ class RetentionPeriodicRunner:
         """Whether the background task is currently owned by the lifespan."""
         return self._task is not None and not self._task.done()
 
+    def latest_cleanup(self) -> dict[str, object] | None:
+        """Return the compact durable audit summary without storage paths or payloads."""
+        return self.owner.audit.latest()
+
     async def start(self) -> None:
         if not self.config.enabled or self._task is not None:
             return
