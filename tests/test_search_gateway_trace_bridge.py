@@ -24,10 +24,10 @@ def attempt(provider: str, state: AttemptState, count: int, reason=None):
     )
 
 
-def test_provider_waterfall_is_persisted_idempotently_without_query(tmp_path):
+def test_provider_waterfall_is_persisted_idempotently_with_canonical_stages(tmp_path):
     diagnostics = SearchDiagnostics(
         state=GatewayState.DEGRADED,
-        selected_provider="yandex",
+        selected_provider="searxng",
         fallback_used=True,
         attempts=[
             attempt("yandex", AttemptState.EMPTY, 0, FallbackReason.EMPTY_RESULTS),
@@ -56,17 +56,31 @@ def test_provider_waterfall_is_persisted_idempotently_without_query(tmp_path):
 
     assert [event.event_id for event in duplicate] == [event.event_id for event in first]
     events = ledger.list_attempt("mission-1", "attempt-1")
-    assert [event.sequence for event in events] == [1, 2, 3]
-    assert events[0].reason_code == "empty_results"
-    assert events[0].metadata == {
-        "called": True,
+    assert [event.sequence for event in events] == list(range(1, 9))
+    assert [event.operation for event in events] == [
+        "provider_selected", "request_started", "response_received",
+        "provider_selected", "request_started", "response_received",
+        "provider_selected", "provider_skipped",
+    ]
+
+    yandex_returned = events[2]
+    assert yandex_returned.reason_code == "empty_results"
+    assert yandex_returned.state.value == "degraded"
+    assert yandex_returned.counters["results_received"] == 0
+
+    searxng_selected = events[3]
+    assert searxng_selected.metadata == {
         "cost_amount": "0",
         "cost_currency": "USD",
+        "final_selected": True,
         "query_index": 2,
-        "selected": True,
     }
-    assert events[1].counters["results_received"] == 4
-    assert events[2].state.value == "skipped"
+    assert events[5].counters["results_received"] == 4
+
+    tavily_skipped = events[7]
+    assert tavily_skipped.state.value == "skipped"
+    assert tavily_skipped.reason_code == "policy_blocked"
+
     serialized = str([event.model_dump() for event in events]).lower()
     assert "query" not in serialized.replace("query_index", "")
     assert "token" not in serialized
