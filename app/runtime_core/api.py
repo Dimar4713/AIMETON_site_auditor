@@ -16,6 +16,12 @@ from app.runtime_core.models import (
     ToolExecutionCreate,
 )
 from app.runtime_core.storage import RuntimeStore
+from app.runtime_time import (
+    RuntimeTimeHealth,
+    RuntimeTimeSnapshot,
+    runtime_time_health,
+    runtime_time_snapshot,
+)
 
 router = APIRouter(prefix="/api/runtime", tags=["runtime-core"])
 store = RuntimeStore()
@@ -24,6 +30,16 @@ store = RuntimeStore()
 @router.get("/health")
 def runtime_health() -> dict[str, object]:
     return {"status": "ok", "component": "aimeton-runtime-core", "schema_version": 1}
+
+
+@router.get("/time", response_model=RuntimeTimeSnapshot)
+def runtime_time() -> RuntimeTimeSnapshot:
+    return runtime_time_snapshot()
+
+
+@router.get("/time/health", response_model=RuntimeTimeHealth)
+def runtime_time_status() -> RuntimeTimeHealth:
+    return runtime_time_health()
 
 
 @router.post("/tasks", response_model=Task, status_code=201)
