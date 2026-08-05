@@ -80,26 +80,25 @@ def persist_provider_waterfall(
             "cost_currency": row["cost"]["currency"],
         }
 
-        events.append(
-            _append_stage(
-                ledger,
-                mission_id=mission_id,
-                attempt_id=attempt_id,
-                provider=provider,
-                provider_index=provider_index,
-                query_index=query_index,
-                operation="provider_selected",
-                state=TraceState.STARTED,
-                reason_code="policy_considered",
-                summary=f"Provider {provider} considered by search policy",
-                metadata=common_metadata,
-                vertical=vertical,
-                deployed_sha=deployed_sha,
-                runtime_version=runtime_version,
-            )
-        )
-
         if row["called"]:
+            events.append(
+                _append_stage(
+                    ledger,
+                    mission_id=mission_id,
+                    attempt_id=attempt_id,
+                    provider=provider,
+                    provider_index=provider_index,
+                    query_index=query_index,
+                    operation="provider_selected",
+                    state=TraceState.STARTED,
+                    reason_code="provider_selected",
+                    summary=f"Provider {provider} selected by search policy",
+                    metadata=common_metadata,
+                    vertical=vertical,
+                    deployed_sha=deployed_sha,
+                    runtime_version=runtime_version,
+                )
+            )
             events.append(
                 _append_stage(
                     ledger,
