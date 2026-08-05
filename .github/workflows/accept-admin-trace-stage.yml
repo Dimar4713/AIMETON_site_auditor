@@ -1,0 +1,184 @@
+name: Accept Admin Trace Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to accept
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-accept-admin-trace-stage
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 293 &&
+       startsWith(github.event.comment.body, '/accept-admin-trace-stage ') &&
+       github.event.comment.user.login == 'Dimar4713')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      ACCEPTANCE_DB: /app/data/admin-trace-acceptance.sqlite3
+
+    steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            expected='${{ inputs.expected_sha }}'
+          else
+            expected="${{ github.event.comment.body }}"
+            expected="${expected#'/accept-admin-trace-stage '}"
+          fi
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact deployed SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
+
+      - name: Prove admin trace diagnostics contract
+        id: verify
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/admin-trace-stage-acceptance.md"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          trap 'if [[ ! -s "$report" ]]; then printf "## Admin trace stage acceptance\n\nWorkflow %s failed before sanitized evidence was produced.\n" "$GITHUB_RUN_ID" > "$report"; fi' EXIT
+          docker exec -i -e AIMETON_RUNTIME_DB="$ACCEPTANCE_DB" "$CONTAINER" python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from fastapi import FastAPI
+          from fastapi.testclient import TestClient
+
+          from app.admin_trace_api import router
+          from app.auth import User, UserRole
+          from app.auth_api import require_admin
+          from app.trace_ledger import SQLiteTraceLedger, TraceEventCreate, TraceState
+
+          path = Path('/app/data/admin-trace-acceptance.sqlite3')
+          for item in path.parent.glob(path.name + '*'):
+              item.unlink(missing_ok=True)
+
+          ledger = SQLiteTraceLedger(path)
+          ledger.append(TraceEventCreate(
+              mission_id='acceptance-mission', attempt_id='acceptance-attempt',
+              component='search', operation='provider_selected',
+              state=TraceState.STARTED, reason_code='selected',
+              summary='Provider selected', provider='searxng',
+              counters={'requested': 1},
+              metadata={'authorization': 'must-not-leak', 'query_kind': 'company'},
+              event_key='acceptance-event-1',
+          ))
+          ledger.append(TraceEventCreate(
+              mission_id='acceptance-mission', attempt_id='acceptance-attempt',
+              component='search', operation='response_received',
+              state=TraceState.SUCCEEDED, reason_code='results_received',
+              summary='Results received', provider='searxng', duration_ms=10,
+              counters={'results_received': 2}, event_key='acceptance-event-2',
+          ))
+
+          app = FastAPI()
+          app.include_router(router)
+          unauth = TestClient(app).get('/api/admin/missions/acceptance-mission/trace/attempts')
+          assert unauth.status_code in {401, 403}
+
+          app.dependency_overrides[require_admin] = lambda: User(
+              id=1, username='admin', role=UserRole.ADMIN, is_active=True,
+          )
+          client = TestClient(app)
+          attempts = client.get('/api/admin/missions/acceptance-mission/trace/attempts')
+          assert attempts.status_code == 200
+          assert attempts.json()[0]['event_count'] == 2
+          assert attempts.json()[0]['terminal_state'] == 'succeeded'
+
+          timeline = client.get('/api/admin/missions/acceptance-mission/trace/attempts/acceptance-attempt')
+          assert timeline.status_code == 200
+          payload = timeline.json()
+          assert [event['sequence'] for event in payload] == [1, 2]
+          assert payload[0]['metadata']['authorization'] == '[REDACTED]'
+          assert 'must-not-leak' not in timeline.text
+          assert 'admin-trace-acceptance.sqlite3' not in timeline.text
+
+          bundle = client.get('/api/admin/missions/acceptance-mission/trace/attempts/acceptance-attempt/bundle.jsonl?limit=1')
+          assert bundle.status_code == 200
+          assert bundle.headers['content-type'].startswith('application/x-ndjson')
+          lines = bundle.text.strip().splitlines()
+          assert len(lines) == 1
+          assert json.loads(lines[0])['sequence'] == 1
+          assert 'must-not-leak' not in bundle.text
+          PY
+          {
+            echo '## Admin trace stage acceptance'
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- exact deployed source SHA: \`${{ steps.expected.outputs.sha }}\`"
+            echo '- ordinary user denied internal diagnostics: ✅'
+            echo '- owner/admin attempt list and ordered timeline: ✅'
+            echo '- safe bounded JSONL bundle: ✅'
+            echo '- redaction and no runtime path exposure: ✅'
+            echo '- dedicated synthetic SQLite only; client data touched: no'
+            echo
+            echo '### Verdict'
+            echo '✅ Exact-SHA admin trace diagnostics acceptance passed.'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup dedicated acceptance files
+        if: always()
+        shell: bash
+        run: |
+          docker exec -i "$CONTAINER" sh -lc 'rm -f /app/data/admin-trace-acceptance.sqlite3 /app/data/admin-trace-acceptance.sqlite3-*' || true
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-trace-stage-acceptance-${{ github.run_id }}
+          path: ${{ steps.verify.outputs.report }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish evidence to OBS-TRACE-01
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ steps.verify.outputs.report }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = process.env.REPORT_PATH;
+            const body = path && fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `## Admin trace stage acceptance\n\nWorkflow ${context.runId} failed before sanitized evidence was produced.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 293,
+              body: body.slice(0, 60000),
+            });
