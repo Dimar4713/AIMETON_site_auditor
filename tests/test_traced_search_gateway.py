@@ -10,7 +10,7 @@ from app.trace_ledger import SQLiteTraceLedger
 
 
 @pytest.mark.asyncio
-async def test_gateway_persists_provider_attempt_without_query_or_secret(tmp_path):
+async def test_gateway_persists_provider_stages_without_query_or_secret(tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.params["q"] == "секретный пользовательский запрос"
         return httpx.Response(
@@ -53,10 +53,14 @@ async def test_gateway_persists_provider_attempt_without_query_or_secret(tmp_pat
         "mission-live-search",
         "attempt-live-search",
     )
-    assert len(events) == 1
-    assert events[0].provider == "searxng"
-    assert events[0].state.value == "succeeded"
-    assert events[0].counters["results_received"] == 1
+    assert [event.operation for event in events] == [
+        "provider_selected",
+        "request_started",
+        "response_received",
+    ]
+    assert all(event.provider == "searxng" for event in events)
+    assert events[-1].state.value == "succeeded"
+    assert events[-1].counters["results_received"] == 1
     serialized = trace_path.read_bytes().decode("utf-8", errors="ignore").lower()
     assert "секретный пользовательский запрос" not in serialized
     assert "authorization" not in serialized
