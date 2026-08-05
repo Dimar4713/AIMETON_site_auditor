@@ -2,6 +2,8 @@ const adminBox = document.querySelector('#session-admin');
 const usersBox = document.querySelector('#admin-users');
 const missionsBox = document.querySelector('#admin-missions');
 const auditBox = document.querySelector('#admin-audit');
+const traceWaterfallBox = document.querySelector('#admin-trace-waterfall');
+const traceWaterfallForm = document.querySelector('#trace-waterfall-form');
 const createUserForm = document.querySelector('#create-user-form');
 const createUserMessage = document.querySelector('#create-user-message');
 
@@ -157,6 +159,36 @@ async function loadMissions() {
   ])));
 }
 
+function stageLine(name, stage) {
+  if (!stage?.reached) return `${name}: —`;
+  const reason = stage.reason_code ? ` · ${stage.reason_code}` : '';
+  const counters = Object.entries(stage.counters || {}).map(([key, value]) => `${key}=${value}`).join(', ');
+  return `${name}: #${stage.sequence} · ${stage.state || 'unknown'}${reason}${counters ? ` · ${counters}` : ''}`;
+}
+
+async function loadProviderWaterfall(event) {
+  event.preventDefault();
+  const missionId = document.querySelector('#trace-mission-id').value.trim();
+  const attemptId = document.querySelector('#trace-attempt-id').value.trim();
+  traceWaterfallBox.textContent = 'Загрузка trace…';
+  const path = `/api/admin/missions/${encodeURIComponent(missionId)}/trace/attempts/${encodeURIComponent(attemptId)}/provider-waterfall`;
+  const response = await api(path);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    traceWaterfallBox.textContent = payload?.detail?.reason || `Trace недоступен (${response.status}).`;
+    return;
+  }
+  const providers = await response.json();
+  traceWaterfallBox.replaceChildren(...providers.map((provider) => card(provider.provider, [
+    stageLine('selected', provider.selected),
+    stageLine('called', provider.called),
+    stageLine('returned', provider.returned),
+    stageLine('accepted', provider.accepted),
+    stageLine('used in report', provider.used_in_report),
+    `terminal reason: ${provider.terminal_reason || '—'}`,
+  ])));
+}
+
 async function loadAudit() {
   auditBox.textContent = 'Загрузка…';
   const response = await api('/api/auth/admin/audit-events?limit=100');
@@ -176,6 +208,7 @@ async function loadAudit() {
 }
 
 createUserForm.addEventListener('submit', createUser);
+traceWaterfallForm.addEventListener('submit', loadProviderWaterfall);
 document.querySelector('#refresh-users').addEventListener('click', loadUsers);
 document.querySelector('#refresh-missions').addEventListener('click', loadMissions);
 document.querySelector('#refresh-audit').addEventListener('click', loadAudit);
