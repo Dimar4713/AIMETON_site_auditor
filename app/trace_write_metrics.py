@@ -14,7 +14,8 @@ class TraceWriteMetrics:
     """Bounded process-local metrics for trace write pressure.
 
     Metrics contain only counters and timings. They never retain trace payloads,
-    mission identifiers, provider data or secrets.
+    mission identifiers, provider data or secrets. The registry is intentionally
+    process-local: durable evidence remains in the transition audit ledger.
     """
 
     def __init__(self, *, latency_window: int = 256) -> None:
