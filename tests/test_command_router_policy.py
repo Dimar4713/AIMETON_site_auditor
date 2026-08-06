@@ -71,3 +71,7 @@ def test_mobile_acceptance_no_longer_subscribes_to_comments() -> None:
 
 def test_admin_trace_acceptance_no_longer_subscribes_to_comments() -> None:
     _assert_dispatch_only(".github/workflows/accept-admin-trace-stage.yml")
+
+
+def test_self_audit_acceptance_no_longer_subscribes_to_comments() -> None:
+    _assert_dispatch_only(".github/workflows/accept-aimeton-self-audit-stage.yml")
