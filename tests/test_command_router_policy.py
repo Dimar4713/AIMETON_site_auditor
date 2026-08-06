@@ -19,12 +19,14 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
 
     assert "issue_number: 337" in text
     assert text.count("issue_number: 293") == 2
+    assert "issue_number: 88" in text
     assert "issueNumber !== route.issue_number" in text
 
     for command, workflow in {
         "deploy-stage": "deploy-stage.yml",
         "accept-admin-trace-stage": "accept-admin-trace-stage.yml",
         "accept-aimeton-self-audit-stage": "accept-aimeton-self-audit-stage.yml",
+        "accept-checkpoint-stage": "accept-checkpoint-stage.yml",
     }.items():
         assert command in text
         assert workflow in text
