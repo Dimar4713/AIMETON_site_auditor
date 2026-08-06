@@ -1,11 +1,18 @@
 name: MCP Runtime Time Acceptance
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "app/mcp_server.py"
+      - "app/runtime_time.py"
+      - "scripts/accept_mcp_runtime_time.py"
+      - ".github/workflows/mcp-runtime-time-acceptance.yml"
   workflow_dispatch:
     inputs:
       ref:
         description: Exact application SHA to verify
-        required: true
+        required: false
         type: string
 
 permissions:
@@ -14,6 +21,9 @@ permissions:
 concurrency:
   group: mcp-runtime-time-acceptance
   cancel-in-progress: false
+
+env:
+  TARGET_REF: ${{ inputs.ref || github.sha }}
 
 jobs:
   accept:
@@ -24,21 +34,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "${{ inputs.ref }}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_REF" =~ ^[0-9a-f]{40}$ ]]
 
       - name: Checkout exact application SHA
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
 
       - name: Verify exact SHA is on main
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ inputs.ref }}"
+          test "$(git rev-parse HEAD)" = "$TARGET_REF"
           git fetch origin main
-          git merge-base --is-ancestor "${{ inputs.ref }}" origin/main
+          git merge-base --is-ancestor "$TARGET_REF" origin/main
 
       - name: Install MCP client dependency
         shell: bash
@@ -59,7 +69,7 @@ jobs:
       - name: Publish exact-SHA evidence
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-runtime-time-${{ inputs.ref }}
+          name: mcp-runtime-time-${{ env.TARGET_REF }}
           path: evidence/mcp-runtime-time/result.json
           if-no-files-found: error
           retention-days: 30
