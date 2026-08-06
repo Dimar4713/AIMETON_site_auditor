@@ -18,6 +18,7 @@ from app.mission_orchestrator import (
 from app.models import CompanyIntelligenceRequest, HuntRequest
 from app.runtime_time import runtime_time_snapshot
 from app.scraper import fetch_site
+from app.temporal_mcp_tools import deadline_check_payload, wait_status_payload
 
 
 def _additional_allowlist_values(variable_name: str) -> list[str]:
@@ -147,6 +148,18 @@ async def runtime_time() -> dict:
     return runtime_time_snapshot().model_dump(mode="json")
 
 
+@mcp.tool(name="runtime.wait.status")
+async def runtime_wait_status(wait_id: str) -> dict:
+    """Read one persisted temporal intent without changing its state."""
+    return wait_status_payload(wait_id)
+
+
+@mcp.tool(name="runtime.deadline.check")
+async def runtime_deadline_check(wait_id: str) -> dict:
+    """Evaluate one persisted temporal intent against fresh trusted AIMETON Time."""
+    return deadline_check_payload(wait_id)
+
+
 @mcp.tool()
 async def hunt_companies(
     region: str,
@@ -195,6 +208,8 @@ async def security_profile() -> dict:
             "analyze_site",
             "start_search_mission",
             "runtime.time",
+            "runtime.wait.status",
+            "runtime.deadline.check",
             "hunt_companies",
             "company_intelligence",
         ],
