@@ -52,19 +52,22 @@ def test_router_requires_exact_sha_and_dispatches_main_only() -> None:
     assert "ref: 'main'" in text
 
 
-def test_checkpoint_acceptance_no_longer_subscribes_to_comments() -> None:
-    text = Path(".github/workflows/accept-checkpoint-stage.yml").read_text(encoding="utf-8")
+def _assert_dispatch_only(path: str) -> None:
+    text = Path(path).read_text(encoding="utf-8")
     trigger_block = text.split("permissions:", 1)[0]
     assert "workflow_dispatch:" in trigger_block
     assert "issue_comment:" not in trigger_block
     assert "github.event_name == 'issue_comment'" not in text
     assert "inputs.expected_sha" in text
+
+
+def test_checkpoint_acceptance_no_longer_subscribes_to_comments() -> None:
+    _assert_dispatch_only(".github/workflows/accept-checkpoint-stage.yml")
 
 
 def test_mobile_acceptance_no_longer_subscribes_to_comments() -> None:
-    text = Path(".github/workflows/accept-mobile-ui-stage.yml").read_text(encoding="utf-8")
-    trigger_block = text.split("permissions:", 1)[0]
-    assert "workflow_dispatch:" in trigger_block
-    assert "issue_comment:" not in trigger_block
-    assert "github.event_name == 'issue_comment'" not in text
-    assert "inputs.expected_sha" in text
+    _assert_dispatch_only(".github/workflows/accept-mobile-ui-stage.yml")
+
+
+def test_admin_trace_acceptance_no_longer_subscribes_to_comments() -> None:
+    _assert_dispatch_only(".github/workflows/accept-admin-trace-stage.yml")
