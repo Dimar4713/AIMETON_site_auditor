@@ -50,19 +50,12 @@ jobs:
           git fetch origin main
           git merge-base --is-ancestor "$TARGET_REF" origin/main
 
-      - name: Install MCP client dependency
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m venv .venv-mcp-acceptance
-          .venv-mcp-acceptance/bin/pip install --disable-pip-version-check --quiet 'mcp>=1.0,<2'
-
       - name: Call runtime.time through live MCP transport
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p evidence/mcp-runtime-time
-          .venv-mcp-acceptance/bin/python scripts/accept_mcp_runtime_time.py \
+          python3 scripts/accept_mcp_runtime_time.py \
             --url https://stage-auditor.aimeton.ru/mcp/ \
             --evidence evidence/mcp-runtime-time/result.json
 
