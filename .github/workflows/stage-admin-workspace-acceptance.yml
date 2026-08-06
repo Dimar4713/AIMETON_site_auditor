@@ -2,8 +2,11 @@ name: Stage Admin Workspace Acceptance
 
 on:
   workflow_dispatch:
-  issue_comment:
-    types: [created]
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to accept
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,12 +14,6 @@ permissions:
 
 jobs:
   accept:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.number == 197 &&
-       github.event.comment.body == '/accept-admin-workspace-stage' &&
-       github.event.comment.user.login == 'Dimar4713')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 20
@@ -25,6 +22,22 @@ jobs:
       CONTAINER: aimeton-auditor
       STAGE_URL: https://stage-auditor.aimeton.ru
     steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact deployed SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deployed="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt")"
+          [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
+
       - name: Verify admin workspace contract
         id: acceptance
         shell: bash
