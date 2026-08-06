@@ -48,3 +48,12 @@ def test_router_requires_exact_sha_and_dispatches_main_only() -> None:
     assert "repos.getCommit" in text
     assert "createWorkflowDispatch" in text
     assert "ref: 'main'" in text
+
+
+def test_checkpoint_acceptance_no_longer_subscribes_to_comments() -> None:
+    text = Path(".github/workflows/accept-checkpoint-stage.yml").read_text(encoding="utf-8")
+    trigger_block = text.split("permissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "issue_comment:" not in trigger_block
+    assert "github.event_name == 'issue_comment'" not in text
+    assert "inputs.expected_sha" in text
