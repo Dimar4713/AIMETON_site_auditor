@@ -20,6 +20,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
     assert "issue_number: 337" in text
     assert text.count("issue_number: 293") == 2
     assert "issue_number: 88" in text
+    assert "issue_number: 223" in text
     assert "issueNumber !== route.issue_number" in text
 
     for command, workflow in {
@@ -27,6 +28,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
         "accept-admin-trace-stage": "accept-admin-trace-stage.yml",
         "accept-aimeton-self-audit-stage": "accept-aimeton-self-audit-stage.yml",
         "accept-checkpoint-stage": "accept-checkpoint-stage.yml",
+        "accept-mobile-ui-stage": "accept-mobile-ui-stage.yml",
     }.items():
         assert command in text
         assert workflow in text
@@ -50,8 +52,8 @@ def test_router_requires_exact_sha_and_dispatches_main_only() -> None:
     assert "ref: 'main'" in text
 
 
-def test_checkpoint_acceptance_no_longer_subscribes_to_comments() -> None:
-    text = Path(".github/workflows/accept-checkpoint-stage.yml").read_text(encoding="utf-8")
+def test_mobile_acceptance_no_longer_subscribes_to_comments() -> None:
+    text = Path(".github/workflows/accept-mobile-ui-stage.yml").read_text(encoding="utf-8")
     trigger_block = text.split("permissions:", 1)[0]
     assert "workflow_dispatch:" in trigger_block
     assert "issue_comment:" not in trigger_block
