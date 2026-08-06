@@ -27,6 +27,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
     assert "issue_number: 262" in text
     assert "issue_number: 192" in text
     assert "issue_number: 197" in text
+    assert "issue_number: 177" in text
     assert "issueNumber !== route.issue_number" in text
 
     for command, workflow in {
@@ -42,6 +43,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
         "accept-ui-stage": "ui-stage-visual-audit.yml",
         "accept-user-workspace-stage": "stage-user-workspace-acceptance.yml",
         "accept-admin-workspace-stage": "stage-admin-workspace-acceptance.yml",
+        "accept-mission-stage-v2": "stage-mission-ownership-acceptance-v2.yml",
     }.items():
         assert command in text
         assert workflow in text
@@ -116,6 +118,10 @@ def test_user_workspace_acceptance_no_longer_subscribes_to_comments() -> None:
 
 def test_admin_workspace_acceptance_no_longer_subscribes_to_comments() -> None:
     _assert_dispatch_only(".github/workflows/stage-admin-workspace-acceptance.yml")
+
+
+def test_mission_ownership_v2_no_longer_subscribes_to_comments() -> None:
+    _assert_dispatch_only(".github/workflows/stage-mission-ownership-acceptance-v2.yml")
 
 
 def test_superseded_mission_ownership_v1_does_not_return() -> None:
