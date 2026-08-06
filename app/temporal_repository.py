@@ -67,6 +67,14 @@ class TemporalIntentRepository:
             row = db.execute("SELECT payload_json FROM temporal_intents WHERE wait_id = ?", (wait_id,)).fetchone()
         return None if row is None else _deserialize_intent(row["payload_json"])
 
+    def list_intents(self) -> tuple[TemporalIntent, ...]:
+        """Return all intents in stable wait_id order without mutating repository state."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT payload_json FROM temporal_intents ORDER BY wait_id ASC"
+            ).fetchall()
+        return tuple(_deserialize_intent(row["payload_json"]) for row in rows)
+
     def update_status(self, wait_id: str, *, status: str, expected_version: int) -> int:
         with self._connect() as db:
             cursor = db.execute(
