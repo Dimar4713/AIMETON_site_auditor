@@ -68,7 +68,7 @@ def identity_search_policy_from_env() -> SearchPolicy:
         item.strip()
         for item in os.getenv(
             "IDENTITY_SEARCH_PROVIDER_ORDER",
-            "tavily,searxng",
+            "yandex,tavily,searxng",
         ).split(",")
         if item.strip()
     )
@@ -76,7 +76,10 @@ def identity_search_policy_from_env() -> SearchPolicy:
         update={
             "provider_order": order,
             "allowed_providers": frozenset(order),
-            "allow_paid_fallback": False,
+            "allow_paid_fallback": _bool_env(
+                "IDENTITY_SEARCH_ALLOW_PAID_FALLBACK",
+                base.allow_paid_fallback,
+            ),
             "retries": 0,
         }
     )
