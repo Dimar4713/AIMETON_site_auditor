@@ -4,13 +4,22 @@ on:
   push:
     branches:
       - main
-      - "agent/**"
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
 
 permissions:
   contents: read
+
+concurrency:
+  group: baseline-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   baseline:
