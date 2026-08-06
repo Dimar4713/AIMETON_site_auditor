@@ -54,7 +54,11 @@ jobs:
           from fastapi.testclient import TestClient
           from app.main import app
 
-          paths = {route.path for route in app.routes}
+          paths = {
+              path
+              for route in app.routes
+              if (path := getattr(route, "path", None)) is not None
+          }
           assert "/api/health" in paths
           assert any(path == "/mcp" or path.startswith("/mcp") for path in paths)
 

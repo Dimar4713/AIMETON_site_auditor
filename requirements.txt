@@ -1,13 +1,13 @@
-fastapi==0.115.6
+fastapi==0.141.1
 uvicorn[standard]==0.34.0
 httpx==0.28.1
 beautifulsoup4==4.12.3
 charset-normalizer>=3.4,<4
 pydantic>=2.11,<3
-python-dotenv==1.0.1
-pytest==8.3.4
+python-dotenv==1.2.2
+pytest==9.1.1
 jsonschema>=4.23,<5
 playwright>=1.45,<2
-pytest-asyncio>=0.23,<1
+pytest-asyncio>=0.23,<2
 mcp>=1.25,<2
 python-docx==1.2.0
