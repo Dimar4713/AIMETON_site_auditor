@@ -79,7 +79,6 @@ def accept(url: str) -> dict[str, Any]:
         },
     )
     _result(initialize)
-    assert session_id, "MCP server did not return Mcp-Session-Id"
 
     _post(url, {"jsonrpc": "2.0", "method": "notifications/initialized"}, session_id)
     tools_response, _ = _post(url, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, session_id)
@@ -108,6 +107,7 @@ def accept(url: str) -> dict[str, Any]:
     assert isinstance(payload["utc"], str) and payload["utc"].endswith("Z"), payload
     return {
         "transport": "mcp-streamable-http",
+        "session_mode": "stateful" if session_id else "stateless",
         "tool": "runtime.time",
         "endpoint": url,
         "result": payload,
