@@ -57,6 +57,20 @@ def _append_stage(
     )
 
 
+def _terminal_reason(row: dict[str, object]) -> str:
+    """Reduce provider outcome to a truthful terminal reason.
+
+    A non-empty successful response is authoritative over any stale diagnostic
+    reason carried by an upstream or aggregated projection. In particular it
+    must never be reported as ``empty_results``.
+    """
+    state = str(row["state"])
+    results_received = int(row["results_received"])
+    if state == AttemptState.SUCCEEDED.value and results_received > 0:
+        return "results_received"
+    return str(row["reason"] or state)
+
+
 def persist_provider_waterfall(
     ledger: SQLiteTraceLedger,
     diagnostics: SearchDiagnostics,
@@ -73,7 +87,7 @@ def persist_provider_waterfall(
     for provider_index, row in enumerate(provider_waterfall(diagnostics), start=1):
         provider = row["provider"]
         final_state = _STATE_MAP[row["state"]]
-        reason_code = row["reason"] or row["state"]
+        reason_code = _terminal_reason(row)
         common_metadata = {
             "final_selected": row["selected"],
             "cost_amount": row["cost"]["amount"],
@@ -128,7 +142,11 @@ def persist_provider_waterfall(
                     operation="response_received",
                     state=final_state,
                     reason_code=reason_code,
-                    summary=f"Provider {provider} finished with state {row['state']}",
+                    summary=(
+                        f"Provider {provider} returned {row['results_received']} results"
+                        if reason_code == "results_received"
+                        else f"Provider {provider} finished with state {row['state']}"
+                    ),
                     counters={"results_received": row["results_received"]},
                     metadata=common_metadata,
                     vertical=vertical,
