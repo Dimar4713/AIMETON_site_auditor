@@ -31,7 +31,7 @@ jobs:
           script: |
             const body = (process.env.COMMENT_BODY || '').trim();
             const issueNumber = Number(process.env.ISSUE_NUMBER || '0');
-            const match = body.match(/^\/(deploy-stage|accept-admin-trace-stage|accept-aimeton-self-audit-stage|accept-checkpoint-stage|accept-mobile-ui-stage|accept-service-catalog-stage|accept-logging-pressure-stage|accept-live-analysis-stage|accept-interface-audit-stage|accept-ui-stage|accept-user-workspace-stage|accept-admin-workspace-stage|accept-mission-stage-v2)\s+([0-9a-f]{40})$/);
+            const match = body.match(/^\/(deploy-stage|accept-admin-trace-stage|accept-aimeton-self-audit-stage|accept-checkpoint-stage|accept-mobile-ui-stage|accept-service-catalog-stage|accept-logging-pressure-stage|accept-live-analysis-stage|accept-interface-audit-stage|accept-ui-stage|accept-user-workspace-stage|accept-admin-workspace-stage|accept-mission-stage-v2|accept-integrated-stage-continuity)\s+([0-9a-f]{40})$/);
 
             if (!match) {
               core.notice('Ignored unsupported slash command; no downstream workflow dispatched.');
@@ -111,6 +111,11 @@ jobs:
               'accept-mission-stage-v2': {
                 issue_number: 177,
                 workflow_id: 'stage-mission-ownership-acceptance-v2.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-integrated-stage-continuity': {
+                issue_number: 203,
+                workflow_id: 'stage-integrated-continuity.yml',
                 inputs: {expected_sha: sha},
               },
             };
