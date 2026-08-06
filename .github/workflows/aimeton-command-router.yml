@@ -48,20 +48,76 @@ jobs:
 
             const [, command, sha] = match;
             const routes = {
-              'deploy-stage': {issue_number: 337, workflow_id: 'deploy-stage.yml', inputs: {commit_sha: sha}},
-              'accept-admin-trace-stage': {issue_number: 293, workflow_id: 'accept-admin-trace-stage.yml', inputs: {expected_sha: sha}},
-              'accept-aimeton-self-audit-stage': {issue_number: 293, workflow_id: 'accept-aimeton-self-audit-stage.yml', inputs: {expected_sha: sha}},
-              'accept-checkpoint-stage': {issue_number: 88, workflow_id: 'accept-checkpoint-stage.yml', inputs: {expected_sha: sha}},
-              'accept-mobile-ui-stage': {issue_number: 223, workflow_id: 'accept-mobile-ui-stage.yml', inputs: {expected_sha: sha}},
-              'accept-service-catalog-stage': {issue_number: 274, workflow_id: 'accept-service-catalog-stage.yml', inputs: {expected_sha: sha}},
-              'accept-logging-pressure-stage': {issue_number: 293, workflow_id: 'accept-logging-pressure-stage.yml', inputs: {expected_sha: sha}},
-              'accept-live-analysis-stage': {issue_number: 270, workflow_id: 'accept-live-analysis-stage.yml', inputs: {expected_sha: sha}},
-              'accept-interface-audit-stage': {issue_number: 291, workflow_id: 'interface-audit-stage-acceptance.yml', inputs: {expected_sha: sha}},
-              'accept-ui-stage': {issue_number: 262, workflow_id: 'ui-stage-visual-audit.yml', inputs: {expected_sha: sha}},
-              'accept-user-workspace-stage': {issue_number: 192, workflow_id: 'stage-user-workspace-acceptance.yml', inputs: {expected_sha: sha}},
-              'accept-admin-workspace-stage': {issue_number: 197, workflow_id: 'stage-admin-workspace-acceptance.yml', inputs: {expected_sha: sha}},
-              'accept-mission-stage-v2': {issue_number: 177, workflow_id: 'stage-mission-ownership-acceptance-v2.yml', inputs: {expected_sha: sha}},
-              'accept-integrated-stage-continuity': {issue_number: 203, workflow_id: 'stage-integrated-continuity.yml', inputs: {expected_sha: sha}},
+              'deploy-stage': {
+                issue_number: 337,
+                workflow_id: 'deploy-stage.yml',
+                inputs: {commit_sha: sha},
+              },
+              'accept-admin-trace-stage': {
+                issue_number: 293,
+                workflow_id: 'accept-admin-trace-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-aimeton-self-audit-stage': {
+                issue_number: 293,
+                workflow_id: 'accept-aimeton-self-audit-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-checkpoint-stage': {
+                issue_number: 88,
+                workflow_id: 'accept-checkpoint-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-mobile-ui-stage': {
+                issue_number: 223,
+                workflow_id: 'accept-mobile-ui-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-service-catalog-stage': {
+                issue_number: 274,
+                workflow_id: 'accept-service-catalog-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-logging-pressure-stage': {
+                issue_number: 293,
+                workflow_id: 'accept-logging-pressure-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-live-analysis-stage': {
+                issue_number: 270,
+                workflow_id: 'accept-live-analysis-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-interface-audit-stage': {
+                issue_number: 291,
+                workflow_id: 'interface-audit-stage-acceptance.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-ui-stage': {
+                issue_number: 262,
+                workflow_id: 'ui-stage-visual-audit.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-user-workspace-stage': {
+                issue_number: 192,
+                workflow_id: 'stage-user-workspace-acceptance.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-admin-workspace-stage': {
+                issue_number: 197,
+                workflow_id: 'stage-admin-workspace-acceptance.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-mission-stage-v2': {
+                issue_number: 177,
+                workflow_id: 'stage-mission-ownership-acceptance-v2.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-integrated-stage-continuity': {
+                issue_number: 203,
+                workflow_id: 'stage-integrated-continuity.yml',
+                inputs: {expected_sha: sha},
+              },
             };
 
             const route = routes[command];
@@ -70,7 +126,11 @@ jobs:
               return;
             }
 
-            await github.rest.repos.getCommit({owner: context.repo.owner, repo: context.repo.repo, ref: sha});
+            await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+            });
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
