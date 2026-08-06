@@ -31,7 +31,7 @@ jobs:
           script: |
             const body = (process.env.COMMENT_BODY || '').trim();
             const issueNumber = Number(process.env.ISSUE_NUMBER || '0');
-            const match = body.match(/^\/(deploy-stage|accept-admin-trace-stage|accept-aimeton-self-audit-stage|accept-checkpoint-stage|accept-mobile-ui-stage|accept-service-catalog-stage)\s+([0-9a-f]{40})$/);
+            const match = body.match(/^\/(deploy-stage|accept-admin-trace-stage|accept-aimeton-self-audit-stage|accept-checkpoint-stage|accept-mobile-ui-stage|accept-service-catalog-stage|accept-logging-pressure-stage)\s+([0-9a-f]{40})$/);
 
             if (!match) {
               core.notice('Ignored unsupported slash command; no downstream workflow dispatched.');
@@ -76,6 +76,11 @@ jobs:
               'accept-service-catalog-stage': {
                 issue_number: 274,
                 workflow_id: 'accept-service-catalog-stage.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-logging-pressure-stage': {
+                issue_number: 293,
+                workflow_id: 'accept-logging-pressure-stage.yml',
                 inputs: {expected_sha: sha},
               },
             };
