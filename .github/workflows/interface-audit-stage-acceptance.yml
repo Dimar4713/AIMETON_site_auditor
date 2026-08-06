@@ -7,8 +7,6 @@ on:
         description: Exact deployed source SHA to audit
         required: true
         type: string
-  issue_comment:
-    types: [created]
   push:
     branches: [main]
     paths:
@@ -30,12 +28,7 @@ jobs:
       - run: echo "Interface Audit Stage Acceptance is registered"
 
   accept:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.number == 291 &&
-       startsWith(github.event.comment.body, '/accept-interface-audit-stage ') &&
-       github.event.comment.user.login == 'Dimar4713')
+    if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 20
@@ -51,12 +44,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
-            expected='${{ inputs.expected_sha }}'
-          else
-            expected="${{ github.event.comment.body }}"
-            expected="${expected#'/accept-interface-audit-stage '}"
-          fi
+          expected='${{ inputs.expected_sha }}'
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
           echo "sha=$expected" >> "$GITHUB_OUTPUT"
 
