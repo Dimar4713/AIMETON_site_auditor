@@ -18,7 +18,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
     assert "core.setFailed('Unsupported command" not in text
 
     assert "issue_number: 337" in text
-    assert text.count("issue_number: 293") == 2
+    assert text.count("issue_number: 293") == 3
     assert "issue_number: 88" in text
     assert "issue_number: 223" in text
     assert "issue_number: 274" in text
@@ -31,6 +31,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
         "accept-checkpoint-stage": "accept-checkpoint-stage.yml",
         "accept-mobile-ui-stage": "accept-mobile-ui-stage.yml",
         "accept-service-catalog-stage": "accept-service-catalog-stage.yml",
+        "accept-logging-pressure-stage": "accept-logging-pressure-stage.yml",
     }.items():
         assert command in text
         assert workflow in text
@@ -81,3 +82,7 @@ def test_self_audit_acceptance_no_longer_subscribes_to_comments() -> None:
 
 def test_service_catalog_acceptance_no_longer_subscribes_to_comments() -> None:
     _assert_dispatch_only(".github/workflows/accept-service-catalog-stage.yml")
+
+
+def test_logging_pressure_acceptance_no_longer_subscribes_to_comments() -> None:
+    _assert_dispatch_only(".github/workflows/accept-logging-pressure-stage.yml")
