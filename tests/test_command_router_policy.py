@@ -21,6 +21,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
     assert text.count("issue_number: 293") == 2
     assert "issue_number: 88" in text
     assert "issue_number: 223" in text
+    assert "issue_number: 274" in text
     assert "issueNumber !== route.issue_number" in text
 
     for command, workflow in {
@@ -29,6 +30,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
         "accept-aimeton-self-audit-stage": "accept-aimeton-self-audit-stage.yml",
         "accept-checkpoint-stage": "accept-checkpoint-stage.yml",
         "accept-mobile-ui-stage": "accept-mobile-ui-stage.yml",
+        "accept-service-catalog-stage": "accept-service-catalog-stage.yml",
     }.items():
         assert command in text
         assert workflow in text
@@ -75,3 +77,7 @@ def test_admin_trace_acceptance_no_longer_subscribes_to_comments() -> None:
 
 def test_self_audit_acceptance_no_longer_subscribes_to_comments() -> None:
     _assert_dispatch_only(".github/workflows/accept-aimeton-self-audit-stage.yml")
+
+
+def test_service_catalog_acceptance_no_longer_subscribes_to_comments() -> None:
+    _assert_dispatch_only(".github/workflows/accept-service-catalog-stage.yml")
