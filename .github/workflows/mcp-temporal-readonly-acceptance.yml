@@ -1,0 +1,62 @@
+name: MCP Temporal Read-Only Acceptance
+
+on:
+  workflow_run:
+    workflows: [Deploy Stage]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact deployed application SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-temporal-readonly-acceptance
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+    env:
+      TARGET_REF: ${{ inputs.ref || github.event.workflow_run.head_sha }}
+    steps:
+      - name: Validate exact SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_REF" =~ ^[0-9a-f]{40}$ ]]
+      - name: Checkout exact application SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_REF }}
+          fetch-depth: 0
+      - name: Verify exact SHA is on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_REF"
+          git fetch origin main
+          git merge-base --is-ancestor "$TARGET_REF" origin/main
+      - name: Call temporal tools through live MCP transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/mcp-temporal-readonly
+          python3 scripts/accept_mcp_temporal_readonly.py \
+            --url https://stage-auditor.aimeton.ru/mcp/ \
+            --evidence evidence/mcp-temporal-readonly/result.json
+      - name: Publish exact-SHA evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-temporal-readonly-${{ env.TARGET_REF }}
+          path: evidence/mcp-temporal-readonly/result.json
+          if-no-files-found: error
+          retention-days: 30
