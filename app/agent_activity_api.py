@@ -6,10 +6,11 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.agent_activity import ActivityBlocked, ActivityConflict, AgentActivityRepository
+from app.auth_api import require_admin
 from app.runtime_time import RuntimeTimeSnapshot, runtime_time_snapshot
 from app.temporal_orchestrator import TrustedTime
 
@@ -60,7 +61,10 @@ def _trusted_time(snapshot: RuntimeTimeSnapshot | None = None) -> TrustedTime:
 
 
 @router.post("/heartbeat", status_code=201)
-def write_heartbeat(request: HeartbeatRequest) -> dict[str, object]:
+def write_heartbeat(
+    request: HeartbeatRequest,
+    _admin: object = Depends(require_admin),
+) -> dict[str, object]:
     try:
         heartbeat = _repository().heartbeat(
             mission_id=request.mission_id,
