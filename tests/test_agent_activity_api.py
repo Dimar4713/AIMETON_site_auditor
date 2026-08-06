@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.agent_activity_api import router
+from app.auth_api import require_admin
 from app.runtime_time import RuntimeTimeSnapshot
 
 
@@ -18,12 +19,35 @@ def snapshot(utc: str, *, trusted: bool = True) -> RuntimeTimeSnapshot:
     )
 
 
-def client(monkeypatch, tmp_path, utc: str = "2026-08-06T16:00:00.000Z") -> TestClient:
+def client(
+    monkeypatch,
+    tmp_path,
+    utc: str = "2026-08-06T16:00:00.000Z",
+    *,
+    authorised: bool = True,
+) -> TestClient:
     monkeypatch.setenv("AIMETON_ACTIVITY_DB", str(tmp_path / "activity.sqlite3"))
     monkeypatch.setattr("app.agent_activity_api.runtime_time_snapshot", lambda: snapshot(utc))
     app = FastAPI()
     app.include_router(router, prefix="/api/runtime")
+    if authorised:
+        app.dependency_overrides[require_admin] = lambda: object()
     return TestClient(app)
+
+
+def test_heartbeat_write_requires_authorized_operator(monkeypatch, tmp_path) -> None:
+    api = client(monkeypatch, tmp_path, authorised=False)
+    response = api.post(
+        "/api/runtime/activity/heartbeat",
+        json={
+            "mission_id": "mission-1",
+            "agent_id": "agent-a",
+            "state": "running",
+            "reason": "working",
+            "idempotency_key": "hb-1",
+        },
+    )
+    assert response.status_code == 401
 
 
 def test_heartbeat_write_read_and_events(monkeypatch, tmp_path) -> None:
