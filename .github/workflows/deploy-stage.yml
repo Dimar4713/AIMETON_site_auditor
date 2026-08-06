@@ -129,16 +129,68 @@ jobs:
           echo "Actual:   $actual"
           [[ "$actual" == "$DEPLOY_SHA" ]]
 
-      - name: Prepare OpenStack preflight environment
+      - name: Validate OpenStack setting presence
+        id: openstack-settings
         shell: bash
         run: |
           set -Eeuo pipefail
+          mkdir -p deployment-evidence
+          missing=()
           for name in OS_AUTH_URL OS_APPLICATION_CREDENTIAL_ID OS_APPLICATION_CREDENTIAL_SECRET OPENSTACK_SERVER_ID OPENSTACK_SERVER_NAME; do
-            test -n "${!name:-}" || { echo "Missing required stage OpenStack setting: $name"; exit 1; }
-          done
-          python3 -m venv .venv-openstack-deploy
+            if [[ -n "${!name:-}" ]]; then
+              printf '%s=present\n' "$name"
+            else
+              printf '%s=missing\n' "$name"
+              missing+=("$name")
+            fi
+          done | tee deployment-evidence/openstack-setting-presence.txt
+          if (( ${#missing[@]} > 0 )); then
+            printf 'preflight_reason=config_missing\n' | tee deployment-evidence/openstack-preflight-reason.txt
+            printf 'Missing required stage OpenStack settings: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+          printf 'preflight_reason=settings_present\n' | tee deployment-evidence/openstack-preflight-reason.txt
+
+      - name: Validate Python runtime
+        id: python-runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p deployment-evidence
+          if ! command -v python3 >/dev/null 2>&1; then
+            printf 'python_runtime=missing\npreflight_reason=python_missing\n' | tee deployment-evidence/openstack-python-runtime.txt
+            exit 1
+          fi
+          python3 --version 2>&1 | sed 's/^/python_runtime=/' | tee deployment-evidence/openstack-python-runtime.txt
+
+      - name: Create OpenStack virtual environment
+        id: openstack-venv
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p deployment-evidence
+          rm -rf .venv-openstack-deploy
+          if ! python3 -m venv .venv-openstack-deploy; then
+            printf 'venv=failed\npreflight_reason=venv_failed\n' | tee deployment-evidence/openstack-venv.txt
+            exit 1
+          fi
+          test -x .venv-openstack-deploy/bin/python
+          printf 'venv=ready\n' | tee deployment-evidence/openstack-venv.txt
+
+      - name: Install OpenStack deployment dependencies
+        id: openstack-dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p deployment-evidence
           . .venv-openstack-deploy/bin/activate
-          python -m pip install --disable-pip-version-check -q -r requirements-openstack.txt
+          if python -m pip install --disable-pip-version-check -q -r requirements-openstack.txt; then
+            printf 'dependencies=ready\npreflight_reason=dependencies_ready\n' | tee deployment-evidence/openstack-dependencies.txt
+          else
+            status=$?
+            printf 'dependencies=failed\npreflight_reason=dependency_install_failed\nexit_code=%s\n' "$status" | tee deployment-evidence/openstack-dependencies.txt
+            exit "$status"
+          fi
 
       - name: Validate Tavily secret contract
         shell: bash
