@@ -30,7 +30,7 @@ jobs:
     outputs:
       should_deploy: ${{ steps.decide.outputs.should_deploy }}
     steps:
-      - name: Decide whether runtime changed
+      - name: Require exact-SHA deployment for successful main baseline
         id: decide
         uses: actions/github-script@v7
         with:
@@ -40,26 +40,11 @@ jobs:
               return;
             }
             const run = context.payload.workflow_run;
-            if (!run || run.conclusion !== 'success' || run.head_branch !== 'main') {
-              core.setOutput('should_deploy', 'false');
-              return;
-            }
-            const {data: commit} = await github.rest.repos.getCommit({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: run.head_sha,
-              per_page: 100,
-            });
-            const runtime = (commit.files || []).some(({filename}) =>
-              filename.startsWith('app/') ||
-              filename.startsWith('static/') ||
-              filename === 'requirements.txt' ||
-              filename === 'Dockerfile' ||
-              filename === 'docker-compose.yml' ||
-              filename === 'scripts/deploy_stage.sh'
+            const shouldDeploy = Boolean(
+              run && run.conclusion === 'success' && run.head_branch === 'main'
             );
-            core.info(`Runtime deployment required: ${runtime}`);
-            core.setOutput('should_deploy', runtime ? 'true' : 'false');
+            core.info(`Exact-SHA stage deployment required: ${shouldDeploy}`);
+            core.setOutput('should_deploy', shouldDeploy ? 'true' : 'false');
 
   deploy:
     needs: deployment-gate
