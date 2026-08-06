@@ -1,0 +1,65 @@
+name: MCP Runtime Time Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact application SHA to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-runtime-time-acceptance
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+    steps:
+      - name: Validate exact SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.ref }}" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Checkout exact application SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Verify exact SHA is on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.ref }}"
+          git fetch origin main
+          git merge-base --is-ancestor "${{ inputs.ref }}" origin/main
+
+      - name: Install MCP client dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv-mcp-acceptance
+          .venv-mcp-acceptance/bin/pip install --disable-pip-version-check --quiet 'mcp>=1.0,<2'
+
+      - name: Call runtime.time through live MCP transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/mcp-runtime-time
+          .venv-mcp-acceptance/bin/python scripts/accept_mcp_runtime_time.py \
+            --url https://stage-auditor.aimeton.ru/mcp/ \
+            --evidence evidence/mcp-runtime-time/result.json
+
+      - name: Publish exact-SHA evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-runtime-time-${{ inputs.ref }}
+          path: evidence/mcp-runtime-time/result.json
+          if-no-files-found: error
+          retention-days: 30
