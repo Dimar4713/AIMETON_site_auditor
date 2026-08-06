@@ -76,7 +76,12 @@ def test_provider_waterfall_is_persisted_idempotently_with_canonical_stages(tmp_
         "final_selected": True,
         "query_index": 2,
     }
-    assert events[5].counters["results_received"] == 4
+
+    searxng_returned = events[5]
+    assert searxng_returned.state.value == "succeeded"
+    assert searxng_returned.reason_code == "results_received"
+    assert searxng_returned.summary == "Provider searxng returned 4 results"
+    assert searxng_returned.counters["results_received"] == 4
 
     normalized = events[6]
     assert normalized.reason_code == "search_items_normalized"
@@ -98,3 +103,33 @@ def test_provider_waterfall_is_persisted_idempotently_with_canonical_stages(tmp_
     serialized = str([event.model_dump() for event in events]).lower()
     assert "query" not in serialized.replace("query_index", "")
     assert "token" not in serialized
+
+
+def test_successful_non_empty_response_overrides_stale_empty_reason(tmp_path):
+    diagnostics = SearchDiagnostics(
+        state=GatewayState.SUCCESS,
+        selected_provider="searxng",
+        attempts=[
+            attempt("searxng", AttemptState.SUCCEEDED, 4, FallbackReason.EMPTY_RESULTS),
+        ],
+    )
+    ledger = SQLiteTraceLedger(tmp_path / "trace.sqlite3")
+
+    persist_provider_waterfall(
+        ledger,
+        diagnostics,
+        mission_id="mission-stale-reason",
+        attempt_id="attempt-stale-reason",
+        query_index=1,
+    )
+
+    events = ledger.list_attempt("mission-stale-reason", "attempt-stale-reason")
+    response = next(event for event in events if event.operation == "response_received")
+    assert response.state.value == "succeeded"
+    assert response.reason_code == "results_received"
+    assert response.counters["results_received"] == 4
+    assert all(
+        event.reason_code != "empty_results"
+        for event in events
+        if event.provider == "searxng"
+    )
