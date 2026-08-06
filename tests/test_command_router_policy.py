@@ -116,3 +116,7 @@ def test_user_workspace_acceptance_no_longer_subscribes_to_comments() -> None:
 
 def test_admin_workspace_acceptance_no_longer_subscribes_to_comments() -> None:
     _assert_dispatch_only(".github/workflows/stage-admin-workspace-acceptance.yml")
+
+
+def test_superseded_mission_ownership_v1_does_not_return() -> None:
+    assert not Path(".github/workflows/stage-mission-ownership-acceptance.yml").exists()
