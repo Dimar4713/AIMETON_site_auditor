@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.agent_activity_api import router as activity_router
 from app.runtime_core.models import (
     Event,
     EventCreate,
@@ -25,6 +26,7 @@ from app.runtime_time import (
 from app.umel import UMEL_VERSION, UmelEvent, list_umel_events
 
 router = APIRouter(prefix="/api/runtime", tags=["runtime-core"])
+router.include_router(activity_router)
 store = RuntimeStore()
 
 
