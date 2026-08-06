@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -73,7 +74,7 @@ def write_heartbeat(request: HeartbeatRequest) -> dict[str, object]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ActivityConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return heartbeat.__dict__
+    return asdict(heartbeat)
 
 
 @router.get("/missions/{mission_id}/agents/{agent_id}/heartbeat")
@@ -81,12 +82,12 @@ def read_heartbeat(mission_id: str, agent_id: str) -> dict[str, object]:
     heartbeat = _repository().latest_heartbeat(mission_id, agent_id)
     if heartbeat is None:
         raise HTTPException(status_code=404, detail="agent_heartbeat_not_found")
-    return heartbeat.__dict__
+    return asdict(heartbeat)
 
 
 @router.get("/missions/{mission_id}/events")
 def read_events(mission_id: str) -> list[dict[str, object]]:
-    return [event.__dict__ for event in _repository().list_events(mission_id)]
+    return [asdict(event) for event in _repository().list_events(mission_id)]
 
 
 @router.get("/missions/{mission_id}/agents/{agent_id}/watchdog", response_model=WatchdogStatus)
