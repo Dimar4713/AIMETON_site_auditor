@@ -13,7 +13,7 @@ from app.agent_activity import ActivityBlocked, ActivityConflict, AgentActivityR
 from app.runtime_time import RuntimeTimeSnapshot, runtime_time_snapshot
 from app.temporal_orchestrator import TrustedTime
 
-router = APIRouter(prefix="/api/runtime/activity", tags=["agent-activity"])
+router = APIRouter(prefix="/activity", tags=["agent-activity"])
 
 
 class HeartbeatRequest(BaseModel):
