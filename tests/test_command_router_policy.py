@@ -144,7 +144,7 @@ def test_integrated_core_no_longer_subscribes_to_comments() -> None:
     assert "issue_comment:" not in trigger_block
     assert "github.event_name == 'issue_comment'" not in text
     assert "inputs.expected_sha" in text
-    assert 'requested_sha="${{ inputs.expected_sha }}"' in text
+    assert "requested_sha='${{ inputs.expected_sha }}'" in text
     assert 'acceptance_contract_sha="$GITHUB_SHA"' in text
     assert '[[ "$requested_sha" == "$acceptance_contract_sha" ]]' in text
 
