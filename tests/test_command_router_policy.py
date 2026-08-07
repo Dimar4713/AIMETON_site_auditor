@@ -31,6 +31,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
     assert text.count("issue_number: 203") == 3
     assert "issue_number: 36" in text
     assert "issue_number: 159" in text
+    assert "issue_number: 164" in text
     assert "issueNumber !== route.issue_number" in text
 
     for command, workflow in {
@@ -54,6 +55,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
         "audit-auth-persistence": "server-auth-persistence-audit.yml",
         "diagnose-mission-stage": "stage-mission-diagnostics.yml",
         "reconcile-stage-data-mount": "stage-data-mount-reconcile.yml",
+        "repair-admin-stage": "repair-stage-admin.yml",
     }.items():
         assert command in text
         assert workflow in text
@@ -168,6 +170,13 @@ def test_mission_diagnostics_no_longer_subscribes_to_comments() -> None:
 
 def test_stage_data_mount_reconcile_no_longer_subscribes_to_comments() -> None:
     _assert_dispatch_only(".github/workflows/stage-data-mount-reconcile.yml")
+
+
+def test_stage_admin_repair_no_longer_subscribes_to_comments() -> None:
+    _assert_dispatch_only(".github/workflows/repair-stage-admin.yml")
+    text = Path(".github/workflows/repair-stage-admin.yml").read_text(encoding="utf-8")
+    assert "Verify exact deployed SHA before mutation" in text
+    assert "requested SHA does not match deployed SHA" in text
 
 
 def test_superseded_mission_ownership_v1_does_not_return() -> None:
