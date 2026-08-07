@@ -187,5 +187,17 @@ def test_stage_auth_acceptance_no_longer_subscribes_to_comments() -> None:
     assert "Refusing acceptance mutation: requested SHA does not match deployed SHA" in text
 
 
+def test_only_router_and_optional_status_sync_subscribe_to_issue_comments() -> None:
+    workflow_dir = Path(".github/workflows")
+    allowed = {"aimeton-command-router.yml", "project-status-sync.yml"}
+    subscribers = {
+        path.name
+        for path in workflow_dir.glob("*.yml")
+        if "issue_comment:" in path.read_text(encoding="utf-8").split("permissions:", 1)[0]
+    }
+    assert "aimeton-command-router.yml" in subscribers
+    assert not (subscribers - allowed), f"unexpected direct issue_comment subscribers: {sorted(subscribers - allowed)}"
+
+
 def test_superseded_mission_ownership_v1_does_not_return() -> None:
     assert not Path(".github/workflows/stage-mission-ownership-acceptance.yml").exists()
