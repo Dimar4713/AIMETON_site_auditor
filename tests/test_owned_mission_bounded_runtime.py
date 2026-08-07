@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.auth import LocalAuthProvider, PasswordHasher, SQLiteUserRepository, UserRole
 from app.auth_api import CSRF_COOKIE, CSRF_HEADER, get_auth_provider, router as auth_router
 from app.mission_api import get_mission_repository, router as mission_router
+from app.mission_bounded_runtime import _aggregate_evidence, _preferred_target_url
 from app.mission_sqlite import SQLiteMissionRepository
 from app.models import SiteAnalysis
 
@@ -62,16 +63,49 @@ def _csrf(client: TestClient) -> dict[str, str]:
     return {CSRF_HEADER: client.cookies[CSRF_COOKIE]}
 
 
+def _deep_evidence():
+    return (
+        {"final_url": "https://example.org", "title": "Example", "text": "seed"},
+        4,
+        "SOURCE: https://example.org\nTITLE: Example\n" + ("rich evidence " * 300),
+    )
+
+
+def test_http_target_prefers_https_with_http_fallback() -> None:
+    preferred, fallback = _preferred_target_url("http:\\example.org/path")
+    assert preferred == "https://example.org/path"
+    assert fallback == "http://example.org/path"
+
+
+def test_https_target_is_not_rewritten() -> None:
+    preferred, fallback = _preferred_target_url("https://example.org/path")
+    assert preferred == "https://example.org/path"
+    assert fallback is None
+
+
+def test_evidence_aggregation_keeps_page_provenance() -> None:
+    text = _aggregate_evidence(
+        [
+            {"final_url": "https://example.org/", "title": "Home", "text": "home facts"},
+            {"final_url": "https://example.org/doctors", "title": "Doctors", "text": "doctor facts"},
+        ]
+    )
+    assert "SOURCE: https://example.org/" in text
+    assert "SOURCE: https://example.org/doctors" in text
+    assert "doctor facts" in text
+
+
 def test_workspace_mission_runs_real_bounded_worker_and_persists_report(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AIMETON_COOKIE_SECURE", "false")
 
-    async def fake_fetch_site(url: str):
-        return {"final_url": url, "title": "Example", "text": "Example text"}
+    async def fake_collect(target_ref: str, *, owned_mission_id: str):
+        return _deep_evidence()
 
     async def fake_analysis(final_url: str, title: str, text: str):
+        assert "rich evidence" in text
         return _analysis()
 
-    monkeypatch.setattr("app.mission_bounded_runtime.fetch_site", fake_fetch_site)
+    monkeypatch.setattr("app.mission_bounded_runtime._collect_deep_site_evidence", fake_collect)
     monkeypatch.setattr("app.mission_bounded_runtime.run_enriched_site_analysis", fake_analysis)
 
     app, repository = _app(tmp_path)
@@ -98,18 +132,18 @@ def test_workspace_mission_runs_real_bounded_worker_and_persists_report(tmp_path
 
     records = repository.records_for_owner(1, mission_id)
     assert records is not None
-    summaries = [
-        record["payload"].get("summary")
-        for record in records
-        if record["kind"] == "turn"
-    ]
+    turns = [record["payload"] for record in records if record["kind"] == "turn"]
+    summaries = [turn.get("summary") for turn in turns]
     assert summaries == [
         "execution_started",
         "planning_started",
         "site_fetch_started",
+        "deep_crawl_started",
         "site_fetch_completed",
+        "deep_crawl_completed",
         "analysis_completed",
     ]
+    assert next(turn for turn in turns if turn["summary"] == "deep_crawl_completed")["source_count"] == 4
     assert "runtime_step_not_configured" not in summaries
 
     report = client.get(f"/api/user/missions/{mission_id}/report")
@@ -121,13 +155,13 @@ def test_workspace_mission_runs_real_bounded_worker_and_persists_report(tmp_path
 def test_owned_report_is_not_visible_to_another_user(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AIMETON_COOKIE_SECURE", "false")
 
-    async def fake_fetch_site(url: str):
-        return {"final_url": url, "title": "Example", "text": "Example text"}
+    async def fake_collect(target_ref: str, *, owned_mission_id: str):
+        return _deep_evidence()
 
     async def fake_analysis(final_url: str, title: str, text: str):
         return _analysis()
 
-    monkeypatch.setattr("app.mission_bounded_runtime.fetch_site", fake_fetch_site)
+    monkeypatch.setattr("app.mission_bounded_runtime._collect_deep_site_evidence", fake_collect)
     monkeypatch.setattr("app.mission_bounded_runtime.run_enriched_site_analysis", fake_analysis)
 
     app, _repository = _app(tmp_path)
@@ -154,13 +188,13 @@ def test_owned_report_is_not_visible_to_another_user(tmp_path, monkeypatch) -> N
     assert hidden.json()["detail"]["reason"] == "mission_not_found"
 
 
-def test_bounded_worker_reports_typed_failure_instead_of_placeholder_block(tmp_path, monkeypatch) -> None:
+def test_bounded_worker_blocks_when_evidence_collection_is_insufficient(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AIMETON_COOKIE_SECURE", "false")
 
-    async def failing_fetch_site(url: str):
-        raise ValueError("synthetic fetch failure")
+    async def failing_collect(target_ref: str, *, owned_mission_id: str):
+        raise ValueError("insufficient_site_evidence")
 
-    monkeypatch.setattr("app.mission_bounded_runtime.fetch_site", failing_fetch_site)
+    monkeypatch.setattr("app.mission_bounded_runtime._collect_deep_site_evidence", failing_collect)
 
     app, repository = _app(tmp_path)
     client = TestClient(app)
@@ -183,5 +217,5 @@ def test_bounded_worker_reports_typed_failure_instead_of_placeholder_block(tmp_p
     assert records is not None
     terminal = [record for record in records if record["kind"] == "turn"][-1]["payload"]
     assert terminal["summary"] == "analysis_failed"
-    assert terminal["reason_code"] == "site_analysis_failed"
-    assert terminal["next_action"] == "verify_target_and_retry"
+    assert terminal["reason_code"] == "site_evidence_insufficient"
+    assert terminal["next_action"] == "inspect_collection_trace"
