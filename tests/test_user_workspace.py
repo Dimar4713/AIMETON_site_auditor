@@ -40,6 +40,10 @@ def test_workspace_serves_shell_for_authenticated_user() -> None:
     assert response.status_code == 200
     assert "Мои миссии" in response.text
     assert "/static/workspace.js" in response.text
+    assert 'id="admin-workspace-link"' in response.text
+    assert 'href="/admin/workspace"' in response.text
+    assert "Администрирование" in response.text
+    assert "hidden" in response.text
 
 
 def test_mission_detail_shell_requires_authenticated_session() -> None:
@@ -69,3 +73,5 @@ def test_workspace_client_uses_owned_api_and_server_session() -> None:
     assert "owner_id" not in source
     assert "/api/admin/" not in source
     assert "/workspace/missions/" in source
+    assert "#admin-workspace-link" in source
+    assert "user.role !== 'admin'" in source
