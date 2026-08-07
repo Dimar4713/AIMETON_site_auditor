@@ -123,17 +123,17 @@ jobs:
           curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/health" >/dev/null
           echo "Local stage preflight passed; no PyPI or runtime package installation used"
 
-      - name: Validate provider secret contract
+      - name: Validate provider configuration contract
         shell: bash
         env:
           TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
           YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
-          YANDEX_CLOUD_FOLDER_ID: ${{ secrets.YANDEX_CLOUD_FOLDER_ID }}
+          YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
         run: |
           set -Eeuo pipefail
           test -n "$TAVILY_TOKEN" || { echo "Missing required stage secret: TAVILY_TOKEN" >&2; exit 1; }
           test -n "$YANDEX_SEARCH_API_KEY" || { echo "Missing required stage secret: YANDEX_SEARCH_API_KEY" >&2; exit 1; }
-          test -n "$YANDEX_CLOUD_FOLDER_ID" || { echo "Missing required stage secret: YANDEX_CLOUD_FOLDER_ID" >&2; exit 1; }
+          test -n "$YANDEX_CLOUD_FOLDER_ID" || { echo "Missing required stage variable: YANDEX_CLOUD_FOLDER_ID" >&2; exit 1; }
 
       - name: Deploy transactionally to stage
         shell: bash
@@ -142,7 +142,7 @@ jobs:
           SOURCE_DIR: ${{ github.workspace }}
           TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
           YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
-          YANDEX_CLOUD_FOLDER_ID: ${{ secrets.YANDEX_CLOUD_FOLDER_ID }}
+          YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
         run: |
           set -Eeuo pipefail
           mkdir -p deployment-evidence
