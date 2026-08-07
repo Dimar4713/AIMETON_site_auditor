@@ -28,7 +28,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
     assert "issue_number: 192" in text
     assert "issue_number: 197" in text
     assert "issue_number: 177" in text
-    assert "issue_number: 203" in text
+    assert text.count("issue_number: 203") == 2
     assert "issue_number: 36" in text
     assert "issueNumber !== route.issue_number" in text
 
@@ -48,6 +48,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
         "accept-mission-stage-v2": "stage-mission-ownership-acceptance-v2.yml",
         "accept-integrated-stage-continuity": "stage-integrated-continuity.yml",
         "audit-server-architecture": "server-architecture-audit.yml",
+        "accept-integrated-stage-companies-bootstrap": "stage-real-company-bootstrap-acceptance.yml",
     }.items():
         assert command in text
         assert workflow in text
@@ -134,6 +135,10 @@ def test_integrated_continuity_no_longer_subscribes_to_comments() -> None:
 
 def test_server_architecture_audit_no_longer_subscribes_to_comments() -> None:
     _assert_dispatch_only(".github/workflows/server-architecture-audit.yml")
+
+
+def test_real_company_bootstrap_no_longer_subscribes_to_comments() -> None:
+    _assert_dispatch_only(".github/workflows/stage-real-company-bootstrap-acceptance.yml")
 
 
 def test_superseded_mission_ownership_v1_does_not_return() -> None:
