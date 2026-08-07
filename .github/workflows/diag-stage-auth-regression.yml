@@ -1,0 +1,63 @@
+name: Diagnose Stage Auth Regression
+
+on:
+  push:
+    branches:
+      - diag/stage-auth-regression-20260807
+    paths:
+      - .github/workflows/diag-stage-auth-regression.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    steps:
+      - name: Inspect stage auth persistence without credentials
+        shell: bash
+        env:
+          CONTAINER: aimeton-auditor
+        run: |
+          set -Eeuo pipefail
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          echo '## Stage auth persistence diagnostic'
+          echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "revision=$(docker inspect -f '{{ index .Config.Labels \"org.opencontainers.image.revision\" }}' "$CONTAINER" 2>/dev/null || true)"
+          echo "container_status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          echo "data_mount=$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination \"/app/data\"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
+          docker exec "$CONTAINER" python - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+
+          auth_path = Path(os.environ.get('AIMETON_AUTH_DB', 'data/auth.sqlite3'))
+          print(f'auth_db_configured_path={auth_path}')
+          print(f'cwd={Path.cwd()}')
+          print(f'auth_db_exists={auth_path.exists()}')
+          print(f'app_data_exists={Path("/app/data").exists()}')
+          if Path('/app/data').exists():
+              print('app_data_entries=' + ','.join(sorted(p.name for p in Path('/app/data').iterdir())))
+          candidates = [auth_path, Path('/app/data/auth.sqlite3'), Path('/app/data/runtime-core.sqlite3')]
+          seen = set()
+          for path in candidates:
+              key = str(path.resolve()) if path.exists() else str(path)
+              if key in seen:
+                  continue
+              seen.add(key)
+              print(f'db_candidate={path} exists={path.exists()}')
+              if not path.exists():
+                  continue
+              try:
+                  with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
+                      integrity = db.execute('PRAGMA integrity_check').fetchone()[0]
+                      tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+                      print(f'db_integrity[{path}]={integrity}')
+                      print(f'db_tables[{path}]=' + ','.join(tables))
+                      if 'users' in tables:
+                          users = db.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+                          print(f'db_user_count[{path}]={users}')
+              except Exception as exc:
+                  print(f'db_read_error[{path}]={type(exc).__name__}:{exc}')
+          PY
