@@ -27,7 +27,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
     assert "issue_number: 262" in text
     assert "issue_number: 192" in text
     assert "issue_number: 197" in text
-    assert text.count("issue_number: 177") == 2
+    assert text.count("issue_number: 177") == 3
     assert text.count("issue_number: 203") == 3
     assert "issue_number: 36" in text
     assert "issue_number: 159" in text
@@ -53,6 +53,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
         "accept-integrated-stage-companies-bootstrap": "stage-real-company-bootstrap-acceptance.yml",
         "audit-auth-persistence": "server-auth-persistence-audit.yml",
         "diagnose-mission-stage": "stage-mission-diagnostics.yml",
+        "reconcile-stage-data-mount": "stage-data-mount-reconcile.yml",
     }.items():
         assert command in text
         assert workflow in text
@@ -163,6 +164,10 @@ def test_auth_persistence_audit_no_longer_subscribes_to_comments() -> None:
 
 def test_mission_diagnostics_no_longer_subscribes_to_comments() -> None:
     _assert_dispatch_only(".github/workflows/stage-mission-diagnostics.yml")
+
+
+def test_stage_data_mount_reconcile_no_longer_subscribes_to_comments() -> None:
+    _assert_dispatch_only(".github/workflows/stage-data-mount-reconcile.yml")
 
 
 def test_superseded_mission_ownership_v1_does_not_return() -> None:
