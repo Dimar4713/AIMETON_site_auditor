@@ -2,12 +2,14 @@ name: Repair Stage Admin
 
 on:
   workflow_dispatch:
-  issue_comment:
-    types: [created]
+    inputs:
+      expected_sha:
+        description: Exact deployed commit SHA expected on stage
+        required: true
+        type: string
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: aimeton-stage-admin-repair
@@ -15,12 +17,6 @@ concurrency:
 
 jobs:
   repair:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.number == 164 &&
-       github.event.comment.body == '/repair-admin-stage' &&
-       github.event.comment.user.login == 'Dimar4713')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
@@ -31,6 +27,24 @@ jobs:
       AIMETON_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.AIMETON_BOOTSTRAP_ADMIN_PASSWORD }}
 
     steps:
+      - name: Verify exact deployed SHA before mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          requested_sha='${{ inputs.expected_sha }}'
+          [[ "$requested_sha" =~ ^[0-9a-f]{40}$ ]]
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          deployed_sha="$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$CONTAINER" 2>/dev/null || true)"
+          test -n "$deployed_sha" || {
+            echo "Missing deployed revision label on $CONTAINER" >&2
+            exit 1
+          }
+          [[ "$requested_sha" == "$deployed_sha" ]] || {
+            echo "Refusing mutation: requested SHA does not match deployed SHA" >&2
+            exit 1
+          }
+          echo "deployed_sha_verified=$deployed_sha"
+
       - name: Validate credential contract
         shell: bash
         run: |
