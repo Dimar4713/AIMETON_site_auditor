@@ -20,7 +20,7 @@ jobs:
         run: |
           set -euo pipefail
           docker ps --format '{{.Names}}|{{.Status}}' | grep '^aimeton-auditor|' || true
-          docker exec aimeton-auditor python - <<'PY'
+          docker exec -i aimeton-auditor python - <<'PY'
           import asyncio
           from app.mission_bounded_runtime import _collect_deep_site_evidence
 
