@@ -2,8 +2,11 @@ name: Server Auth Persistence Audit
 
 on:
   workflow_dispatch:
-  issue_comment:
-    types: [created]
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to audit
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,16 +18,26 @@ concurrency:
 
 jobs:
   audit:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'issue_comment' && github.event.issue.number == 159 && github.event.comment.body == '/audit-auth-persistence' && github.event.comment.user.login == 'Dimar4713') }}
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
     steps:
+      - name: Verify exact deployed SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          deployed="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt")"
+          [[ "$deployed" == "$expected" ]]
+
       - name: Audit auth database persistence without secrets
         id: audit
         shell: bash
         run: |
           set -Eeuo pipefail
-          cd /opt/aimeton/auditor-stack
+          cd "$STACK_DIR"
 
           report="$RUNNER_TEMP/auth-persistence-report.md"
           : > "$report"
