@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 from typing import Any, Protocol
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from app.evidence_crawler.factory import get_evidence_crawler
+from app.evidence_crawler.models import BootstrapCrawlPolicy, CrawlStatus
 from app.external_sources import run_enriched_site_analysis
 from app.mission_contract import Mission, MissionState, utc_now
-from app.scraper import FetchError, fetch_site
+from app.mission_orchestrator import (
+    ActionCandidate,
+    ActionType,
+    EntryPoint,
+    PolicySnapshot,
+    default_site_mission_request,
+    get_mission_orchestrator,
+)
+from app.scraper import FetchError, fetch_site, normalize_url
+
+MIN_EVIDENCE_CHARS = 1_500
+MAX_EVIDENCE_CHARS = 120_000
+MAX_EVIDENCE_PAGE_CHARS = 24_000
 
 
 class BoundedRuntimeRepository(Protocol):
@@ -53,6 +68,123 @@ def _turn(
     repository.append_record(mission_id, "turn", payload)
 
 
+def _preferred_target_url(raw: str) -> tuple[str, str | None]:
+    """Return a preferred HTTPS target plus an optional HTTP fallback.
+
+    User-entered HTTP URLs are upgraded only for the standard HTTP port. If the
+    HTTPS representation cannot be fetched, the original normalized HTTP URL is
+    still available as a bounded fallback.
+    """
+    normalized = normalize_url(raw)
+    parsed = urlsplit(normalized)
+    if parsed.scheme != "http" or parsed.port not in {None, 80}:
+        return normalized, None
+    https_netloc = parsed.hostname or ""
+    if parsed.port == 80:
+        https_netloc = parsed.hostname or ""
+    preferred = urlunsplit(("https", https_netloc, parsed.path, parsed.query, ""))
+    return preferred, normalized
+
+
+async def _fetch_preferred_target(raw: str) -> dict[str, str]:
+    preferred, fallback = _preferred_target_url(raw)
+    try:
+        return await fetch_site(preferred)
+    except FetchError:
+        if fallback is None:
+            raise
+        return await fetch_site(fallback)
+
+
+def _aggregate_evidence(pages: list[dict[str, str]]) -> str:
+    chunks: list[str] = []
+    total = 0
+    for page in pages:
+        text = " ".join((page.get("text") or "").split())
+        if not text:
+            continue
+        title = " ".join((page.get("title") or "").split())
+        final_url = page.get("final_url") or ""
+        body = text[:MAX_EVIDENCE_PAGE_CHARS]
+        chunk = f"SOURCE: {final_url}\nTITLE: {title}\n{body}"
+        remaining = MAX_EVIDENCE_CHARS - total
+        if remaining <= 0:
+            break
+        chunk = chunk[:remaining]
+        chunks.append(chunk)
+        total += len(chunk)
+    return "\n\n--- INTERNAL PAGE ---\n\n".join(chunks)
+
+
+async def _collect_deep_site_evidence(
+    target_ref: str,
+    *,
+    owned_mission_id: str,
+) -> tuple[dict[str, str], int, str]:
+    """Collect bounded same-origin evidence before analytical generation."""
+    seed = await _fetch_preferred_target(target_ref)
+    orchestrator = get_mission_orchestrator()
+    crawl_snapshot = orchestrator.create_mission(
+        default_site_mission_request(
+            seed["final_url"],
+            analysis_id=f"owned-{owned_mission_id}",
+        ),
+        entry_point=EntryPoint.UI,
+    )
+    crawl_mission_id = crawl_snapshot.contract.mission_id
+    host = (urlsplit(seed["final_url"]).hostname or "").lower()
+    if not host:
+        raise ValueError("site_host_missing")
+    plan = orchestrator.plan(
+        crawl_mission_id,
+        deficits=["bootstrap"],
+        candidates=[
+            ActionCandidate(
+                action_type=ActionType.CRAWL_URL,
+                target=seed["final_url"],
+                deficit_code="bootstrap",
+                expected_sufficiency_gain=0.8,
+                ai_priority=1.0,
+            )
+        ],
+        policy=PolicySnapshot(
+            allowed_hosts=frozenset({host}),
+            remaining_actions=20,
+        ),
+    )
+    crawl = await get_evidence_crawler().run_mission(
+        orchestrator,
+        crawl_mission_id,
+        plan=plan,
+        policy=BootstrapCrawlPolicy(
+            max_pages=12,
+            max_depth=3,
+            max_duration_seconds=60,
+            max_links_per_page=100,
+            allow_browser=True,
+        ),
+    )
+    if crawl.status is CrawlStatus.BLOCKED or not crawl.pages:
+        raise ValueError("deep_crawl_blocked")
+
+    pages: list[dict[str, str]] = [seed]
+    seen = {seed["final_url"]}
+    for crawled_page in crawl.pages:
+        page_url = str(crawled_page.final_url)
+        if page_url in seen:
+            continue
+        seen.add(page_url)
+        try:
+            pages.append(await _fetch_preferred_target(page_url))
+        except (FetchError, httpx.HTTPError):
+            continue
+
+    evidence_text = _aggregate_evidence(pages)
+    if len(evidence_text) < MIN_EVIDENCE_CHARS:
+        raise ValueError("insufficient_site_evidence")
+    return seed, len(pages), evidence_text
+
+
 async def run_owned_site_analysis(
     repository: BoundedRuntimeRepository,
     *,
@@ -61,9 +193,9 @@ async def run_owned_site_analysis(
 ) -> None:
     """Execute one bounded owner-scoped site-analysis mission.
 
-    The worker reuses the existing fetch/enrichment pipeline while keeping the
-    canonical user mission and its report inside owner-scoped persistence.
-    Secrets and provider payloads are not copied into the user event stream.
+    The worker now places the existing Evidence Crawler on the production user
+    path before enrichment/LLM analysis. Reports remain owner-scoped and no
+    secret/provider payloads are copied into the user event stream.
     """
     if mission.owner_id != owner_id or mission.state is not MissionState.RUNNING:
         return
@@ -81,18 +213,35 @@ async def run_owned_site_analysis(
             summary="site_fetch_started",
             status="running",
         )
-        page = await fetch_site(mission.target_ref)
+        _turn(
+            repository,
+            mission.id,
+            summary="deep_crawl_started",
+            status="running",
+        )
+        seed, internal_page_count, evidence_text = await _collect_deep_site_evidence(
+            mission.target_ref,
+            owned_mission_id=mission.id,
+        )
         _turn(
             repository,
             mission.id,
             summary="site_fetch_completed",
             status="running",
+            source_count=internal_page_count,
+        )
+        _turn(
+            repository,
+            mission.id,
+            summary="deep_crawl_completed",
+            status="running",
+            source_count=internal_page_count,
         )
 
         result = await run_enriched_site_analysis(
-            page["final_url"],
-            page["title"],
-            page["text"],
+            seed["final_url"],
+            seed["title"],
+            evidence_text,
         )
         report_payload = result.model_copy(
             update={"mission_id": mission.id}
@@ -134,8 +283,8 @@ async def run_owned_site_analysis(
             mission.id,
             summary="analysis_failed",
             status="blocked",
-            reason_code="site_analysis_failed",
-            next_action="verify_target_and_retry",
+            reason_code="site_evidence_insufficient",
+            next_action="inspect_collection_trace",
         )
         repository.update_state_for_owner(
             owner_id,
