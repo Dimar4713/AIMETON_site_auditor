@@ -1,0 +1,40 @@
+name: Diag Stage Deep Evidence 422
+
+on:
+  push:
+    branches:
+      - diag/stage-deep-evidence-422
+    paths:
+      - .github/workflows/diag-stage-deep-evidence-422.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 10
+    steps:
+      - name: Verify deployed container and run read-only evidence collection
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker ps --format '{{.Names}}|{{.Status}}' | grep '^aimeton-auditor|' || true
+          docker exec aimeton-auditor python - <<'PY'
+          import asyncio
+          from app.mission_bounded_runtime import _collect_deep_site_evidence
+
+          async def main():
+              seed, page_count, evidence = await _collect_deep_site_evidence(
+                  'https://stomadv.ru/',
+                  owned_mission_id='diag-stage-deep-evidence-422',
+              )
+              print(f'final_url={seed["final_url"]}')
+              print(f'page_count={page_count}')
+              print(f'evidence_chars={len(evidence)}')
+              for line in evidence.splitlines():
+                  if line.startswith('SOURCE: '):
+                      print(line)
+
+          asyncio.run(main())
+          PY
