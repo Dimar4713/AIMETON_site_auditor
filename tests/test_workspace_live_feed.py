@@ -27,8 +27,13 @@ def test_workspace_projects_latest_sanitized_operational_status() -> None:
     assert "chain-of-thought" not in script
 
 
-def test_workspace_reports_truthful_blocked_launch() -> None:
+def test_workspace_reports_real_bounded_runtime_progress() -> None:
     script = (ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
 
-    assert "mission.state === 'blocked'" in script
-    assert "рабочий контур пока не настроен" in script
+    assert "site_fetch_started" in script
+    assert "site_fetch_completed" in script
+    assert "analysis_completed" in script
+    assert "analysis_failed" in script
+    assert "Миссия принята:" in script
+    assert "mission.state === 'blocked'" not in script
+    assert "рабочий контур пока не настроен" not in script
