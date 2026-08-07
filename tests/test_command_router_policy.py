@@ -28,7 +28,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
     assert "issue_number: 192" in text
     assert "issue_number: 197" in text
     assert text.count("issue_number: 177") == 2
-    assert text.count("issue_number: 203") == 2
+    assert text.count("issue_number: 203") == 3
     assert "issue_number: 36" in text
     assert "issue_number: 159" in text
     assert "issueNumber !== route.issue_number" in text
@@ -48,6 +48,7 @@ def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
         "accept-admin-workspace-stage": "stage-admin-workspace-acceptance.yml",
         "accept-mission-stage-v2": "stage-mission-ownership-acceptance-v2.yml",
         "accept-integrated-stage-continuity": "stage-integrated-continuity.yml",
+        "accept-integrated-stage-core": "stage-integrated-acceptance.yml",
         "audit-server-architecture": "server-architecture-audit.yml",
         "accept-integrated-stage-companies-bootstrap": "stage-real-company-bootstrap-acceptance.yml",
         "audit-auth-persistence": "server-auth-persistence-audit.yml",
@@ -134,6 +135,18 @@ def test_mission_ownership_v2_no_longer_subscribes_to_comments() -> None:
 
 def test_integrated_continuity_no_longer_subscribes_to_comments() -> None:
     _assert_dispatch_only(".github/workflows/stage-integrated-continuity.yml")
+
+
+def test_integrated_core_no_longer_subscribes_to_comments() -> None:
+    text = Path(".github/workflows/stage-integrated-acceptance.yml").read_text(encoding="utf-8")
+    trigger_block = text.split("permissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "issue_comment:" not in trigger_block
+    assert "github.event_name == 'issue_comment'" not in text
+    assert "inputs.expected_sha" in text
+    assert "requested_sha='${{ inputs.expected_sha }}'" in text
+    assert 'acceptance_contract_sha="$GITHUB_SHA"' in text
+    assert '[[ "$requested_sha" == "$acceptance_contract_sha" ]]' in text
 
 
 def test_server_architecture_audit_no_longer_subscribes_to_comments() -> None:
