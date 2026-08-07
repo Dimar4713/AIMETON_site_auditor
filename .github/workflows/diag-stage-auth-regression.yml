@@ -25,10 +25,10 @@ jobs:
           docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
           echo '## Stage auth persistence diagnostic'
           echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "revision=$(docker inspect -f '{{ index .Config.Labels \"org.opencontainers.image.revision\" }}' "$CONTAINER" 2>/dev/null || true)"
+          echo "revision=$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$CONTAINER" 2>/dev/null || true)"
           echo "container_status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
-          echo "data_mount=$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination \"/app/data\"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
-          docker exec "$CONTAINER" python - <<'PY'
+          docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}data_mount={{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}'
+          docker exec -i "$CONTAINER" python - <<'PY'
           import os, sqlite3
           from pathlib import Path
 
@@ -57,7 +57,9 @@ jobs:
                       print(f'db_tables[{path}]=' + ','.join(tables))
                       if 'users' in tables:
                           users = db.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+                          admins = db.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1").fetchone()[0]
                           print(f'db_user_count[{path}]={users}')
+                          print(f'db_active_admin_count[{path}]={admins}')
               except Exception as exc:
                   print(f'db_read_error[{path}]={type(exc).__name__}:{exc}')
           PY
