@@ -36,6 +36,10 @@ function eventLabel(summary) {
   return ({
     execution_started: 'Запуск подтверждён',
     planning_started: 'Формируется план',
+    site_fetch_started: 'Подключаемся к сайту',
+    site_fetch_completed: 'Сайт получен',
+    analysis_completed: 'Анализ завершён',
+    analysis_failed: 'Анализ остановлен',
     runtime_step_not_configured: 'Рабочий шаг не настроен',
   })[summary] || summary || 'Событие подтверждено';
 }
@@ -159,10 +163,8 @@ form.addEventListener('submit', async (event) => {
   }
   const mission = await response.json();
   form.reset();
-  messageBox.textContent = mission.state === 'blocked'
-    ? 'Миссия остановлена честно: рабочий контур пока не настроен.'
-    : `Миссия создана: ${stateLabel(mission.state)}.`;
-  messageBox.className = mission.state === 'blocked' ? 'message error' : 'message success';
+  messageBox.textContent = `Миссия принята: ${stateLabel(mission.state)}. Ход выполнения появится в истории.`;
+  messageBox.className = 'message success';
   messageBox.hidden = false;
   await loadMissions();
 });

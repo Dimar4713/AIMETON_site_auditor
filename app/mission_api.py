@@ -3,11 +3,12 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.auth import User
 from app.auth_api import CSRF_COOKIE, CSRF_HEADER, _require_csrf, current_user, require_admin
+from app.mission_bounded_runtime import run_owned_site_analysis
 from app.mission_contract import (
     Mission,
     MissionCreate,
@@ -16,9 +17,9 @@ from app.mission_contract import (
     MissionUserProjection,
 )
 from app.mission_execution import start_mission_execution
-from app.mission_local_runtime import run_cost_free_local_step
 from app.mission_observability import derive_runtime_observation
 from app.mission_sqlite import SQLiteMissionRepository
+from app.models import SiteAnalysis
 
 
 router = APIRouter(tags=["owned-missions"])
@@ -114,6 +115,17 @@ def _not_found() -> HTTPException:
     return HTTPException(status_code=404, detail={"reason": "mission_not_found"})
 
 
+def _records_for_owner(
+    repository: MissionRepository,
+    owner_id: int,
+    mission_id: str,
+) -> list[dict[str, Any]] | None:
+    records_reader = getattr(repository, "records_for_owner", None)
+    if not callable(records_reader):
+        raise HTTPException(status_code=500, detail={"reason": "mission_records_unavailable"})
+    return records_reader(owner_id, mission_id)
+
+
 @router.post(
     "/api/user/missions",
     response_model=MissionUserProjection,
@@ -121,6 +133,7 @@ def _not_found() -> HTTPException:
 )
 def create_owned_mission(
     payload: MissionCreate,
+    background_tasks: BackgroundTasks,
     user: User = Depends(current_user),
     csrf_cookie: str | None = Cookie(default=None, alias=CSRF_COOKIE),
     csrf_header: str | None = Header(default=None, alias=CSRF_HEADER),
@@ -133,12 +146,13 @@ def create_owned_mission(
         owner_id=user.id,
         mission=mission,
     )
-    runtime = run_cost_free_local_step(
+    background_tasks.add_task(
+        run_owned_site_analysis,
         repository,
         owner_id=user.id,
         mission=execution.mission,
     )
-    return MissionUserProjection.from_mission(runtime.mission)
+    return MissionUserProjection.from_mission(execution.mission)
 
 
 @router.get("/api/user/missions", response_model=list[MissionUserProjection])
@@ -174,10 +188,7 @@ def get_owned_mission_records(
     user: User = Depends(current_user),
     repository: MissionRepository = Depends(get_mission_repository),
 ) -> MissionUserRecordsProjection:
-    records_reader = getattr(repository, "records_for_owner", None)
-    if not callable(records_reader):
-        raise HTTPException(status_code=500, detail={"reason": "mission_records_unavailable"})
-    records = records_reader(user.id, mission_id)
+    records = _records_for_owner(repository, user.id, mission_id)
     if records is None:
         raise _not_found()
     observation = derive_runtime_observation(records)
@@ -199,6 +210,28 @@ def get_owned_mission_records(
         stalled=observation.stalled,
         runtime_reason=observation.reason_code,
     )
+
+
+@router.get("/api/user/missions/{mission_id}/report", response_model=SiteAnalysis)
+def get_owned_mission_report(
+    mission_id: str,
+    user: User = Depends(current_user),
+    repository: MissionRepository = Depends(get_mission_repository),
+) -> SiteAnalysis:
+    records = _records_for_owner(repository, user.id, mission_id)
+    if records is None:
+        raise _not_found()
+    report_payload = next(
+        (
+            record.get("payload")
+            for record in reversed(records)
+            if record.get("kind") == "report_payload"
+        ),
+        None,
+    )
+    if not isinstance(report_payload, dict):
+        raise HTTPException(status_code=404, detail={"reason": "report_not_available"})
+    return SiteAnalysis.model_validate(report_payload)
 
 
 @router.patch("/api/user/missions/{mission_id}/state", response_model=MissionUserProjection)

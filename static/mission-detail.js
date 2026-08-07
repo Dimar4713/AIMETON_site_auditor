@@ -19,7 +19,7 @@ function guidance(state) {
     running: 'Анализ выполняется и подтверждён execution-событиями.',
     degraded: 'Получен ограниченный результат. Успешный отчёт не подтверждён.',
     blocked: 'Продолжение заблокировано. Требуется устранить указанную причину.',
-    completed: 'Миссия завершена. Доступность отчёта определяется отдельным release-контрактом.',
+    completed: 'Миссия завершена. Ниже доступен owner-scoped результат анализа.',
   })[state] || 'Состояние миссии обновлено.';
 }
 
@@ -27,6 +27,10 @@ function eventLabel(summary) {
   return ({
     execution_started: 'Запуск миссии подтверждён.',
     planning_started: 'Формируется план выполнения.',
+    site_fetch_started: 'Подключаемся к сайту.',
+    site_fetch_completed: 'Сайт получен.',
+    analysis_completed: 'Анализ завершён.',
+    analysis_failed: 'Анализ остановлен.',
     runtime_step_not_configured: 'Рабочий шаг пока не настроен.',
   })[summary] || summary || 'Операционное событие подтверждено.';
 }
@@ -35,7 +39,15 @@ function eventIcon(summary, state) {
   if (state === 'blocked') return '⛔';
   if (state === 'degraded') return '⚠️';
   if (state === 'completed') return '✅';
-  return ({execution_started: '▶️', planning_started: '🧭', runtime_step_not_configured: '⏸️'})[summary] || '•';
+  return ({
+    execution_started: '▶️',
+    planning_started: '🧭',
+    site_fetch_started: '🌐',
+    site_fetch_completed: '📥',
+    analysis_completed: '✅',
+    analysis_failed: '⛔',
+    runtime_step_not_configured: '⏸️',
+  })[summary] || '•';
 }
 
 function heartbeatLabel(payload) {
@@ -52,12 +64,16 @@ function reasonLabel(reason) {
     heartbeat_stalled: 'События выполнения перестали обновляться.',
     heartbeat_missing: 'Отсутствует корректная временная метка события.',
     runtime_step_not_configured: 'Рабочий шаг пока не настроен.',
+    site_analysis_failed: 'Не удалось получить или обработать целевой сайт.',
+    bounded_runtime_failed: 'Рабочий контур завершился внутренней безопасной остановкой.',
   })[reason] || reason || '';
 }
 
 function nextActionLabel(nextAction) {
   return ({
     configure_bounded_runtime_worker: 'Следующий шаг: подключить ограниченный рабочий контур выполнения.',
+    verify_target_and_retry: 'Следующий шаг: проверить адрес сайта и повторить запуск.',
+    inspect_runtime_trace: 'Следующий шаг: проверить технологический trace миссии.',
   })[nextAction] || (nextAction ? `Следующий шаг: ${nextAction}.` : '');
 }
 
@@ -170,13 +186,54 @@ function renderLiveFeed(mission, records) {
   liveUpdatedBox.textContent = `Последнее обновление: ${new Date(updatedAt).toLocaleString()}`;
 }
 
-function renderReport(payload) {
-  const report = payload.report_metadata;
-  if (!report || payload.report_reason) {
+async function renderReport(missionId, payload) {
+  const reportMeta = payload.report_metadata;
+  if (!reportMeta || payload.report_reason) {
     reportBox.textContent = `Отчёт недоступен: ${payload.report_reason || 'report_not_available'}.`;
     return;
   }
-  reportBox.textContent = `Отчёт ${report.data.report_id || report.id} доступен (${report.data.format || report.data.content_type || 'metadata'}).`;
+
+  const response = await api(`/api/user/missions/${encodeURIComponent(missionId)}/report`);
+  if (!response.ok) {
+    reportBox.textContent = `Отчёт недоступен (${response.status}).`;
+    return;
+  }
+  const report = await response.json();
+  reportBox.replaceChildren();
+
+  const card = document.createElement('article');
+  card.className = 'mission-card';
+  const title = document.createElement('h3');
+  title.textContent = report.company_name || 'Результат анализа';
+  const summary = document.createElement('p');
+  summary.textContent = report.business_summary || 'Краткое описание не сформировано.';
+  card.append(title, summary);
+
+  const opportunity = report.commercial_opportunity;
+  if (opportunity) {
+    const line = document.createElement('p');
+    line.textContent = `Возможность: ${opportunity.recommended_solution || opportunity.opportunity_type || '—'} · оценка ${opportunity.score ?? '—'}/100 · ${opportunity.qualification || ''}`;
+    card.append(line);
+  }
+
+  const sourceLine = document.createElement('p');
+  sourceLine.textContent = `Подтверждённых/собранных источников: ${Array.isArray(report.sources) ? report.sources.length : 0}`;
+  card.append(sourceLine);
+
+  const agents = Array.isArray(report.agents) ? report.agents : [];
+  if (agents.length) {
+    const heading = document.createElement('h4');
+    heading.textContent = 'Рекомендуемые AI-агенты';
+    const list = document.createElement('ul');
+    for (const agent of agents) {
+      const item = document.createElement('li');
+      item.textContent = `${agent.name}: ${agent.purpose} — ${agent.benefit}`;
+      list.append(item);
+    }
+    card.append(heading, list);
+  }
+
+  reportBox.append(card);
 }
 
 async function load() {
@@ -222,7 +279,7 @@ async function load() {
     renderLiveFeed(mission, records);
     renderTerminalHistory(mission, records);
     renderEvidence(records.evidence || []);
-    renderReport(records);
+    await renderReport(missionId, records);
   } else {
     liveFeedBox.textContent = 'Ход миссии недоступен.';
     evidenceBox.textContent = 'Evidence/УДП недоступны.';

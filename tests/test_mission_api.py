@@ -9,6 +9,11 @@ from app.mission_sqlite import SQLiteMissionRepository
 
 def build_client(tmp_path, monkeypatch):
     monkeypatch.setenv("AIMETON_COOKIE_SECURE", "false")
+
+    async def noop_owned_worker(repository, *, owner_id, mission):
+        return None
+
+    monkeypatch.setattr("app.mission_api.run_owned_site_analysis", noop_owned_worker)
     users = SQLiteUserRepository(tmp_path / "auth.sqlite3")
     hasher = PasswordHasher()
     users.create_user("admin", hasher.hash("admin secure password"), UserRole.ADMIN)
