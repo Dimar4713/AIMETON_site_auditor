@@ -1,0 +1,107 @@
+name: Repair Stage Auth Regression Once
+
+on:
+  push:
+    branches:
+      - diag/stage-auth-regression-20260807
+    paths:
+      - .github/workflows/repair-stage-auth-regression-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+      HOST_AUTH_DB: /opt/aimeton/auditor-stack/data/runtime-core/auth.sqlite3
+      AIMETON_BOOTSTRAP_ADMIN_USERNAME: ${{ vars.AIMETON_BOOTSTRAP_ADMIN_USERNAME }}
+      AIMETON_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.AIMETON_BOOTSTRAP_ADMIN_PASSWORD }}
+    steps:
+      - name: Guard and backup current persistent auth DB
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$AIMETON_BOOTSTRAP_ADMIN_USERNAME"
+          test -n "$AIMETON_BOOTSTRAP_ADMIN_PASSWORD"
+          echo "::add-mask::$AIMETON_BOOTSTRAP_ADMIN_USERNAME"
+          echo "::add-mask::$AIMETON_BOOTSTRAP_ADMIN_PASSWORD"
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          test -f "$HOST_AUTH_DB"
+          python3 - <<'PY'
+          import sqlite3
+          path='/opt/aimeton/auditor-stack/data/runtime-core/auth.sqlite3'
+          with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
+              assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+              tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              assert {'users','sessions','auth_audit_events'} <= tables
+          PY
+          install -d -m 0700 /opt/aimeton/auditor-stack/backups/auth
+          backup="/opt/aimeton/auditor-stack/backups/auth/auth.sqlite3.$(date -u +%Y%m%dT%H%M%SZ).pre-repair.bak"
+          cp -a "$HOST_AUTH_DB" "$backup"
+          chmod 0600 "$backup"
+          echo "backup_created=yes"
+
+      - name: Reconcile canonical admin
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i \
+            -e AIMETON_BOOTSTRAP_ADMIN_USERNAME="$AIMETON_BOOTSTRAP_ADMIN_USERNAME" \
+            -e AIMETON_BOOTSTRAP_ADMIN_PASSWORD="$AIMETON_BOOTSTRAP_ADMIN_PASSWORD" \
+            "$CONTAINER" python - <<'PY'
+          import os
+          from pathlib import Path
+          from app.admin_users import AdminSQLiteUserRepository
+          from app.auth import PasswordHasher, UserRole
+
+          username=os.environ['AIMETON_BOOTSTRAP_ADMIN_USERNAME'].strip().lower()
+          password=os.environ['AIMETON_BOOTSTRAP_ADMIN_PASSWORD']
+          path=Path(os.environ.get('AIMETON_AUTH_DB','data/auth.sqlite3'))
+          repository=AdminSQLiteUserRepository(path)
+          existing=repository.get_by_username(username)
+          if existing is None:
+              user=repository.create_user(username, PasswordHasher().hash(password), UserRole.ADMIN)
+              action='created'
+          else:
+              user,_=existing
+              if user.role != UserRole.ADMIN:
+                  raise RuntimeError('bootstrap username exists with non-admin role')
+              repository.update_password(user.id, PasswordHasher().hash(password))
+              repository.set_active(user.id, True)
+              action='reconciled'
+          print(f'stage_admin_repair=ok action={action} user_id={user.id}')
+          PY
+
+      - name: Verify DB state and real Stage login
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i "$CONTAINER" python - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+          path=Path(os.environ.get('AIMETON_AUTH_DB','data/auth.sqlite3'))
+          with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
+              assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+              users=db.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+              admins=db.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1").fetchone()[0]
+              assert users >= 1 and admins >= 1
+              print(f'auth_db_users={users} active_admins={admins}')
+          PY
+          payload="$RUNNER_TEMP/login.json"
+          cookie="$RUNNER_TEMP/cookie.txt"
+          python3 - <<'PY' > "$payload"
+          import json, os
+          print(json.dumps({'username': os.environ['AIMETON_BOOTSTRAP_ADMIN_USERNAME'], 'password': os.environ['AIMETON_BOOTSTRAP_ADMIN_PASSWORD']}))
+          PY
+          code="$(curl -sS -o "$RUNNER_TEMP/login-response.json" -c "$cookie" -w '%{http_code}' -H 'Content-Type: application/json' --data-binary @"$payload" "$STAGE_URL/api/auth/login")"
+          rm -f "$payload"
+          test "$code" = 200
+          me="$(curl -fsS -b "$cookie" "$STAGE_URL/api/auth/me")"
+          python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["role"]=="admin" and p["is_active"] is True' "$me"
+          rm -f "$cookie" "$RUNNER_TEMP/login-response.json"
+          echo 'stage_login_verification=passed'
