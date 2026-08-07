@@ -1,0 +1,141 @@
+name: Stage Auth Persistence Guard
+
+on:
+  workflow_run:
+    workflows:
+      - Runtime Persistence Reconcile
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: aimeton-stage-auth-persistence-guard
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+      HOST_AUTH_DB: /opt/aimeton/auditor-stack/data/runtime-core/auth.sqlite3
+      AIMETON_BOOTSTRAP_ADMIN_USERNAME: ${{ vars.AIMETON_BOOTSTRAP_ADMIN_USERNAME }}
+      AIMETON_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.AIMETON_BOOTSTRAP_ADMIN_PASSWORD }}
+
+    steps:
+      - name: Inspect persistent auth invariant
+        id: inspect
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          test -f "$HOST_AUTH_DB"
+          state="$(python3 - <<'PY'
+          import sqlite3
+          path='/opt/aimeton/auditor-stack/data/runtime-core/auth.sqlite3'
+          with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
+              assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+              tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              assert {'users','sessions','auth_audit_events'} <= tables
+              users=db.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+              admins=db.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1").fetchone()[0]
+              print(f'{users}|{admins}')
+          PY
+          )"
+          users="${state%%|*}"
+          admins="${state##*|}"
+          echo "users=$users" >> "$GITHUB_OUTPUT"
+          echo "admins=$admins" >> "$GITHUB_OUTPUT"
+          if (( admins > 0 )); then
+            echo 'needs_repair=false' >> "$GITHUB_OUTPUT"
+            echo "Persistent auth invariant OK: users=$users active_admins=$admins"
+          else
+            echo 'needs_repair=true' >> "$GITHUB_OUTPUT"
+            echo "Persistent auth invariant broken: users=$users active_admins=$admins"
+          fi
+
+      - name: Backup auth DB before self-heal
+        if: ${{ steps.inspect.outputs.needs_repair == 'true' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 /opt/aimeton/auditor-stack/backups/auth
+          backup="/opt/aimeton/auditor-stack/backups/auth/auth.sqlite3.$(date -u +%Y%m%dT%H%M%SZ).guard.bak"
+          cp -a "$HOST_AUTH_DB" "$backup"
+          chmod 0600 "$backup"
+          echo 'auth_backup=created'
+
+      - name: Reconcile bootstrap admin if invariant is broken
+        if: ${{ steps.inspect.outputs.needs_repair == 'true' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$AIMETON_BOOTSTRAP_ADMIN_USERNAME"
+          test -n "$AIMETON_BOOTSTRAP_ADMIN_PASSWORD"
+          echo "::add-mask::$AIMETON_BOOTSTRAP_ADMIN_USERNAME"
+          echo "::add-mask::$AIMETON_BOOTSTRAP_ADMIN_PASSWORD"
+          docker exec -i \
+            -e AIMETON_BOOTSTRAP_ADMIN_USERNAME="$AIMETON_BOOTSTRAP_ADMIN_USERNAME" \
+            -e AIMETON_BOOTSTRAP_ADMIN_PASSWORD="$AIMETON_BOOTSTRAP_ADMIN_PASSWORD" \
+            "$CONTAINER" python - <<'PY'
+          import os
+          from pathlib import Path
+          from app.admin_users import AdminSQLiteUserRepository
+          from app.auth import PasswordHasher, UserRole
+
+          username=os.environ['AIMETON_BOOTSTRAP_ADMIN_USERNAME'].strip().lower()
+          password=os.environ['AIMETON_BOOTSTRAP_ADMIN_PASSWORD']
+          path=Path(os.environ.get('AIMETON_AUTH_DB','data/auth.sqlite3'))
+          repository=AdminSQLiteUserRepository(path)
+          existing=repository.get_by_username(username)
+          if existing is None:
+              user=repository.create_user(username, PasswordHasher().hash(password), UserRole.ADMIN)
+              action='created'
+          else:
+              user,_=existing
+              if user.role != UserRole.ADMIN:
+                  raise RuntimeError('bootstrap username exists with non-admin role')
+              repository.update_password(user.id, PasswordHasher().hash(password))
+              repository.set_active(user.id, True)
+              action='reconciled'
+          print(f'auth_guard_repair=ok action={action} user_id={user.id}')
+          PY
+
+      - name: Verify persistent auth and live login
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$AIMETON_BOOTSTRAP_ADMIN_USERNAME"
+          test -n "$AIMETON_BOOTSTRAP_ADMIN_PASSWORD"
+          echo "::add-mask::$AIMETON_BOOTSTRAP_ADMIN_USERNAME"
+          echo "::add-mask::$AIMETON_BOOTSTRAP_ADMIN_PASSWORD"
+          docker exec -i "$CONTAINER" python - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+          path=Path(os.environ.get('AIMETON_AUTH_DB','data/auth.sqlite3'))
+          with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
+              assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+              admins=db.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1").fetchone()[0]
+              assert admins >= 1
+              print(f'active_admins={admins}')
+          PY
+          payload="$RUNNER_TEMP/stage-auth-guard-login.json"
+          cookie="$RUNNER_TEMP/stage-auth-guard-cookie.txt"
+          python3 - <<'PY' > "$payload"
+          import json, os
+          print(json.dumps({'username': os.environ['AIMETON_BOOTSTRAP_ADMIN_USERNAME'], 'password': os.environ['AIMETON_BOOTSTRAP_ADMIN_PASSWORD']}))
+          PY
+          code="$(curl -sS -o "$RUNNER_TEMP/stage-auth-guard-response.json" -c "$cookie" -w '%{http_code}' -H 'Content-Type: application/json' --data-binary @"$payload" "$STAGE_URL/api/auth/login")"
+          rm -f "$payload"
+          test "$code" = 200
+          me="$(curl -fsS -b "$cookie" "$STAGE_URL/api/auth/me")"
+          python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["role"]=="admin" and p["is_active"] is True' "$me"
+          rm -f "$cookie" "$RUNNER_TEMP/stage-auth-guard-response.json"
+          echo 'stage_auth_guard=passed'
