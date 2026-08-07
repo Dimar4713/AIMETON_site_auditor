@@ -2,6 +2,7 @@ const userBox = document.querySelector('#session-user');
 const listBox = document.querySelector('#missions');
 const form = document.querySelector('#mission-form');
 const messageBox = document.querySelector('#mission-message');
+const adminWorkspaceLink = document.querySelector('#admin-workspace-link');
 const POLL_INTERVAL_MS = 15000;
 const LIVE_RECORD_LIMIT = 20;
 let pollTimer = null;
@@ -111,6 +112,7 @@ async function loadSession() {
   if (!response.ok) throw new Error('session_unavailable');
   const user = await response.json();
   userBox.textContent = `${user.username} · ${user.role}`;
+  adminWorkspaceLink.hidden = user.role !== 'admin';
 }
 
 async function loadMissions({silent = false} = {}) {
