@@ -26,6 +26,29 @@
       <p class="message">Пароль показывается и передаётся только в форме создания; хеши и токены в UI не выводятся. Блокировка отзывает активные сессии.</p>
       <div id="admin-users" class="mission-list" aria-live="polite"></div>
     </section>
+
+    <section class="panel" aria-labelledby="temporary-access-title">
+      <div class="panel-title"><h2 id="temporary-access-title">Временный доступ</h2><button id="refresh-temporary-access" class="secondary" type="button">Обновить</button></div>
+      <p class="message">Создайте персональную magic-link для временного агента или демонстрации. Секрет показывается только один раз после создания.</p>
+      <form id="temporary-access-form" class="auth-form">
+        <label>User ID<input id="temporary-access-user-id" type="number" min="1" required></label>
+        <label>Название<input id="temporary-access-label" minlength="1" maxlength="200" value="Perplexity product reviewer" required></label>
+        <label>Назначение<select id="temporary-access-purpose"><option value="agent">Временный агент</option><option value="marketing_demo">Маркетинговое демо</option><option value="support">Поддержка</option><option value="other">Другое</option></select></label>
+        <label>Срок, минут<input id="temporary-access-ttl" type="number" min="5" max="43200" value="1440" required></label>
+        <label>Число входов<input id="temporary-access-max-uses" type="number" min="1" max="1000" value="5" required></label>
+        <label>Причина<input id="temporary-access-reason" minlength="1" maxlength="500" value="Временный доступ для независимой продуктовой экспертизы" required></label>
+        <button type="submit">Выдать временную ссылку</button>
+        <p id="temporary-access-message" class="message" aria-live="polite"></p>
+      </form>
+      <div id="temporary-access-issued" class="mission-card" hidden>
+        <h3>Ссылка готова</h3>
+        <p>Она отображается только сейчас. Передайте её адресату напрямую и не публикуйте в Issue, PR или логах.</p>
+        <label>Magic link<input id="temporary-access-issued-link" type="text" readonly autocomplete="off"></label>
+        <button id="temporary-access-copy" type="button">Копировать ссылку</button>
+      </div>
+      <div id="temporary-access-list" class="mission-list" aria-live="polite"></div>
+    </section>
+
     <section class="panel" aria-labelledby="missions-title">
       <div class="panel-title"><h2 id="missions-title">Все миссии</h2><button id="refresh-missions" class="secondary">Обновить</button></div>
       <p class="message">Технические secrets, snapshots и внутренние пути не отображаются.</p>
@@ -48,5 +71,6 @@
     </section>
   </main>
   <script src="/static/admin-workspace.js" defer></script>
+  <script src="/static/admin-temporary-access.js" defer></script>
 </body>
 </html>
