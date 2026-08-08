@@ -119,6 +119,8 @@ def test_hunter_exposes_business_facing_search_controls() -> None:
     ):
         assert label in index
 
+    assert 'id="hunterMaxCandidates" type="number" min="10" max="100"' in index
+    assert "большие рынки перейдут на серверную пагинацию следующим шагом" in index
     assert "concurrency" not in index
     assert ".hunter-settings__grid" in styles
 
