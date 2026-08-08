@@ -326,9 +326,10 @@ async def _collect_deep_site_evidence(
         except (FetchError, httpx.HTTPError):
             continue
 
+    domain_hint = (urlsplit(seed["final_url"]).hostname or "").lower().removeprefix("www.")
     discovery = await discover_same_domain_urls(
         seed["final_url"],
-        company_name=seed.get("title") or None,
+        company_name=domain_hint or None,
         mission_id=owned_mission_id,
         correlation_id=f"owned-search-{owned_mission_id}",
         max_urls=MAX_SEARCH_DISCOVERED_PAGES,
