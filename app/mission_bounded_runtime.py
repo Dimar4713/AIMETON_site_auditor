@@ -8,7 +8,7 @@ import httpx
 
 from app.evidence_crawler.factory import get_evidence_crawler
 from app.evidence_crawler.models import BootstrapCrawlPolicy, CrawlStatus
-from app.external_sources import run_enriched_site_analysis
+from app.verified_analysis import run_verified_enriched_site_analysis as run_enriched_site_analysis
 from app.mission_contract import Mission, MissionState, utc_now
 from app.mission_orchestrator import (
     ActionCandidate,
