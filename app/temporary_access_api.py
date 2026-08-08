@@ -7,6 +7,7 @@ from pathlib import Path
 import secrets
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from app.admin_users import AdminSQLiteUserRepository
@@ -71,6 +72,48 @@ def _require_csrf(cookie_token: str | None, header_token: str | None) -> None:
         raise HTTPException(status_code=403, detail={"reason": "csrf_failed"})
 
 
+def _set_session_cookies(response: Response, *, session_token: str, expires_at: datetime) -> None:
+    csrf_token = secrets.token_urlsafe(32)
+    max_age = max(1, int((expires_at - datetime.now(UTC)).total_seconds()))
+    secure = _cookie_secure()
+    response.set_cookie(
+        SESSION_COOKIE,
+        session_token,
+        httponly=True,
+        secure=secure,
+        samesite="strict",
+        max_age=max_age,
+        path="/",
+    )
+    response.set_cookie(
+        CSRF_COOKIE,
+        csrf_token,
+        httponly=False,
+        secure=secure,
+        samesite="strict",
+        max_age=max_age,
+        path="/",
+    )
+
+
+def _exchange_token(
+    token: str,
+    *,
+    existing_session: str | None,
+    auth: TypedLocalAuthProvider,
+    temporary_access: TemporaryAccessRepository,
+):
+    exchanged = temporary_access.exchange(token, auth)
+    if exchanged is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"reason": "unauthenticated"},
+        )
+    user, session, access = exchanged
+    auth.revoke_session(existing_session or "")
+    return user, session, access
+
+
 class TokenLoginRequest(BaseModel):
     token: str = Field(min_length=32, max_length=512)
 
@@ -119,6 +162,7 @@ class TemporaryAccessResponse(BaseModel):
 class IssuedTemporaryAccessResponse(TemporaryAccessResponse):
     token: str
     magic_link_fragment: str
+    magic_link_path: str
 
 
 class TokenLoginResponse(BaseModel):
@@ -139,16 +183,13 @@ def token_login(
     auth: TypedLocalAuthProvider = Depends(get_auth_provider),
     temporary_access: TemporaryAccessRepository = Depends(get_temporary_access_repository),
 ):
-    exchanged = temporary_access.exchange(payload.token, auth)
-    if exchanged is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"reason": "unauthenticated"})
-    user, session, access = exchanged
-    auth.revoke_session(existing_session or "")
-    csrf_token = secrets.token_urlsafe(32)
-    max_age = max(1, int((session.expires_at - datetime.now(UTC)).total_seconds()))
-    secure = _cookie_secure()
-    response.set_cookie(SESSION_COOKIE, session.token, httponly=True, secure=secure, samesite="strict", max_age=max_age, path="/")
-    response.set_cookie(CSRF_COOKIE, csrf_token, httponly=False, secure=secure, samesite="strict", max_age=max_age, path="/")
+    user, session, access = _exchange_token(
+        payload.token,
+        existing_session=existing_session,
+        auth=auth,
+        temporary_access=temporary_access,
+    )
+    _set_session_cookies(response, session_token=session.token, expires_at=session.expires_at)
     return TokenLoginResponse(
         id=user.id,
         username=user.username,
@@ -158,6 +199,28 @@ def token_login(
         temporary_access_expires_at=access.expires_at.isoformat(),
         remaining_uses=max(0, access.max_uses - access.uses_count),
     )
+
+
+@router.get("/access/{token}", include_in_schema=False)
+def server_side_magic_link(
+    token: str,
+    existing_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    auth: TypedLocalAuthProvider = Depends(get_auth_provider),
+    temporary_access: TemporaryAccessRepository = Depends(get_temporary_access_repository),
+):
+    if len(token) < 32 or len(token) > 512:
+        raise HTTPException(status_code=401, detail={"reason": "unauthenticated"})
+    _user, session, _access = _exchange_token(
+        token,
+        existing_session=existing_session,
+        auth=auth,
+        temporary_access=temporary_access,
+    )
+    response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    _set_session_cookies(response, session_token=session.token, expires_at=session.expires_at)
+    return response
 
 
 @router.post("/admin/temporary-access-tokens", response_model=IssuedTemporaryAccessResponse, status_code=201)
@@ -192,6 +255,7 @@ def create_temporary_access(
         **metadata,
         token=issued.token,
         magic_link_fragment=f"#access_token={issued.token}",
+        magic_link_path=f"/api/auth/access/{issued.token}",
     )
 
 

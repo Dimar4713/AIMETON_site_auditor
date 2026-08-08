@@ -94,10 +94,11 @@
       return;
     }
     const issued = await response.json();
-    const link = `${window.location.origin}/${issued.magic_link_fragment}`;
+    const path = issued.magic_link_path || `/${issued.magic_link_fragment || ''}`;
+    const link = new URL(path, window.location.origin).toString();
     issuedLink.value = link;
     issuedBox.hidden = false;
-    message.textContent = 'Ссылка создана. Она показана только сейчас — скопируйте и передайте адресату.';
+    message.textContent = 'Ссылка создана. Вход выполняется сервером без JavaScript; после проверки сервер сразу откроет приложение.';
     await loadAccess();
   }
 
