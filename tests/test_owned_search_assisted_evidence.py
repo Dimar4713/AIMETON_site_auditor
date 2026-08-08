@@ -11,13 +11,14 @@ async def test_owned_evidence_includes_search_discovered_page_only_after_crawl(m
     seed_url = "https://example.org/"
     discovered_url = "https://example.org/ogrn/1234567890123"
     calls: list[tuple[str, str]] = []
+    discovery_kwargs: dict = {}
 
     async def fake_fetch(raw: str):
         calls.append(("fetch", raw))
         if raw == seed_url:
             return {
                 "final_url": seed_url,
-                "title": "Example Company",
+                "title": "Example Company — marketing title that must not become exact search identity",
                 "text": "seed evidence " * 120,
             }
         if raw == discovered_url:
@@ -46,6 +47,7 @@ async def test_owned_evidence_includes_search_discovered_page_only_after_crawl(m
 
     async def fake_discovery(*args, **kwargs):
         calls.append(("search", args[0]))
+        discovery_kwargs.update(kwargs)
         return SimpleNamespace(urls=[discovered_url])
 
     monkeypatch.setattr("app.mission_bounded_runtime._fetch_preferred_target", fake_fetch)
@@ -58,6 +60,7 @@ async def test_owned_evidence_includes_search_discovered_page_only_after_crawl(m
     )
 
     assert seed["final_url"] == seed_url
+    assert discovery_kwargs["company_name"] == "example.org"
     assert page_count == 2
     assert f"SOURCE: {discovered_url}" in evidence
     assert "verified registry profile evidence" in evidence
