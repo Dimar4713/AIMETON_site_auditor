@@ -131,6 +131,43 @@ def index():
     )
 
 
+AI_API_DOCS = """AIMETON Site Auditor API — AI-readable discovery\n\nThis document requires no JavaScript and is suitable for sandboxed AI agents, curl/wget and text-only HTTP clients.\n\nDISCOVERY\nGET /llms.txt           shortest AI-readable entrypoint\nGET /api/capabilities   compact JSON capability/index document\nGET /api/docs.txt       this plain-text guide\nGET /openapi.json       authoritative complete OpenAPI schema\nGET /api/health         runtime health plus discovery links\nGET /docs               Swagger UI for humans; JavaScript may be required\n\nRECOMMENDED AGENT FLOW\n1. Read /llms.txt or /api/capabilities.\n2. Fetch /openapi.json for all routes, request/response schemas and operation details.\n3. If OpenAPI cannot be parsed, use /api/docs.txt for orientation.\n4. Use /api/health for deployment/runtime status only.\n\nCORE API FAMILIES\n- analysis: /api/analyze, /api/company-intelligence, /api/hunt, /api/chat\n- missions/orchestration: /api/missions/...\n- runtime: /api/runtime/...\n- search: /api/search/health\n- identity/evidence: mission-scoped crawler, resolution and evidence routes\n- SEF/reporting: /api/sef/company-profile, /api/sef/report and report exports\n- preliminary exports: /api/export/analysis.md and /api/export/analysis.docx\n- MCP: /mcp/ ; administrative MCP: /mcp-admin/\n\nThe authoritative API contract is always /openapi.json.\n"""
+
+
+@app.get("/llms.txt", include_in_schema=False)
+def llms_txt():
+    return Response(AI_API_DOCS, media_type="text/plain; charset=utf-8")
+
+
+@app.get("/api/docs.txt", include_in_schema=False)
+def api_docs_text():
+    return Response(AI_API_DOCS, media_type="text/plain; charset=utf-8")
+
+
+@app.get("/api/capabilities", tags=["Discovery"], summary="Machine-readable API discovery index")
+def api_capabilities():
+    return {
+        "service": "AIMETON Site Auditor",
+        "version": app.version,
+        "purpose": "AI-readable API discovery without browser JavaScript",
+        "openapi_json": "/openapi.json",
+        "plain_text_docs": "/api/docs.txt",
+        "llms_txt": "/llms.txt",
+        "swagger_ui": "/docs",
+        "health": "/api/health",
+        "mcp": "/mcp/",
+        "mcp_admin": "/mcp-admin/",
+        "javascript_required": False,
+        "authoritative_contract": "/openapi.json",
+        "recommended_flow": [
+            "/api/capabilities",
+            "/openapi.json",
+            "/api/docs.txt",
+            "/api/health",
+        ],
+    }
+
+
 def deployment_sha() -> str | None:
     value = os.getenv("AIMETON_DEPLOY_SHA", "").strip()
     if not value:
@@ -149,6 +186,10 @@ def health():
         "analysis_mode": "ai-sales-with-canonical-km-company-profile",
         "osint": "contacts-finance-workforce-legal-ownership",
         "api": "/docs",
+        "openapi": "/openapi.json",
+        "capabilities": "/api/capabilities",
+        "api_docs_text": "/api/docs.txt",
+        "llms_txt": "/llms.txt",
         "auth": "/api/auth",
         "mcp": "/mcp",
         "mcp_admin": "/mcp-admin",
