@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -46,8 +48,78 @@ RESULT_MARKERS: list[tuple[SourceKind, tuple[str, ...]]] = [
 ]
 
 
+@dataclass(frozen=True)
+class IdentityAnchors:
+    domain: str | None = None
+    legal_name: str | None = None
+    inn: str | None = None
+    ogrn: str | None = None
+    cities: tuple[str, ...] = ()
+    phones: tuple[str, ...] = ()
+
+    @property
+    def primary_region(self) -> str | None:
+        return self.cities[0] if self.cities else None
+
+
 def _host(url: str) -> str:
     return (urlparse(url).hostname or "").lower()
+
+
+def _first_group(pattern: str, text: str, flags: int = re.IGNORECASE) -> str | None:
+    match = re.search(pattern, text, flags)
+    return match.group(1).strip() if match else None
+
+
+def extract_identity_anchors(text: str, official_url: str | None) -> IdentityAnchors:
+    """Extract high-confidence identity hints from already crawled official evidence.
+
+    These values are used only to constrain discovery queries; downstream search
+    snippets remain discovery hints until primary documents are fetched/verified.
+    """
+    compact = " ".join(text.split())
+    legal_match = re.search(
+        r"\b((?:ООО|АО|ПАО)\s*[«\"]?[^\n|;]{2,80}?[»\"]?)(?=\s+(?:ИНН|КПП|ОГРН|Лиценз|Адрес|Телефон)|[.,;]|$)",
+        compact,
+        re.IGNORECASE,
+    )
+    legal_name = legal_match.group(1).strip(" .,") if legal_match else None
+    inn = _first_group(r"\bИНН\s*[:№]?\s*(\d{10}|\d{12})\b", compact)
+    ogrn = _first_group(r"\bОГРН\s*[:№]?\s*(\d{13}|\d{15})\b", compact)
+
+    cities: list[str] = []
+    for match in re.finditer(
+        r"(?:\bг\.?\s*|город\s+)([А-ЯЁ][А-Яа-яЁё-]{2,40})",
+        compact,
+        re.IGNORECASE,
+    ):
+        city = match.group(1).strip(" ,.;")
+        normalized = city[:1].upper() + city[1:]
+        if normalized.casefold() not in {item.casefold() for item in cities}:
+            cities.append(normalized)
+        if len(cities) >= 3:
+            break
+
+    phones: list[str] = []
+    for raw in re.findall(r"(?:\+7|8)\s*\(?\d{3,4}\)?(?:[\s\-–‒]?\d){6,8}", compact):
+        digits = re.sub(r"\D", "", raw)
+        if digits.startswith("8") and len(digits) in {11, 12}:
+            digits = "7" + digits[1:]
+        if digits.startswith("7") and 11 <= len(digits) <= 12:
+            normalized = "+" + digits[:11]
+            if normalized not in phones:
+                phones.append(normalized)
+        if len(phones) >= 3:
+            break
+
+    return IdentityAnchors(
+        domain=_host(official_url or "") or None,
+        legal_name=legal_name,
+        inn=inn,
+        ogrn=ogrn,
+        cities=tuple(cities),
+        phones=tuple(phones),
+    )
 
 
 def classify_source_domain(url: str, official_host: str | None) -> SourceKind:
@@ -102,27 +174,53 @@ def source_type(source_class: SourceKind) -> str:
     }.get(source_class, "external_source")
 
 
-def query_plan(company_name: str, region: str | None = None) -> list[tuple[SourceKind, str]]:
-    suffix = f" {region}" if region else ""
-    q = company_name
+def _identity_query_base(company_name: str, anchors: IdentityAnchors) -> str:
+    if anchors.inn:
+        return f'"{company_name}" "{anchors.inn}"'
+    if anchors.primary_region:
+        return f'"{company_name}" "{anchors.primary_region}"'
+    if anchors.domain:
+        return f'"{company_name}" "{anchors.domain}"'
+    return f'"{company_name}"'
+
+
+def query_plan(
+    company_name: str,
+    region: str | None = None,
+    anchors: IdentityAnchors | None = None,
+) -> list[tuple[SourceKind, str]]:
+    anchors = anchors or IdentityAnchors()
+    effective_region = region or anchors.primary_region
+    suffix = f' "{effective_region}"' if effective_region else ""
+    base = _identity_query_base(company_name, anchors)
+    domain = anchors.domain
+    inn = anchors.inn
+    ogrn = anchors.ogrn
+    phone = anchors.phones[0] if anchors.phones else None
+
+    official_query = f'site:{domain} "{company_name}"' if domain else f'{base} официальный сайт{suffix}'
+    registry_ids = " ".join(f'"{item}"' for item in (inn, ogrn) if item)
+    registry_base = registry_ids or base
+    contact_anchor = f' "{phone}"' if phone else suffix
+
     return [
-        ("official", f'"{q}" официальный сайт{suffix}'),
-        ("contact", f'"{q}" телефон email адрес контакты{suffix}'),
-        ("registry", f'"{q}" ИНН ОГРН выписка ЕГРЮЛ{suffix}'),
-        ("finance", f'"{q}" выручка прибыль активы налоги бухгалтерская отчетность'),
-        ("workforce", f'"{q}" численность сотрудников среднесписочная численность'),
-        ("jobs", f'"{q}" вакансии работодатель команда сотрудники'),
-        ("ownership", f'"{q}" учредитель генеральный директор владелец бенефициар'),
-        ("affiliation", f'"{q}" аффилированные лица связанные компании группа компаний'),
-        ("arbitration", f'"{q}" арбитражный суд истец ответчик дело'),
-        ("court", f'"{q}" суд иск решение взыскание'),
-        ("enforcement", f'"{q}" ФССП исполнительное производство задолженность'),
-        ("news", f'"{q}" новости{suffix}'),
-        ("review", f'"{q}" отзывы клиентов{suffix}'),
-        ("social", f'"{q}" site:vk.com OR site:t.me OR site:ok.ru'),
-        ("tender", f'"{q}" тендер OR закупка OR контракт'),
-        ("patent", f'"{q}" патент OR изобретение'),
-        ("other", f'"{q}" продукция услуги клиенты партнеры поставщики'),
+        ("official", official_query),
+        ("contact", f'{base} телефон email адрес контакты{contact_anchor}'),
+        ("registry", f'{registry_base} ИНН ОГРН выписка ЕГРЮЛ{suffix}'),
+        ("finance", f'{registry_base} выручка прибыль активы налоги бухгалтерская отчетность'),
+        ("workforce", f'{base} численность сотрудников среднесписочная численность{suffix}'),
+        ("jobs", f'{base} вакансии работодатель команда сотрудники{suffix}'),
+        ("ownership", f'{registry_base} учредитель генеральный директор владелец бенефициар'),
+        ("affiliation", f'{registry_base} аффилированные лица связанные компании группа компаний'),
+        ("arbitration", f'{registry_base} арбитражный суд истец ответчик дело'),
+        ("court", f'{registry_base} суд иск решение взыскание'),
+        ("enforcement", f'{registry_base} ФССП исполнительное производство задолженность'),
+        ("news", f'{base} новости{suffix}'),
+        ("review", f'{base} отзывы клиентов{suffix}'),
+        ("social", f'{base}{suffix} site:vk.com OR site:t.me OR site:ok.ru'),
+        ("tender", f'{registry_base} тендер OR закупка OR контракт'),
+        ("patent", f'{registry_base} патент OR изобретение'),
+        ("other", f'{base} продукция услуги клиенты партнеры поставщики{suffix}'),
     ]
 
 
@@ -131,9 +229,10 @@ async def collect_external_sources(
     official_url: str | None,
     region: str | None = None,
     max_sources: int = 60,
+    anchors: IdentityAnchors | None = None,
 ) -> tuple[list[IntelligenceSource], list[str], SearchDiagnostics]:
     notes: list[str] = []
-    plan = query_plan(company_name, region)
+    plan = query_plan(company_name, region, anchors)
     per_query = max(2, min(5, max_sources // max(1, len(plan)) + 1))
     semaphore = asyncio.Semaphore(6)
     mission_id = f"company-{uuid4()}"
@@ -224,10 +323,13 @@ def to_llm_sources(sources: list[IntelligenceSource]) -> list[dict]:
 
 async def run_enriched_site_analysis(url: str, title: str, text: str) -> SiteAnalysis:
     company_hint = title.split("—")[0].split("|")[0].strip() or _host(url)
+    anchors = extract_identity_anchors(text, url)
     external_sources, notes, _diagnostics = await collect_external_sources(
         company_hint,
         url,
+        region=anchors.primary_region,
         max_sources=60,
+        anchors=anchors,
     )
     try:
         analysis = await analyze_with_routerai(url, title, text, to_llm_sources(external_sources))
@@ -240,6 +342,17 @@ async def run_enriched_site_analysis(url: str, title: str, text: str) -> SiteAna
             else "failed"
         )
         analysis.risks_and_assumptions.append(f"Использован резервный локальный анализ: {type(exc).__name__}.")
+    anchor_parts = [
+        f"domain={anchors.domain}" if anchors.domain else None,
+        f"region={anchors.primary_region}" if anchors.primary_region else None,
+        f"inn={anchors.inn}" if anchors.inn else None,
+        f"ogrn={anchors.ogrn}" if anchors.ogrn else None,
+    ]
+    analysis.risks_and_assumptions.append(
+        "Внешний поиск привязан к identity anchors: "
+        + ", ".join(part for part in anchor_parts if part)
+        + "."
+    )
     analysis.risks_and_assumptions.append(
         f"Внешний поиск дал discovery_hint={len(external_sources)}; поисковые сниппеты не включены в evidence до проверки первичных документов."
     )
