@@ -2,6 +2,17 @@
   const cards = [...document.querySelectorAll('[data-service-card]')];
   const panels = [...document.querySelectorAll('[data-service-panel]')];
 
+  const SUPPORTING_HOSTS = new Set([
+    'prodoctorov.ru', '32top.ru', 'zoon.ru', 'flamp.ru', 'otzovik.com', 'irecommend.ru',
+    'rusprofile.ru', 'checko.ru', 'list-org.com', 'audit-it.ru', 'companies.rbc.ru',
+    'spark-interfax.ru', 'sbis.ru', 'kp.ru', 'rbc.ru', 'tass.ru', 'ria.ru',
+    'vedomosti.ru', 'kommersant.ru', 'interfax.ru',
+  ]);
+  const SUPPORTING_TITLE_MARKERS = [
+    'рейтинг', 'лучшие', 'отзывы', 'каталог', 'список', 'обзор', 'топ ',
+    'новости', 'рейтинг клиник', 'рейтинг стоматолог', 'врачи', 'про докторов',
+  ];
+
   function clearSelection() {
     cards.forEach(card => card.setAttribute('aria-pressed', 'false'));
     panels.forEach(panel => { panel.hidden = true; });
@@ -49,6 +60,38 @@
     }
   }
 
+  function hostOf(value) {
+    try {
+      return new URL(value).hostname.toLowerCase().replace(/^www\./, '');
+    } catch {
+      return '';
+    }
+  }
+
+  function isSupportingHost(host) {
+    return [...SUPPORTING_HOSTS].some(known => host === known || host.endsWith(`.${known}`));
+  }
+
+  function classifyCandidate(candidate) {
+    const url = safeHttpUrl(candidate.url || candidate.official_url || candidate.website);
+    const host = hostOf(url);
+    const sourceText = `${candidate.source_title || ''} ${candidate.source_snippet || ''}`.toLowerCase();
+    if (isSupportingHost(host) || SUPPORTING_TITLE_MARKERS.some(marker => sourceText.includes(marker))) {
+      return {kind: 'supporting', label: 'Источник для проверки'};
+    }
+    if (candidate.deep_analysis_performed === true) {
+      return {kind: 'company', label: 'Компания-кандидат'};
+    }
+    return {kind: 'observation', label: 'Наблюдение'};
+  }
+
+  function priorityLabel(score, qualification) {
+    if (score == null) return qualification || 'Недостаточно данных';
+    if (score >= 70) return 'Высокий приоритет';
+    if (score >= 55) return 'Перспективный';
+    return qualification === 'Недостаточно данных' ? qualification : 'Наблюдение';
+  }
+
   function appendItem(container, title, text, meta = '') {
     const item = document.createElement('article');
     item.className = 'service-summary__item';
@@ -66,6 +109,21 @@
     container.append(item);
   }
 
+  function appendGroup(container, title, description, kind) {
+    const section = document.createElement('section');
+    section.className = `hunter-group hunter-group--${kind}`;
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    const note = document.createElement('p');
+    note.className = 'hunter-group__note';
+    note.textContent = description;
+    const list = document.createElement('div');
+    list.className = 'hunter-group__list';
+    section.append(heading, note, list);
+    container.append(section);
+    return list;
+  }
+
   function handoffCandidate(candidate, fallbackRegion) {
     const name = String(candidate.company_name || '').trim();
     const url = safeHttpUrl(candidate.url || candidate.official_url || candidate.website);
@@ -80,9 +138,10 @@
   }
 
   function appendCandidate(container, candidate, fallbackRegion) {
+    const classification = classifyCandidate(candidate);
     const item = document.createElement('article');
-    item.className = 'service-summary__item service-summary__candidate';
-    const name = String(candidate.company_name || candidate.url || 'Компания без названия').trim();
+    item.className = `service-summary__item service-summary__candidate service-summary__candidate--${classification.kind}`;
+    const name = String(candidate.company_name || candidate.url || 'Результат без названия').trim();
     const url = safeHttpUrl(candidate.url || candidate.official_url || candidate.website);
     const region = String(candidate.region || fallbackRegion || '').trim();
     const summary = candidate.recommended_solution || candidate.business_summary || '';
@@ -90,11 +149,20 @@
     const qualification = candidate.qualification || 'не определена';
     const nameOnly = !url && !summary && score == null;
 
+    const top = document.createElement('div');
+    top.className = 'service-summary__candidate-top';
     const heading = document.createElement('strong');
     heading.textContent = name;
+    const badge = document.createElement('span');
+    badge.className = `service-summary__kind service-summary__kind--${classification.kind}`;
+    badge.textContent = classification.label;
+    top.append(heading, badge);
+    item.append(top);
+
     const body = document.createElement('div');
+    body.className = 'service-summary__description';
     body.textContent = summary || 'Недостаточно данных: найдено только название компании.';
-    item.append(heading, body);
+    item.append(body);
 
     if (url) {
       const link = document.createElement('a');
@@ -108,16 +176,54 @@
 
     const meta = document.createElement('div');
     meta.className = 'service-summary__meta';
-    meta.textContent = `${region ? `Регион: ${region} · ` : ''}Приоритет: ${score ?? '—'} · ${qualification}${nameOnly ? ' · Недостаточно данных' : ''}`;
+    const humanPriority = priorityLabel(score, qualification);
+    meta.textContent = `${region ? `Регион: ${region} · ` : ''}${humanPriority}${score == null ? '' : ` · балл ${score}/100`}${nameOnly ? ' · Недостаточно данных' : ''}`;
     item.append(meta);
 
-    const action = document.createElement('button');
-    action.type = 'button';
-    action.className = 'btn-ghost btn-sm';
-    action.textContent = 'Исследовать компанию';
-    action.addEventListener('click', () => handoffCandidate(candidate, fallbackRegion));
-    item.append(action);
+    if (classification.kind === 'company') {
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'btn-ghost hunter-candidate-action';
+      action.textContent = 'Исследовать компанию';
+      action.addEventListener('click', () => handoffCandidate(candidate, fallbackRegion));
+      item.append(action);
+    }
     container.append(item);
+  }
+
+  function renderHunterCandidates(container, candidates, fallbackRegion) {
+    const groups = {company: [], supporting: [], observation: []};
+    candidates.forEach(candidate => {
+      const classification = classifyCandidate(candidate);
+      groups[classification.kind].push(candidate);
+    });
+
+    if (groups.company.length) {
+      const list = appendGroup(container, 'Компании-кандидаты', 'Наиболее пригодные для следующего шага: сайт был глубоко обработан.', 'company');
+      groups.company.forEach(candidate => appendCandidate(list, candidate, fallbackRegion));
+    }
+    if (groups.supporting.length) {
+      const details = document.createElement('details');
+      details.className = 'hunter-supporting-details';
+      const summary = document.createElement('summary');
+      summary.textContent = `Источники для дополнительной проверки (${groups.supporting.length})`;
+      const list = document.createElement('div');
+      list.className = 'hunter-group__list';
+      groups.supporting.forEach(candidate => appendCandidate(list, candidate, fallbackRegion));
+      details.append(summary, list);
+      container.append(details);
+    }
+    if (groups.observation.length) {
+      const details = document.createElement('details');
+      details.className = 'hunter-supporting-details';
+      const summary = document.createElement('summary');
+      summary.textContent = `Наблюдение (${groups.observation.length})`;
+      const list = document.createElement('div');
+      list.className = 'hunter-group__list';
+      groups.observation.forEach(candidate => appendCandidate(list, candidate, fallbackRegion));
+      details.append(summary, list);
+      container.append(details);
+    }
   }
 
   const companyForm = document.querySelector('#companyIntelligenceForm');
@@ -175,8 +281,8 @@
         concurrency: 2,
       };
       const data = await postJson('/api/hunt', payload);
-      appendItem(list, 'Результат поиска', `Обнаружено компаний: ${data.discovered ?? 0}`, `Регион: ${data.region || region}`);
-      (data.candidates || []).slice(0, 10).forEach(candidate => appendCandidate(list, candidate, data.region || region));
+      appendItem(list, 'Результат поиска', `Обнаружено источников-кандидатов: ${data.discovered ?? 0}`, `Регион: ${data.region || region} · балл выше = ближе к профилю потенциального клиента`);
+      renderHunterCandidates(list, (data.candidates || []).slice(0, 10), data.region || region);
       output.hidden = false;
       setStatus(status, 'Список кандидатов подготовлен.', 'success');
     } catch (error) {
