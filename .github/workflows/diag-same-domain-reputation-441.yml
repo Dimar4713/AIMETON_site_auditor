@@ -15,66 +15,96 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
-      - name: Prove deployed same-domain discovery
+      - name: Prove discovered Reputation URL is fetched by Evidence Crawler
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p evidence
           container="$(docker ps --format '{{.Names}}' | grep -E '^aimeton-auditor$' | head -n 1)"
           test -n "$container"
-          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-same-domain.txt
+          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-crawler-evidence.txt
           import asyncio
-          from app.evidence_crawler.search_discovery import discover_same_domain_urls
-          from app.search_gateway.models import AttemptState, FallbackReason
 
-          HARD = {
-              FallbackReason.PROVIDER_BLOCKED,
-              FallbackReason.RATE_LIMITED,
-              FallbackReason.CAPTCHA,
-          }
+          from app.evidence_crawler import BootstrapCrawlPolicy, get_evidence_crawler
+          from app.mission_orchestrator import (
+              ActionCandidate,
+              ActionType,
+              EntryPoint,
+              MissionOrchestrator,
+              PolicySnapshot,
+              default_site_mission_request,
+          )
+
+          ROOT = 'https://reputation.ru/'
+          DISCOVERED = 'https://reputation.ru/ogrn/1151690002980'
 
           async def main():
-              result = await discover_same_domain_urls(
-                  'https://reputation.ru/',
-                  company_name='Reputation.ru',
-                  mission_id='diag-reputation-same-domain-441-after-448',
-                  correlation_id='diag-reputation-same-domain-441-after-448',
-                  max_urls=8,
+              orchestrator = MissionOrchestrator()
+              mission = orchestrator.create_mission(
+                  default_site_mission_request(ROOT),
+                  entry_point=EntryPoint.REST,
               )
-              print(f'state={result.diagnostics.state.value}')
-              print(f'selected_provider={result.diagnostics.selected_provider}')
-              print(f'url_count={len(result.urls)}')
-              for index, url in enumerate(result.urls, 1):
-                  print(f'url_{index}={url}')
+              plan = orchestrator.plan(
+                  mission.contract.mission_id,
+                  deficits=['company_profile_evidence'],
+                  candidates=[
+                      ActionCandidate(
+                          action_type=ActionType.CRAWL_URL,
+                          target=DISCOVERED,
+                          deficit_code='search_assisted_same_domain',
+                          expected_sufficiency_gain=0.8,
+                      )
+                  ],
+                  policy=PolicySnapshot(
+                      allowed_hosts=frozenset({'reputation.ru', 'www.reputation.ru'}),
+                      remaining_actions=5,
+                  ),
+              )
+              result = await get_evidence_crawler().run_mission(
+                  orchestrator,
+                  mission.contract.mission_id,
+                  plan=plan,
+                  policy=BootstrapCrawlPolicy(
+                      max_pages=4,
+                      max_depth=1,
+                      max_duration_seconds=45,
+                      timeout_seconds=15,
+                      min_request_interval_ms=500,
+                      allow_crawl4ai=False,
+                      allow_browser=False,
+                  ),
+              )
 
-              hard_network_failures = 0
-              circuit_skips = 0
-              for attempt in result.diagnostics.attempts:
-                  reason = attempt.reason.value if attempt.reason else 'none'
+              print(f'status={result.status.value}')
+              print(f'robots_state={result.robots_state.value}')
+              print(f'page_count={len(result.pages)}')
+              print(f'signal_count={len(result.identity_signals)}')
+              print(f'failed_url_count={len(result.failed_urls)}')
+              print(f'blocked_url_count={len(result.blocked_urls)}')
+              print('reason_codes=' + ','.join(result.reason_codes))
+              for index, page in enumerate(result.pages, 1):
                   print(
-                      'attempt='
-                      f'{attempt.provider}:{attempt.state.value}:'
-                      f'{reason}:{attempt.result_count}:{attempt.latency_ms}'
+                      f'page_{index}='
+                      f'{page.final_url}|{page.page_type.value}|{page.fetch_path.value}|{page.title}'
                   )
-                  if attempt.state == AttemptState.FAILED and attempt.reason in HARD:
-                      hard_network_failures += 1
-                  if attempt.state == AttemptState.SKIPPED and attempt.reason == FallbackReason.CIRCUIT_OPEN:
-                      circuit_skips += 1
+              for index, signal in enumerate(result.identity_signals[:12], 1):
+                  print(
+                      f'signal_{index}='
+                      f'{signal.kind.value}|{signal.value}|{signal.source_url}|{signal.locator}'
+                  )
 
-              print(f'hard_network_failures={hard_network_failures}')
-              print(f'circuit_skips={circuit_skips}')
-              if hard_network_failures > 3:
-                  raise SystemExit('hard-blocked providers were called repeatedly across discovery topics')
-              if hard_network_failures and circuit_skips == 0:
-                  raise SystemExit('hard upstream failure did not suppress later batch calls')
-              if result.urls and not all('reputation.ru' in url for url in result.urls):
-                  raise SystemExit('cross-domain URL escaped same-domain filter')
+              if not result.pages:
+                  raise SystemExit('Evidence Crawler fetched no page from discovered same-domain URL')
+              if not any(str(page.final_url).startswith('https://reputation.ru/') for page in result.pages):
+                  raise SystemExit('Evidence Crawler did not produce first-party Reputation page evidence')
+              if not all(page.document_id for page in result.pages):
+                  raise SystemExit('crawler page missing DocumentPipeline document id')
 
           asyncio.run(main())
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: reputation-same-domain-${{ github.run_id }}
+          name: reputation-crawler-${{ github.run_id }}
           path: evidence/
           if-no-files-found: error
           retention-days: 30
