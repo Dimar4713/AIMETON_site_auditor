@@ -10,6 +10,9 @@ from app.search_gateway.providers import SearxngProvider, TavilyProvider, Yandex
 from app.search_gateway.traced_gateway import TracedSearchGateway
 
 
+DEBUG_BUDGET_CEILING = Decimal("999999")
+
+
 def _decimal_env(name: str, default: str = "0") -> Decimal:
     try:
         return Decimal(os.getenv(name, default).strip() or default)
@@ -34,6 +37,16 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def search_effectiveness_debug_enabled() -> bool:
+    """Return whether search quality is intentionally prioritized over internal cost caps.
+
+    This temporary mode is governed by #427. It removes AIMETON-internal budget
+    and quota throttles while preserving provider hard limits, timeouts, circuit
+    breakers and all crawler/security controls.
+    """
+    return _bool_env("SEARCH_EFFECTIVENESS_DEBUG")
+
+
 def search_policy_from_env() -> SearchPolicy:
     order = tuple(
         item.strip()
@@ -43,18 +56,25 @@ def search_policy_from_env() -> SearchPolicy:
         ).split(",")
         if item.strip()
     )
-    budgets = {
-        currency: amount
-        for currency, amount in {
-            "RUB": _decimal_env("SEARCH_MISSION_BUDGET_RUB"),
-            "USD": _decimal_env("SEARCH_MISSION_BUDGET_USD"),
-        }.items()
-        if amount > 0
-    }
+    debug = search_effectiveness_debug_enabled()
+    if debug:
+        budgets = {
+            "RUB": DEBUG_BUDGET_CEILING,
+            "USD": DEBUG_BUDGET_CEILING,
+        }
+    else:
+        budgets = {
+            currency: amount
+            for currency, amount in {
+                "RUB": _decimal_env("SEARCH_MISSION_BUDGET_RUB"),
+                "USD": _decimal_env("SEARCH_MISSION_BUDGET_USD"),
+            }.items()
+            if amount > 0
+        }
     return SearchPolicy(
         provider_order=order,
         allowed_providers=frozenset(order),
-        allow_paid_fallback=_bool_env("SEARCH_ALLOW_PAID_FALLBACK"),
+        allow_paid_fallback=True if debug else _bool_env("SEARCH_ALLOW_PAID_FALLBACK"),
         max_cost_by_currency=budgets,
         timeout_seconds=float(os.getenv("SEARCH_TIMEOUT_SECONDS", "15")),
         retries=int(os.getenv("SEARCH_RETRIES", "1")),
@@ -72,11 +92,12 @@ def identity_search_policy_from_env() -> SearchPolicy:
         ).split(",")
         if item.strip()
     )
+    debug = search_effectiveness_debug_enabled()
     return base.model_copy(
         update={
             "provider_order": order,
             "allowed_providers": frozenset(order),
-            "allow_paid_fallback": _bool_env(
+            "allow_paid_fallback": True if debug else _bool_env(
                 "IDENTITY_SEARCH_ALLOW_PAID_FALLBACK",
                 base.allow_paid_fallback,
             ),
@@ -87,7 +108,8 @@ def identity_search_policy_from_env() -> SearchPolicy:
 
 @lru_cache(maxsize=1)
 def get_search_gateway() -> TracedSearchGateway:
-    quotas = {
+    debug = search_effectiveness_debug_enabled()
+    quotas = {} if debug else {
         provider: quota
         for provider, quota in {
             "searxng": _quota_env("SEARCH_QUOTA_SEARXNG"),
