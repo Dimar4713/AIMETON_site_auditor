@@ -1,0 +1,1 @@
+Documents verified backend/API gaps: deployed discovery endpoints could not be reached from this environment; no confirmed public chat endpoint; mission event semantics need a stable user-facing stage taxonomy; export endpoint input contract was not verifiable.
