@@ -61,7 +61,10 @@ jobs:
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       STAGE_URL: https://stage-auditor.aimeton.ru
-      DADATA_API: ${{ vars.DADATA_API }}
+      # Security contract: API token must be stored as an Actions secret.
+      # Never fall back to vars.DADATA_API because variable values are not masked
+      # and a previous runtime configuration log exposed that credential.
+      DADATA_API: ${{ secrets.DADATA_API }}
       DADATA_SECRET: ${{ secrets.DADATA_SECRET }}
       DADATA_SMOKE_QUERY: ${{ vars.DADATA_SMOKE_QUERY || '7707083893' }}
 
@@ -78,15 +81,15 @@ jobs:
           set -Eeuo pipefail
           for name in DADATA_API DADATA_SECRET; do
             test -n "${!name:-}" || {
-              echo "Missing required DADATA environment credential: $name" >&2
+              echo "Missing required DADATA environment secret: $name" >&2
               exit 1
             }
             [[ "${!name}" != *$'\n'* ]] || {
-              echo "Invalid newline in DADATA environment credential: $name" >&2
+              echo "Invalid newline in DADATA environment secret: $name" >&2
               exit 1
             }
           done
-          echo "DaData environment credential contract present"
+          echo "DaData environment secret contract present"
 
       - name: Align stage smoke with runtime contracts
         shell: bash
