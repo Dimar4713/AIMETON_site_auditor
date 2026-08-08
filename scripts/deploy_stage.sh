@@ -12,10 +12,19 @@ BACKUP_KEEP="${BACKUP_KEEP:-5}"
 FAILED_KEEP="${FAILED_KEEP:-2}"
 LOCK_FILE="${LOCK_FILE:-/tmp/aimeton-auditor-stage-deploy.lock}"
 TAVILY_TOKEN="${TAVILY_TOKEN:-}"
+YANDEX_SEARCH_API_KEY="${YANDEX_SEARCH_API_KEY:-}"
+YANDEX_CLOUD_FOLDER_ID="${YANDEX_CLOUD_FOLDER_ID:-${YANDEX_SEARCH_FOLDER_ID:-}}"
 TAVILY_SEARCH_COST_USD="${TAVILY_SEARCH_COST_USD:-0.008}"
+YANDEX_SEARCH_COST_RUB="${YANDEX_SEARCH_COST_RUB:-0.01}"
 SEARCH_MISSION_BUDGET_USD="${SEARCH_MISSION_BUDGET_USD:-0.008}"
+SEARCH_MISSION_BUDGET_RUB="${SEARCH_MISSION_BUDGET_RUB:-0.01}"
 SEARCH_QUOTA_TAVILY="${SEARCH_QUOTA_TAVILY:-10}"
-IDENTITY_SEARCH_PROVIDER_ORDER="${IDENTITY_SEARCH_PROVIDER_ORDER:-tavily,searxng}"
+SEARCH_QUOTA_YANDEX="${SEARCH_QUOTA_YANDEX:-10}"
+SEARCH_PROVIDER_ORDER="${SEARCH_PROVIDER_ORDER:-yandex,searxng,tavily}"
+SEARCH_ALLOW_PAID_FALLBACK="${SEARCH_ALLOW_PAID_FALLBACK:-false}"
+SEARCH_EFFECTIVENESS_DEBUG="${SEARCH_EFFECTIVENESS_DEBUG:-false}"
+IDENTITY_SEARCH_PROVIDER_ORDER="${IDENTITY_SEARCH_PROVIDER_ORDER:-yandex,tavily,searxng}"
+IDENTITY_SEARCH_ALLOW_PAID_FALLBACK="${IDENTITY_SEARCH_ALLOW_PAID_FALLBACK:-true}"
 IDENTITY_AUTHORITY_HOSTS="${IDENTITY_AUTHORITY_HOSTS:-egrul.nalog.ru,service.nalog.ru,bo.nalog.ru}"
 
 log() {
@@ -39,9 +48,15 @@ fail() {
 [[ -f "$SOURCE_DIR/requirements.txt" ]] || fail "requirements.txt missing from source"
 [[ -n "$TAVILY_TOKEN" ]] || fail "TAVILY_TOKEN is required for stage"
 [[ "$TAVILY_TOKEN" != *$'\n'* ]] || fail "TAVILY_TOKEN contains a newline"
-[[ "$TAVILY_SEARCH_COST_USD" =~ ^0\.[0-9]+$ ]] || fail "TAVILY_SEARCH_COST_USD must be a positive decimal below 1"
-[[ "$SEARCH_MISSION_BUDGET_USD" =~ ^0\.[0-9]+$ ]] || fail "SEARCH_MISSION_BUDGET_USD must be a positive decimal below 1"
+[[ -n "$YANDEX_SEARCH_API_KEY" ]] || fail "YANDEX_SEARCH_API_KEY is required for stage"
+[[ "$YANDEX_SEARCH_API_KEY" != *$'\n'* ]] || fail "YANDEX_SEARCH_API_KEY contains a newline"
+[[ -n "$YANDEX_CLOUD_FOLDER_ID" ]] || fail "YANDEX_CLOUD_FOLDER_ID is required for stage"
+[[ "$TAVILY_SEARCH_COST_USD" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "TAVILY_SEARCH_COST_USD must be a non-negative decimal"
+[[ "$YANDEX_SEARCH_COST_RUB" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "YANDEX_SEARCH_COST_RUB must be a non-negative decimal"
+[[ "$SEARCH_MISSION_BUDGET_USD" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "SEARCH_MISSION_BUDGET_USD must be a non-negative decimal"
+[[ "$SEARCH_MISSION_BUDGET_RUB" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "SEARCH_MISSION_BUDGET_RUB must be a non-negative decimal"
 [[ "$SEARCH_QUOTA_TAVILY" =~ ^[1-9][0-9]*$ ]] || fail "SEARCH_QUOTA_TAVILY must be a positive integer"
+[[ "$SEARCH_QUOTA_YANDEX" =~ ^[1-9][0-9]*$ ]] || fail "SEARCH_QUOTA_YANDEX must be a positive integer"
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || fail "Another stage deployment is already running"
@@ -64,17 +79,28 @@ configure_runtime_secrets() {
   secret_tmp="$(mktemp "$DEPLOY_ROOT/runtime-secrets.XXXXXX")"
   override_tmp="$(mktemp "$DEPLOY_ROOT/runtime-compose.XXXXXX")"
   chmod 600 "$secret_tmp"
-  printf 'TAVILY_TOKEN=%s\n' "$TAVILY_TOKEN" > "$secret_tmp"
+  {
+    printf 'TAVILY_TOKEN=%s\n' "$TAVILY_TOKEN"
+    printf 'YANDEX_SEARCH_API_KEY=%s\n' "$YANDEX_SEARCH_API_KEY"
+  } > "$secret_tmp"
   cat > "$override_tmp" <<EOF
 services:
   $SERVICE:
     env_file:
       - $RUNTIME_SECRETS_FILE
     environment:
+      YANDEX_CLOUD_FOLDER_ID: "$YANDEX_CLOUD_FOLDER_ID"
       TAVILY_SEARCH_COST_USD: "$TAVILY_SEARCH_COST_USD"
+      YANDEX_SEARCH_COST_RUB: "$YANDEX_SEARCH_COST_RUB"
       SEARCH_MISSION_BUDGET_USD: "$SEARCH_MISSION_BUDGET_USD"
+      SEARCH_MISSION_BUDGET_RUB: "$SEARCH_MISSION_BUDGET_RUB"
       SEARCH_QUOTA_TAVILY: "$SEARCH_QUOTA_TAVILY"
+      SEARCH_QUOTA_YANDEX: "$SEARCH_QUOTA_YANDEX"
+      SEARCH_PROVIDER_ORDER: "$SEARCH_PROVIDER_ORDER"
+      SEARCH_ALLOW_PAID_FALLBACK: "$SEARCH_ALLOW_PAID_FALLBACK"
+      SEARCH_EFFECTIVENESS_DEBUG: "$SEARCH_EFFECTIVENESS_DEBUG"
       IDENTITY_SEARCH_PROVIDER_ORDER: "$IDENTITY_SEARCH_PROVIDER_ORDER"
+      IDENTITY_SEARCH_ALLOW_PAID_FALLBACK: "$IDENTITY_SEARCH_ALLOW_PAID_FALLBACK"
       IDENTITY_AUTHORITY_HOSTS: "$IDENTITY_AUTHORITY_HOSTS"
 EOF
   chmod 600 "$override_tmp"
@@ -261,6 +287,7 @@ log "DEPLOYMENT PASS"
 log "Deployed SHA: $DEPLOYED_SHA"
 log "Previous SHA: $PREVIOUS_SHA"
 log "Backup: $BACKUP_DIR"
+log "Search effectiveness debug: $SEARCH_EFFECTIVENESS_DEBUG"
 log "Automatic retention thresholds: backups=$BACKUP_KEEP failed=$FAILED_KEEP"
 
 docker ps --filter "name=$CONTAINER" --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
