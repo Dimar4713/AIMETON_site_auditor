@@ -25,13 +25,20 @@ jobs:
           docker exec -i "$container" python - <<'PY' | tee evidence/reputation-same-domain.txt
           import asyncio
           from app.evidence_crawler.search_discovery import discover_same_domain_urls
+          from app.search_gateway.models import AttemptState, FallbackReason
+
+          HARD = {
+              FallbackReason.PROVIDER_BLOCKED,
+              FallbackReason.RATE_LIMITED,
+              FallbackReason.CAPTCHA,
+          }
 
           async def main():
               result = await discover_same_domain_urls(
                   'https://reputation.ru/',
                   company_name='Reputation.ru',
-                  mission_id='diag-reputation-same-domain-441',
-                  correlation_id='diag-reputation-same-domain-441',
+                  mission_id='diag-reputation-same-domain-441-after-448',
+                  correlation_id='diag-reputation-same-domain-441-after-448',
                   max_urls=8,
               )
               print(f'state={result.diagnostics.state.value}')
@@ -39,16 +46,28 @@ jobs:
               print(f'url_count={len(result.urls)}')
               for index, url in enumerate(result.urls, 1):
                   print(f'url_{index}={url}')
+
+              hard_network_failures = 0
+              circuit_skips = 0
               for attempt in result.diagnostics.attempts:
+                  reason = attempt.reason.value if attempt.reason else 'none'
                   print(
                       'attempt='
                       f'{attempt.provider}:{attempt.state.value}:'
-                      f'{attempt.reason.value if attempt.reason else "none"}:'
-                      f'{attempt.result_count}:{attempt.latency_ms}'
+                      f'{reason}:{attempt.result_count}:{attempt.latency_ms}'
                   )
-              if not result.urls:
-                  raise SystemExit('same-domain discovery returned no Reputation.ru URLs')
-              if not all('reputation.ru' in url for url in result.urls):
+                  if attempt.state == AttemptState.FAILED and attempt.reason in HARD:
+                      hard_network_failures += 1
+                  if attempt.state == AttemptState.SKIPPED and attempt.reason == FallbackReason.CIRCUIT_OPEN:
+                      circuit_skips += 1
+
+              print(f'hard_network_failures={hard_network_failures}')
+              print(f'circuit_skips={circuit_skips}')
+              if hard_network_failures > 3:
+                  raise SystemExit('hard-blocked providers were called repeatedly across discovery topics')
+              if hard_network_failures and circuit_skips == 0:
+                  raise SystemExit('hard upstream failure did not suppress later batch calls')
+              if result.urls and not all('reputation.ru' in url for url in result.urls):
                   raise SystemExit('cross-domain URL escaped same-domain filter')
 
           asyncio.run(main())
