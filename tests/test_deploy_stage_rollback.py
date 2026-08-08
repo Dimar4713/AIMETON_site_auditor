@@ -90,7 +90,9 @@ exit 22
             "STAGE_URL": "https://stage.invalid",
             "HEALTH_TIMEOUT": "5",
             "LOCK_FILE": str(tmp_path / "deploy.lock"),
-            "TAVILY_TOKEN": "deployment-test-value",
+            "TAVILY_TOKEN": "deployment-test-tavily",
+            "YANDEX_SEARCH_API_KEY": "deployment-test-yandex",
+            "YANDEX_CLOUD_FOLDER_ID": "deployment-test-folder",
         }
     )
 
@@ -106,15 +108,17 @@ exit 22
     assert result.returncode != 0
     assert "ROLLBACK:" in result.stdout
     assert "Rollback restored SHA" in result.stdout
-    assert "deployment-test-value" not in result.stdout
+    assert "deployment-test-tavily" not in result.stdout
+    assert "deployment-test-yandex" not in result.stdout
     runtime_secret = stack_dir / ".runtime-secrets.env"
     assert runtime_secret.stat().st_mode & 0o777 == 0o600
-    assert runtime_secret.read_text(encoding="utf-8").strip().startswith(
-        "TAVILY_TOKEN="
-    )
-    assert "deployment-test-value" not in (
-        stack_dir / "docker-compose.runtime-secrets.yml"
-    ).read_text(encoding="utf-8")
+    runtime_secret_text = runtime_secret.read_text(encoding="utf-8")
+    assert "TAVILY_TOKEN=deployment-test-tavily" in runtime_secret_text
+    assert "YANDEX_SEARCH_API_KEY=deployment-test-yandex" in runtime_secret_text
+    override_text = (stack_dir / "docker-compose.runtime-secrets.yml").read_text(encoding="utf-8")
+    assert "deployment-test-tavily" not in override_text
+    assert "deployment-test-yandex" not in override_text
+    assert 'SEARCH_EFFECTIVENESS_DEBUG: "false"' in override_text
     assert (stack_dir / "app-source-sha.txt").read_text(encoding="utf-8").strip() == previous_sha
     assert (stack_dir / "app-source" / "marker.txt").read_text(encoding="utf-8").strip() == "previous-bundle"
 
