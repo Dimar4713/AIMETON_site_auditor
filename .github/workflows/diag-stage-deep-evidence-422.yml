@@ -13,9 +13,9 @@ permissions:
 jobs:
   diagnose:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Inspect effective SearXNG runtime engine pool without exposing secrets
+      - name: Benchmark candidate SearXNG web engines from Stage IP
         shell: bash
         run: |
           set -euo pipefail
@@ -23,35 +23,67 @@ jobs:
           test -n "$searx_container"
           docker exec -i "$searx_container" python - <<'PY'
           import json
+          import urllib.parse
           import urllib.request
-          from pathlib import Path
-          import re
+          import time
 
-          settings = Path('/etc/searxng/settings.yml')
-          text = settings.read_text(encoding='utf-8') if settings.exists() else ''
-          print(f'use_default_settings={bool(re.search(r"^use_default_settings\s*:", text, re.MULTILINE))}')
-          print(f'explicit_engines_block={bool(re.search(r"^engines\s*:", text, re.MULTILINE))}')
+          base = 'http://127.0.0.1:8080/search'
+          candidates = [
+              'bing', 'qwant', 'mojeek', 'seznam', 'yandex',
+              'dogpile', 'infospace', 'searchtoday', '360search',
+          ]
+          queries = [
+              'site:stomadv.ru "Стоматология для вас"',
+              'Стоматология для вас Красноярск',
+          ]
 
-          for url in ('http://127.0.0.1:8080/config', 'http://127.0.0.1:8080/config.json'):
+          def run(engine, query):
+              params = urllib.parse.urlencode({
+                  'q': query,
+                  'format': 'json',
+                  'language': 'ru',
+                  'safesearch': 1,
+                  'engines': engine,
+              })
+              url = f'{base}?{params}'
               try:
-                  with urllib.request.urlopen(url, timeout=10) as response:
+                  with urllib.request.urlopen(url, timeout=25) as response:
                       payload = json.load(response)
-                  print(f'CONFIG_URL {url} status=ok')
-                  engines = payload.get('engines') or []
-                  print(f'runtime_engines={len(engines)}')
-                  for item in engines:
-                      if not isinstance(item, dict):
-                          continue
-                      print(
-                          'ENGINE '
-                          f"name={item.get('name','')} "
-                          f"shortcut={item.get('shortcut','')} "
-                          f"categories={item.get('categories','')} "
-                          f"enabled={item.get('enabled', item.get('disabled', 'unknown'))}"
-                      )
-                  break
+                  results = payload.get('results') or []
+                  failures = payload.get('unresponsive_engines') or []
+                  hosts = []
+                  for item in results[:10]:
+                      try:
+                          hosts.append(urllib.parse.urlparse(str(item.get('url') or '')).hostname or '')
+                      except Exception:
+                          pass
+                  relevant = sum(
+                      1 for item in results
+                      if 'stomadv.ru' in f"{item.get('url','')} {item.get('title','')} {item.get('content','')}".casefold()
+                      or 'краснояр' in f"{item.get('title','')} {item.get('content','')}".casefold()
+                      or 'железногор' in f"{item.get('title','')} {item.get('content','')}".casefold()
+                  )
+                  return len(results), relevant, failures, hosts
               except Exception as exc:
-                  print(f'CONFIG_URL {url} status=failed error={type(exc).__name__}')
-          else:
-              raise SystemExit('SearXNG runtime config endpoint unavailable')
+                  return -1, 0, [[engine, type(exc).__name__]], []
+
+          for round_no in range(1, 3):
+              print(f'ROUND {round_no}')
+              for engine in candidates:
+                  total = 0
+                  relevant = 0
+                  failure_summary = []
+                  host_summary = []
+                  for query in queries:
+                      count, good, failures, hosts = run(engine, query)
+                      total += max(0, count)
+                      relevant += good
+                      failure_summary.extend(failures)
+                      host_summary.extend(hosts)
+                      time.sleep(0.35)
+                  print(
+                      f'ENGINE_TEST engine={engine} results={total} relevant={relevant} '
+                      f'failures={failure_summary[:4]} hosts={host_summary[:8]}'
+                  )
+              time.sleep(2)
           PY
