@@ -7,6 +7,7 @@ from functools import lru_cache
 from app.search_gateway.factory_helpers import first_nonempty_env
 from app.search_gateway.models import SearchPolicy
 from app.search_gateway.providers import SearxngProvider, TavilyProvider, YandexProvider
+from app.search_gateway.scheduler import ScheduledProvider
 from app.search_gateway.traced_gateway import TracedSearchGateway
 
 
@@ -37,6 +38,28 @@ def _quota_env(name: str) -> int | None:
         return None
 
 
+def _int_env(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def _float_env(
+    name: str,
+    default: float,
+    *,
+    minimum: float = 0.0,
+    maximum: float = 30.0,
+) -> float:
+    try:
+        value = float(os.getenv(name, str(default)).strip())
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
 def _bool_env(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -49,6 +72,28 @@ def _csv_env(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
     if raw is None:
         return default
     return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
+def _scheduled(
+    provider,
+    *,
+    concurrency_env: str,
+    concurrency_default: int,
+    jitter_min_env: str,
+    jitter_min_default: float,
+    jitter_max_env: str,
+    jitter_max_default: float,
+) -> ScheduledProvider:
+    jitter_min = _float_env(jitter_min_env, jitter_min_default)
+    jitter_max = _float_env(jitter_max_env, jitter_max_default)
+    if jitter_max < jitter_min:
+        jitter_max = jitter_min
+    return ScheduledProvider(
+        provider,
+        max_concurrency=_int_env(concurrency_env, concurrency_default),
+        jitter_min_seconds=jitter_min,
+        jitter_max_seconds=jitter_max,
+    )
 
 
 def search_effectiveness_debug_enabled() -> bool:
@@ -132,25 +177,50 @@ def get_search_gateway() -> TracedSearchGateway:
         }.items()
         if quota is not None
     }
+
+    yandex = _scheduled(
+        YandexProvider(
+            os.getenv("YANDEX_SEARCH_API_KEY"),
+            first_nonempty_env(
+                "YANDEX_CLOUD_FOLDER_ID",
+                "YANDEX_SEARCH_FOLDER_ID",
+            ),
+            cost_amount=_decimal_env("YANDEX_SEARCH_COST_RUB"),
+        ),
+        concurrency_env="SEARCH_CONCURRENCY_YANDEX",
+        concurrency_default=3,
+        jitter_min_env="SEARCH_JITTER_YANDEX_MIN_SECONDS",
+        jitter_min_default=0.0,
+        jitter_max_env="SEARCH_JITTER_YANDEX_MAX_SECONDS",
+        jitter_max_default=0.0,
+    )
+    searxng = _scheduled(
+        SearxngProvider(
+            os.getenv("SEARXNG_BASE_URL"),
+            engines=_csv_env("SEARXNG_ENGINES", DEFAULT_SEARXNG_ENGINES),
+        ),
+        concurrency_env="SEARCH_CONCURRENCY_SEARXNG",
+        concurrency_default=2,
+        jitter_min_env="SEARCH_JITTER_SEARXNG_MIN_SECONDS",
+        jitter_min_default=0.2,
+        jitter_max_env="SEARCH_JITTER_SEARXNG_MAX_SECONDS",
+        jitter_max_default=0.8,
+    )
+    tavily = _scheduled(
+        TavilyProvider(
+            os.getenv("TAVILY_TOKEN") or os.getenv("TAVILY_API_KEY"),
+            cost_amount=_decimal_env("TAVILY_SEARCH_COST_USD"),
+        ),
+        concurrency_env="SEARCH_CONCURRENCY_TAVILY",
+        concurrency_default=3,
+        jitter_min_env="SEARCH_JITTER_TAVILY_MIN_SECONDS",
+        jitter_min_default=0.0,
+        jitter_max_env="SEARCH_JITTER_TAVILY_MAX_SECONDS",
+        jitter_max_default=0.0,
+    )
+
     return TracedSearchGateway(
-        [
-            YandexProvider(
-                os.getenv("YANDEX_SEARCH_API_KEY"),
-                first_nonempty_env(
-                    "YANDEX_CLOUD_FOLDER_ID",
-                    "YANDEX_SEARCH_FOLDER_ID",
-                ),
-                cost_amount=_decimal_env("YANDEX_SEARCH_COST_RUB"),
-            ),
-            SearxngProvider(
-                os.getenv("SEARXNG_BASE_URL"),
-                engines=_csv_env("SEARXNG_ENGINES", DEFAULT_SEARXNG_ENGINES),
-            ),
-            TavilyProvider(
-                os.getenv("TAVILY_TOKEN") or os.getenv("TAVILY_API_KEY"),
-                cost_amount=_decimal_env("TAVILY_SEARCH_COST_USD"),
-            ),
-        ],
+        [yandex, searxng, tavily],
         global_quotas=quotas,
     )
 
