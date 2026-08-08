@@ -3,6 +3,7 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from app.adaptive_external_sources import collect_external_sources_adaptive
+from app.dadata_report_bridge import enrich_identity_with_dadata
 from app.external_sources import (
     extract_identity_anchors,
     source_type,
@@ -28,11 +29,15 @@ async def run_verified_enriched_site_analysis(
 
     Search results remain discovery hints until the document pipeline fetches the
     primary URL and confirms the resolved company identity in fetched content.
-    Entity discovery uses an exact query first and one relaxed fallback only when
-    the exact attempt is empty/degraded.
+    DaData may corroborate/normalize INN/OGRN as a non-authoritative registry
+    mirror before adaptive exact -> relaxed external discovery.
     """
     company_hint = title.split("—")[0].split("|")[0].strip() or _host(url)
     anchors = guard_identity_anchors(extract_identity_anchors(text, url), text)
+    anchors, dadata_result, dadata_facts, dadata_notes = await enrich_identity_with_dadata(
+        anchors
+    )
+
     external_sources, notes, diagnostics = await collect_external_sources_adaptive(
         company_hint,
         url,
@@ -65,6 +70,16 @@ async def run_verified_enriched_site_analysis(
         analysis.risks_and_assumptions.append(
             f"Использован резервный локальный анализ: {type(exc).__name__}."
         )
+
+    existing_fact_keys = {
+        (fact.field, fact.value, fact.note)
+        for fact in analysis.company_facts
+    }
+    for fact in dadata_facts:
+        key = (fact.field, fact.value, fact.note)
+        if key not in existing_fact_keys:
+            analysis.company_facts.append(fact)
+            existing_fact_keys.add(key)
 
     known_ids = {source.id for source in analysis.sources}
     for source in verified:
@@ -106,6 +121,7 @@ async def run_verified_enriched_site_analysis(
         "ogrn=present" if anchors.ogrn else None,
         f"phones={len(anchors.phones)}" if anchors.phones else None,
     ]
+    analysis.risks_and_assumptions.extend(dadata_notes)
     analysis.risks_and_assumptions.append(
         "Identity anchors для внешнего поиска: "
         + (", ".join(part for part in anchor_parts if part) or "не извлечены")
@@ -124,6 +140,26 @@ async def run_verified_enriched_site_analysis(
         f"Search gateway state={diagnostics.state}; attempts={len(diagnostics.attempts)}."
     )
     analysis.risks_and_assumptions.extend(notes)
+
+    if dadata_result is not None:
+        analysis.readiness.provider_states["dadata"] = dadata_result.state.value
+        if dadata_result.state.value == "registry_mirror_verified":
+            identity_vertical = next(
+                (
+                    vertical
+                    for vertical in analysis.readiness.required_verticals
+                    if vertical.code == "identity"
+                ),
+                None,
+            )
+            if identity_vertical and identity_vertical.state in {"not_searched", "degraded"}:
+                identity_vertical.state = "partially_verified"
+    else:
+        analysis.readiness.provider_states["dadata"] = (
+            "not_attempted_no_identifier"
+            if any("not_attempted" in note for note in dadata_notes)
+            else "unavailable"
+        )
 
     if evidence_count:
         analysis.readiness.evidence_quality = max(
