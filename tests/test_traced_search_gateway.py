@@ -10,9 +10,9 @@ from app.trace_ledger import SQLiteTraceLedger
 
 
 @pytest.mark.asyncio
-async def test_gateway_persists_provider_stages_without_query_or_secret(tmp_path):
+async def test_gateway_persists_bounded_query_and_provider_stages_without_secret_transport_data(tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.params["q"] == "секретный пользовательский запрос"
+        assert request.url.params["q"] == "диагностический пользовательский запрос"
         return httpx.Response(
             200,
             json={
@@ -37,7 +37,7 @@ async def test_gateway_persists_provider_stages_without_query_or_secret(tmp_path
         trace_db_path=trace_path,
     )
     request = SearchRequest(
-        query="секретный пользовательский запрос",
+        query="диагностический пользовательский запрос",
         limit=5,
         mission_id="mission-live-search",
         correlation_id="attempt-live-search",
@@ -54,12 +54,16 @@ async def test_gateway_persists_provider_stages_without_query_or_secret(tmp_path
         "attempt-live-search",
     )
     assert [event.operation for event in events] == [
+        "query_planned",
         "provider_selected",
         "request_started",
         "response_received",
         "normalized",
     ]
-    assert all(event.provider == "searxng" for event in events)
+    assert events[0].provider is None
+    assert events[0].metadata["query_text"] == "диагностический пользовательский запрос"
+    assert events[0].counters == {"requested_limit": 5}
+    assert all(event.provider == "searxng" for event in events[1:])
     assert events[-1].state.value == "succeeded"
     assert events[-1].reason_code == "search_items_normalized"
     assert events[-1].counters == {
@@ -67,8 +71,9 @@ async def test_gateway_persists_provider_stages_without_query_or_secret(tmp_path
         "results_normalized": 1,
     }
     serialized = trace_path.read_bytes().decode("utf-8", errors="ignore").lower()
-    assert "секретный пользовательский запрос" not in serialized
-    assert "authorization" not in serialized
+    assert "диагностический пользовательский запрос" in serialized
+    for forbidden in ("authorization", "api_key", "password", "cookie", "raw_payload"):
+        assert forbidden not in serialized
 
 
 @pytest.mark.asyncio
