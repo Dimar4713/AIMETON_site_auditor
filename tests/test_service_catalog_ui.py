@@ -69,3 +69,20 @@ def test_disabled_service_card_is_visually_secondary_not_broken() -> None:
     assert "opacity:.58" in styles
     assert "background:#f8f9fc" in styles
     assert "cursor:not-allowed" in styles
+
+
+def test_hunter_results_are_grouped_for_commercial_scanability() -> None:
+    script = (STATIC / "service-catalog.js").read_text(encoding="utf-8")
+    styles = (STATIC / "service-catalog.css").read_text(encoding="utf-8")
+
+    assert "function classifyCandidate(candidate)" in script
+    assert "deep_analysis_performed === true" in script
+    assert "Компания-кандидат" in script
+    assert "Источник для проверки" in script
+    assert "Наблюдение" in script
+    assert "Источники для дополнительной проверки" in script
+    assert "балл выше = ближе к профилю потенциального клиента" in script
+    assert "candidate_kind" not in script
+    assert ".service-summary__candidate-top" in styles
+    assert ".hunter-supporting-details" in styles
+    assert ".hunter-candidate-action" in styles
