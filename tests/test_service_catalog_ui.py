@@ -139,6 +139,13 @@ def test_hunter_search_breadth_is_separate_from_display_page_size() -> None:
     assert "Показать ещё" in script
 
 
+def test_hunter_deep_threshold_never_falls_below_minimum_score() -> None:
+    script = (STATIC / "service-catalog.js").read_text(encoding="utf-8")
+
+    assert "const requestedDeepAuditScore" in script
+    assert "const deepAuditScore = Math.max(minimumPreScore, requestedDeepAuditScore)" in script
+
+
 def test_hunter_summary_uses_truthful_distinct_counts() -> None:
     script = (STATIC / "service-catalog.js").read_text(encoding="utf-8")
 
