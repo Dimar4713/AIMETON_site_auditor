@@ -13,21 +13,23 @@ permissions:
 jobs:
   diagnose:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Verify deployed container and run read-only evidence collection
+      - name: Verify deployed deep collection and external search enrichment
         shell: bash
         run: |
           set -euo pipefail
-          docker ps --format '{{.Names}}|{{.Status}}' | grep '^aimeton-auditor|' || true
+          docker ps --format '{{.Names}}|{{.Status}}' | grep '^aimeton-auditor|'
           docker exec -i aimeton-auditor python - <<'PY'
           import asyncio
+          from collections import Counter
           from app.mission_bounded_runtime import _collect_deep_site_evidence
+          from app.external_sources import collect_external_sources
 
           async def main():
               seed, page_count, evidence = await _collect_deep_site_evidence(
                   'https://stomadv.ru/',
-                  owned_mission_id='diag-stage-deep-evidence-422',
+                  owned_mission_id='diag-stage-deep-evidence-422-full',
               )
               print(f'final_url={seed["final_url"]}')
               print(f'page_count={page_count}')
@@ -35,6 +37,30 @@ jobs:
               for line in evidence.splitlines():
                   if line.startswith('SOURCE: '):
                       print(line)
+
+              company_hint = seed['title'].split('—')[0].split('|')[0].strip()
+              sources, notes, diagnostics = await collect_external_sources(
+                  company_hint,
+                  seed['final_url'],
+                  max_sources=100,
+              )
+              print(f'company_hint={company_hint}')
+              print(f'external_sources={len(sources)}')
+              print(f'diagnostics_state={diagnostics.state}')
+              print(f'fallback_used={diagnostics.fallback_used}')
+              print(f'attempts={len(diagnostics.attempts)}')
+              print(f'total_cost={dict(diagnostics.total_cost_by_currency)}')
+              provider_states = Counter((a.provider, str(a.state), str(a.reason or '')) for a in diagnostics.attempts)
+              for key, count in sorted(provider_states.items()):
+                  print(f'ATTEMPT provider={key[0]} state={key[1]} reason={key[2]} count={count}')
+              classes = Counter(str(s.source_class) for s in sources)
+              queries = Counter(str(s.query_kind) for s in sources)
+              print(f'source_classes={dict(classes)}')
+              print(f'query_kinds={dict(queries)}')
+              for source in sources[:40]:
+                  print(f'EXT {source.id} class={source.source_class} query={source.query_kind} url={source.url}')
+              for note in notes:
+                  print(f'NOTE {note}')
 
           asyncio.run(main())
           PY
