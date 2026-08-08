@@ -30,6 +30,10 @@
   let latestState = 'queued';
   let latestUpdatedAt = null;
 
+  function emitWorkspaceEvent(name, detail) {
+    window.dispatchEvent(new CustomEvent(name, { detail }));
+  }
+
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -141,6 +145,14 @@
             </li>`).join('')}
         </ol>
       </div>`;
+
+    emitWorkspaceEvent('aimeton:analysis-update', {
+      mission: current ? { ...current } : null,
+      state,
+      updated_at: updatedAt,
+      events: latestEvents.map(event => ({ ...event })),
+      terminal: TERMINAL.has(state),
+    });
   }
 
   function refreshClockAndHeartbeat() {
@@ -180,6 +192,12 @@
           renderChatSession();
           render();
           saveToHistory(analysis);
+          emitWorkspaceEvent('aimeton:analysis-complete', {
+            mission: current ? { ...current } : null,
+            state: status.state,
+            updated_at: status.updated_at,
+            result: status.result,
+          });
         }
       }
     } catch (error) {
@@ -199,6 +217,7 @@
     current = payload;
     startedAt = Date.now();
     rememberActive({ ...payload, started_at: startedAt });
+    emitWorkspaceEvent('aimeton:analysis-started', { mission: { ...payload } });
     renderReporter([], payload.state, new Date().toISOString());
     await poll();
     pollTimer = setInterval(poll, 1200);
@@ -229,6 +248,7 @@
       current = saved;
       startedAt = Number(saved.started_at) || Date.now();
       button.disabled = true;
+      emitWorkspaceEvent('aimeton:analysis-started', { mission: { ...saved }, resumed: true });
       poll();
       pollTimer = setInterval(poll, 1200);
       elapsedTimer = setInterval(refreshClockAndHeartbeat, 1000);
