@@ -88,6 +88,29 @@ async def test_searx_unresponsive_payload_maps_captcha_state():
     assert caught.value.retryable is False
 
 
+@pytest.mark.asyncio
+async def test_searx_generic_unresponsive_state_remains_retryable():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [],
+                "unresponsive_engines": [["brave", "network error"]],
+            },
+        )
+
+    provider = SearxngProvider(
+        "https://search.internal",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ProviderError) as caught:
+        await provider.search(request("searx transient"), timeout_seconds=1)
+
+    assert caught.value.reason == FallbackReason.PROVIDER_ERROR
+    assert caught.value.retryable is True
+
+
 class TypedFailureProvider(SearchProvider):
     name = "typed"
     paid = False
