@@ -9,6 +9,7 @@ import httpx
 
 from app.heuristics import heuristic_analysis
 from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries
+from app.hunter_query_intelligence import generate_hunter_query_plan
 from app.models import HuntCandidate, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
 from app.search_gateway import (
@@ -152,7 +153,30 @@ def _shallow_candidate(
 
 
 async def run_hunt(req: HuntRequest) -> HuntResult:
-    queries = _build_queries(req)
+    query_plan = await generate_hunter_query_plan(
+        region=req.region,
+        industries=req.industries,
+        focus=req.focus,
+        max_queries=req.max_queries,
+    )
+    effective_req = req
+    if query_plan is not None:
+        effective_req = req.model_copy(
+            update={
+                "region": query_plan.normalized_region,
+                "industries": query_plan.normalized_industries or req.industries,
+                "focus": query_plan.normalized_focus or req.focus,
+            }
+        )
+        queries = query_plan.query_variants[: req.max_queries]
+        query_intelligence_note = (
+            "Query Intelligence: LLM-нормализация применена; "
+            f"вариантов поиска: {len(queries)}."
+        )
+    else:
+        queries = _build_queries(req)
+        query_intelligence_note = "Query Intelligence: fallback на детерминированный план поиска."
+
     raw_results: list[dict] = []
     search_diagnostics: list[SearchDiagnostics] = []
     mission_id = f"hunt-{uuid4()}"
@@ -174,12 +198,12 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
     aggregate = SearchDiagnostics.aggregate(search_diagnostics)
     if not raw_results:
         return HuntResult(
-            region=req.region,
+            region=effective_req.region,
             search_zone=req.search_zone,
             queries=queries,
             discovered=0,
             candidates=[],
-            notes=[f"Поиск не дал результатов: gateway state={aggregate.state}."],
+            notes=[query_intelligence_note, f"Поиск не дал результатов: gateway state={aggregate.state}."],
             search=aggregate,
         )
 
@@ -198,7 +222,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         raw_title = str(item.get("title") or "")
         display_title = raw_title or _domain(url)
         snippet = str(item.get("content") or item.get("snippet") or "")
-        result = _pre_score(req, raw_title, snippet, url)
+        result = _pre_score(effective_req, raw_title, snippet, url)
 
         if result.status == "insufficient_data":
             return _shallow_candidate(
@@ -230,7 +254,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             page = await fetch_site(url)
             analysis = heuristic_analysis(page["final_url"], page["title"], page["text"])
             regional_text = f'{page["title"]} {page["text"][:12000]}'.lower()
-            region_tokens = [token for token in req.region.lower().split() if len(token) > 3]
+            region_tokens = [token for token in effective_req.region.lower().split() if len(token) > 3]
             region_confirmed = any(token in regional_text for token in region_tokens)
             final_score = round((result.score + analysis.commercial_opportunity.score) / 2)
             reasons = list(result.reasons)
@@ -284,12 +308,13 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         reverse=True,
     )
     return HuntResult(
-        region=req.region,
+        region=effective_req.region,
         search_zone=req.search_zone,
         queries=queries,
         discovered=len(unique),
         candidates=candidates[: req.output_limit],
         notes=[
+            query_intelligence_note,
             "План охоты сформирован по Справочнику охотника.",
             "Каждый кандидат получает объяснимый pre-score либо явный статус insufficient_data.",
             f"Глубокая обработка запускается только при pre-score >= {req.deep_audit_score}.",
