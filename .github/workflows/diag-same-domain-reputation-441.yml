@@ -1,0 +1,61 @@
+name: Diag Same Domain Reputation 441
+
+on:
+  push:
+    branches:
+      - diag/same-domain-reputation-441
+    paths:
+      - .github/workflows/diag-same-domain-reputation-441.yml
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 10
+    steps:
+      - name: Prove deployed same-domain discovery
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p evidence
+          container="$(docker ps --format '{{.Names}}' | grep -E '^aimeton-auditor$' | head -n 1)"
+          test -n "$container"
+          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-same-domain.txt
+          import asyncio
+          from app.evidence_crawler.search_discovery import discover_same_domain_urls
+
+          async def main():
+              result = await discover_same_domain_urls(
+                  'https://reputation.ru/',
+                  company_name='Reputation.ru',
+                  mission_id='diag-reputation-same-domain-441',
+                  correlation_id='diag-reputation-same-domain-441',
+                  max_urls=8,
+              )
+              print(f'state={result.diagnostics.state.value}')
+              print(f'selected_provider={result.diagnostics.selected_provider}')
+              print(f'url_count={len(result.urls)}')
+              for index, url in enumerate(result.urls, 1):
+                  print(f'url_{index}={url}')
+              for attempt in result.diagnostics.attempts:
+                  print(
+                      'attempt='
+                      f'{attempt.provider}:{attempt.state.value}:'
+                      f'{attempt.reason.value if attempt.reason else "none"}:'
+                      f'{attempt.result_count}:{attempt.latency_ms}'
+                  )
+              if not result.urls:
+                  raise SystemExit('same-domain discovery returned no Reputation.ru URLs')
+              if not all('reputation.ru' in url for url in result.urls):
+                  raise SystemExit('cross-domain URL escaped same-domain filter')
+
+          asyncio.run(main())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reputation-same-domain-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
