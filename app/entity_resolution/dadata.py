@@ -158,8 +158,14 @@ class DaDataRegistryMirrorProvider:
             )
             response.raise_for_status()
             payload = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise RuntimeError("dadata_registry_mirror_request_failed") from exc
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"dadata_registry_mirror_http_{exc.response.status_code}"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise RuntimeError("dadata_registry_mirror_transport_failed") from exc
+        except ValueError as exc:
+            raise RuntimeError("dadata_registry_mirror_invalid_json") from exc
         finally:
             if owns_client:
                 client.close()
