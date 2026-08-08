@@ -48,3 +48,24 @@ def test_catalog_is_initial_experience_and_forms_open_only_after_selection() -> 
     assert "clearSelection();" in script
     assert "selectService('site-audit')" not in script
     assert "panel.hidden = true" in script
+
+
+def test_service_cards_override_global_button_nowrap_and_keep_actions_aligned() -> None:
+    styles = (STATIC / "service-catalog.css").read_text(encoding="utf-8")
+
+    assert ".service-card{" in styles
+    assert "white-space:normal" in styles
+    assert "min-width:0" in styles
+    assert "flex-direction:column" in styles
+    assert ".service-card p{" in styles
+    assert "overflow-wrap:anywhere" in styles
+    assert ".service-card__action{display:block;margin-top:auto" in styles
+
+
+def test_disabled_service_card_is_visually_secondary_not_broken() -> None:
+    styles = (STATIC / "service-catalog.css").read_text(encoding="utf-8")
+
+    assert '.service-card[disabled]{' in styles
+    assert "opacity:.58" in styles
+    assert "background:#f8f9fc" in styles
+    assert "cursor:not-allowed" in styles
