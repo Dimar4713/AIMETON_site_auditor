@@ -13,9 +13,9 @@ permissions:
 jobs:
   diagnose:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
-      - name: Cross-check core plus Bing pool on unrelated domains
+      - name: Benchmark independent SearXNG fallbacks on broad entity queries
         shell: bash
         run: |
           set -euo pipefail
@@ -28,56 +28,65 @@ jobs:
           import time
 
           base = 'http://127.0.0.1:8080/search'
-          pools = {
-              'core': 'brave,duckduckgo,google cse,startpage',
-              'core_plus_bing': 'brave,duckduckgo,google cse,startpage,bing',
-              'bing': 'bing',
-          }
+          engines = [
+              'bing', 'presearch', 'yahoo', 'mwmbl', 'tusksearch',
+              'stract', 'marginalia', 'crowdview', 'right dao',
+          ]
           cases = [
-              ('dns', 'site:dns-shop.ru DNS', 'dns-shop.ru'),
-              ('timeweb', 'site:timeweb.cloud "Timeweb Cloud"', 'timeweb.cloud'),
-              ('reputation', 'site:reputation.ru reputation', 'reputation.ru'),
+              ('stomadv', 'Стоматология для вас Красноярск', ('stomadv.ru', 'краснояр', 'железногор')),
+              ('dns', 'DNS интернет магазин электроники Россия', ('dns-shop.ru', 'dns')),
+              ('timeweb', 'Timeweb Cloud российское облако', ('timeweb.cloud', 'timeweb')),
+              ('reputation', 'Reputation.ru управление репутацией', ('reputation.ru', 'reputation')),
           ]
 
-          def search(engines, query):
+          def search(engine, query):
               params = urllib.parse.urlencode({
                   'q': query,
                   'format': 'json',
                   'language': 'ru',
                   'safesearch': 1,
-                  'engines': engines,
+                  'engines': engine,
               })
               try:
                   with urllib.request.urlopen(f'{base}?{params}', timeout=25) as response:
                       payload = json.load(response)
               except Exception as exc:
-                  return [], [[engines, type(exc).__name__]]
+                  return [], [[engine, type(exc).__name__]]
               return payload.get('results') or [], payload.get('unresponsive_engines') or []
 
           for round_no in range(1, 3):
               print(f'ROUND {round_no}')
-              for pool_name, engines in pools.items():
-                  hits = 0
-                  total_results = 0
+              for engine in engines:
+                  case_hits = 0
+                  relevant_total = 0
+                  result_total = 0
                   failures = []
-                  for case_name, query, expected_domain in cases:
-                      results, blocked = search(engines, query)
+                  host_samples = []
+                  for case_name, query, markers in cases:
+                      results, blocked = search(engine, query)
                       failures.extend(blocked)
-                      total_results += len(results)
-                      domain_hits = [
-                          str(item.get('url') or '')
-                          for item in results
-                          if expected_domain in (urllib.parse.urlparse(str(item.get('url') or '')).hostname or '')
-                      ]
-                      hits += int(bool(domain_hits))
+                      result_total += len(results)
+                      relevant = []
+                      for item in results:
+                          url = str(item.get('url') or '')
+                          host = urllib.parse.urlparse(url).hostname or ''
+                          text = f"{url} {item.get('title','')} {item.get('content','')}".casefold()
+                          if any(marker.casefold() in text for marker in markers):
+                              relevant.append(url)
+                          if len(host_samples) < 10 and host:
+                              host_samples.append(host)
+                      case_hits += int(bool(relevant))
+                      relevant_total += len(relevant)
                       print(
-                          f'CASE pool={pool_name} name={case_name} results={len(results)} '
-                          f'domain_hit={bool(domain_hits)} sample={domain_hits[:3]}'
+                          f'CASE engine={engine} name={case_name} results={len(results)} '
+                          f'relevant={len(relevant)} sample={relevant[:3]}'
                       )
                       time.sleep(0.35)
+                  precision = relevant_total / result_total if result_total else 0.0
                   print(
-                      f'POOL_SUMMARY pool={pool_name} case_hits={hits}/{len(cases)} '
-                      f'total_results={total_results} failures={failures[:12]}'
+                      f'ENGINE_SUMMARY engine={engine} hits={case_hits}/{len(cases)} '
+                      f'results={result_total} relevant={relevant_total} precision={precision:.3f} '
+                      f'failures={failures[:10]} hosts={host_samples}'
                   )
               time.sleep(2)
           PY
