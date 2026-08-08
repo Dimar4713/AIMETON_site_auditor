@@ -8,6 +8,7 @@ import httpx
 
 from app.evidence_crawler.factory import get_evidence_crawler
 from app.evidence_crawler.models import BootstrapCrawlPolicy, CrawlStatus
+from app.evidence_crawler.search_discovery import discover_same_domain_urls
 from app.verified_analysis import run_verified_enriched_site_analysis as run_enriched_site_analysis
 from app.mission_contract import Mission, MissionState, utc_now
 from app.mission_orchestrator import (
@@ -25,6 +26,7 @@ MAX_EVIDENCE_CHARS = 120_000
 MAX_EVIDENCE_PAGE_CHARS = 24_000
 PRIMARY_CRAWL_PAGES = 8
 MAX_TARGETED_PAGES = 6
+MAX_SEARCH_DISCOVERED_PAGES = 4
 
 HIGH_VALUE_TERMS: dict[str, tuple[str, ...]] = {
     "workforce": (
@@ -262,6 +264,39 @@ async def _run_crawl(
     )
 
 
+async def _append_verified_crawl_page(
+    pages: list[dict[str, str]],
+    seen: set[str],
+    target_url: str,
+    *,
+    analysis_id: str,
+) -> None:
+    """Add a candidate only after it passes the owned Evidence Crawler path."""
+    if target_url in seen:
+        return
+    try:
+        targeted = await _run_crawl(
+            target_url,
+            analysis_id=analysis_id,
+            max_pages=1,
+            max_depth=0,
+            max_duration_seconds=15,
+        )
+    except (FetchError, httpx.HTTPError, ValueError):
+        return
+    if targeted.status is CrawlStatus.BLOCKED or not targeted.pages:
+        return
+    page_url = str(targeted.pages[0].final_url)
+    if page_url in seen:
+        return
+    try:
+        fetched = await _fetch_preferred_target(page_url)
+    except (FetchError, httpx.HTTPError):
+        return
+    seen.add(page_url)
+    pages.append(fetched)
+
+
 async def _collect_deep_site_evidence(
     target_ref: str,
     *,
@@ -291,31 +326,32 @@ async def _collect_deep_site_evidence(
         except (FetchError, httpx.HTTPError):
             continue
 
+    discovery = await discover_same_domain_urls(
+        seed["final_url"],
+        company_name=seed.get("title") or None,
+        mission_id=owned_mission_id,
+        correlation_id=f"owned-search-{owned_mission_id}",
+        max_urls=MAX_SEARCH_DISCOVERED_PAGES,
+    )
+    for index, target_url in enumerate(discovery.urls[:MAX_SEARCH_DISCOVERED_PAGES]):
+        await _append_verified_crawl_page(
+            pages,
+            seen,
+            str(target_url),
+            analysis_id=f"owned-{owned_mission_id}-search-{index}",
+        )
+
     target_candidates = _select_diverse_targets(
         [str(url) for url in primary.discovered_urls],
         excluded=seen,
     )
     for index, target_url in enumerate(target_candidates):
-        try:
-            targeted = await _run_crawl(
-                target_url,
-                analysis_id=f"owned-{owned_mission_id}-target-{index}",
-                max_pages=1,
-                max_depth=0,
-                max_duration_seconds=15,
-            )
-        except (FetchError, httpx.HTTPError, ValueError):
-            continue
-        if targeted.status is CrawlStatus.BLOCKED or not targeted.pages:
-            continue
-        page_url = str(targeted.pages[0].final_url)
-        if page_url in seen:
-            continue
-        seen.add(page_url)
-        try:
-            pages.append(await _fetch_preferred_target(page_url))
-        except (FetchError, httpx.HTTPError):
-            continue
+        await _append_verified_crawl_page(
+            pages,
+            seen,
+            target_url,
+            analysis_id=f"owned-{owned_mission_id}-target-{index}",
+        )
 
     evidence_text = _aggregate_evidence(pages)
     if len(evidence_text) < MIN_EVIDENCE_CHARS:
