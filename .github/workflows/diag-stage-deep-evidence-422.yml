@@ -13,77 +13,9 @@ permissions:
 jobs:
   diagnose:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
-      - name: Verify native app SearXNG pool and failure semantics
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker exec -i \
-            -e SEARCH_PROVIDER_ORDER='searxng' \
-            -e SEARCH_ALLOW_PAID_FALLBACK='false' \
-            aimeton-auditor python - <<'PY'
-          import asyncio
-          from collections import Counter
-          from urllib.parse import urlparse
-
-          from app.search_gateway import get_search_gateway, search_policy_from_env
-          from app.search_gateway.models import SearchRequest
-
-          CASES = [
-              ('stomadv', 'Стоматология для вас Красноярск', ('stomadv.ru', 'краснояр', 'железногор')),
-              ('dns', 'DNS интернет магазин электроники Россия', ('dns-shop.ru', 'dns')),
-              ('timeweb', 'Timeweb Cloud российское облако', ('timeweb.cloud', 'timeweb')),
-              ('reputation', 'Reputation.ru управление репутацией', ('reputation.ru', 'reputation')),
-          ]
-
-          async def main():
-              gateway = get_search_gateway()
-              policy = search_policy_from_env()
-              searx = next(provider for provider in gateway._providers.values() if provider.name == 'searxng')
-              print(f'native_engines={list(searx._engines)}')
-              print(f'policy_order={list(policy.provider_order)}')
-              total = 0
-              relevant_total = 0
-              state_counts = Counter()
-              reason_counts = Counter()
-              for round_no in range(1, 4):
-                  print(f'ROUND {round_no}')
-                  for idx, (name, query, markers) in enumerate(CASES):
-                      response = await gateway.search(
-                          SearchRequest(
-                              query=query,
-                              limit=20,
-                              mission_id='diag-native-searx-pool',
-                              correlation_id=f'{round_no}-{idx}',
-                          ),
-                          policy,
-                      )
-                      results = response.results
-                      total += len(results)
-                      relevant = []
-                      for item in results:
-                          url = str(item.url)
-                          text = f'{url} {item.title} {item.snippet}'.casefold()
-                          if any(marker.casefold() in text for marker in markers):
-                              relevant.append(url)
-                      relevant_total += len(relevant)
-                      for attempt in response.diagnostics.attempts:
-                          state_counts[str(attempt.state)] += 1
-                          reason_counts[str(attempt.reason or '')] += 1
-                      print(
-                          f'CASE round={round_no} name={name} state={response.diagnostics.state} '
-                          f'results={len(results)} relevant={len(relevant)} sample={relevant[:4]}'
-                      )
-              precision = relevant_total / total if total else 0.0
-              print(f'SUMMARY results={total} relevant={relevant_total} precision={precision:.3f}')
-              print(f'STATES {dict(state_counts)}')
-              print(f'REASONS {dict(reason_counts)}')
-
-          asyncio.run(main())
-          PY
-
-      - name: Verify canonical SearXNG runtime has Bing enabled
+      - name: Compare fresh five-engine pool with Yahoo fallback
         shell: bash
         run: |
           set -euo pipefail
@@ -91,13 +23,73 @@ jobs:
           test -n "$searx_container"
           docker exec -i "$searx_container" python - <<'PY'
           import json
+          import time
+          import urllib.parse
           import urllib.request
 
-          with urllib.request.urlopen('http://127.0.0.1:8080/config', timeout=10) as response:
-              payload = json.load(response)
-          engines = payload.get('engines') or []
-          matches = [item for item in engines if isinstance(item, dict) and item.get('name') == 'bing']
-          assert matches, 'Bing engine missing from runtime config'
-          print(f'bing_runtime_entries={len(matches)}')
-          print(f'bing_runtime={matches[0]}')
+          base = 'http://127.0.0.1:8080/search'
+          pools = {
+              'five': 'brave,duckduckgo,google cse,startpage,bing',
+              'five_plus_yahoo': 'brave,duckduckgo,google cse,startpage,bing,yahoo',
+              'bing': 'bing',
+              'yahoo': 'yahoo',
+          }
+          cases = [
+              ('stomadv', 'Стоматология для вас Красноярск', ('stomadv.ru', 'краснояр', 'железногор')),
+              ('dns', 'DNS интернет магазин электроники Россия', ('dns-shop.ru', 'dns')),
+              ('timeweb', 'Timeweb Cloud российское облако', ('timeweb.cloud', 'timeweb')),
+              ('reputation', 'Reputation.ru управление репутацией', ('reputation.ru', 'reputation')),
+          ]
+
+          def search(engines, query, nonce):
+              # A harmless negative nonce prevents SearXNG/gateway query cache from
+              # turning repeated rounds into the same response while preserving
+              # entity intent. The nonce is deliberately not a domain or identity token.
+              fresh_query = f'{query} -aimeton_diag_{nonce}'
+              params = urllib.parse.urlencode({
+                  'q': fresh_query,
+                  'format': 'json',
+                  'language': 'ru',
+                  'safesearch': 1,
+                  'engines': engines,
+              })
+              try:
+                  with urllib.request.urlopen(f'{base}?{params}', timeout=25) as response:
+                      payload = json.load(response)
+              except Exception as exc:
+                  return [], [[engines, type(exc).__name__]]
+              return payload.get('results') or [], payload.get('unresponsive_engines') or []
+
+          for round_no in range(1, 4):
+              print(f'ROUND {round_no}')
+              for pool_name, engines in pools.items():
+                  case_hits = 0
+                  total = 0
+                  relevant_total = 0
+                  failures = []
+                  for case_idx, (case_name, query, markers) in enumerate(cases):
+                      results, blocked = search(engines, query, f'{round_no}_{pool_name}_{case_idx}')
+                      failures.extend(blocked)
+                      total += len(results)
+                      relevant = []
+                      for item in results:
+                          url = str(item.get('url') or '')
+                          text = f"{url} {item.get('title','')} {item.get('content','')}".casefold()
+                          if any(marker.casefold() in text for marker in markers):
+                              relevant.append(url)
+                      case_hits += int(bool(relevant))
+                      relevant_total += len(relevant)
+                      print(
+                          f'CASE round={round_no} pool={pool_name} name={case_name} '
+                          f'results={len(results)} relevant={len(relevant)} failures={blocked[:6]} '
+                          f'sample={relevant[:3]}'
+                      )
+                      time.sleep(0.45)
+                  precision = relevant_total / total if total else 0.0
+                  print(
+                      f'POOL_SUMMARY round={round_no} pool={pool_name} hits={case_hits}/{len(cases)} '
+                      f'results={total} relevant={relevant_total} precision={precision:.3f} '
+                      f'failures={failures[:16]}'
+                  )
+              time.sleep(2)
           PY
