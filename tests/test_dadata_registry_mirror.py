@@ -1,4 +1,5 @@
 import httpx
+import pytest
 
 from app.entity_resolution.dadata import (
     DaDataRegistryMirrorProvider,
@@ -142,3 +143,33 @@ def test_health_never_exposes_secret_values():
     assert health["secrets_exposed"] is False
     assert "api-value" not in str(health)
     assert "secret-value" not in str(health)
+
+
+def test_http_status_failure_keeps_only_safe_status_class():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"message": "secret provider body"})
+
+    provider = DaDataRegistryMirrorProvider(
+        api_token="test-token",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(RuntimeError, match=r"^dadata_registry_mirror_http_403$") as exc_info:
+        provider.lookup("7707083893")
+
+    assert "test-token" not in str(exc_info.value)
+    assert "secret provider body" not in str(exc_info.value)
+
+
+def test_invalid_json_has_typed_failure_without_response_body():
+    provider = DaDataRegistryMirrorProvider(
+        api_token="test-token",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(200, text="not-json")
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match=r"^dadata_registry_mirror_invalid_json$"):
+        provider.lookup("7707083893")
