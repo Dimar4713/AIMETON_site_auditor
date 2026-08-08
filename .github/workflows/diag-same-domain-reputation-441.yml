@@ -15,14 +15,14 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
-      - name: Prove search-assisted Reputation evidence reaches owned aggregation
+      - name: Prove domain-anchored Reputation evidence reaches owned aggregation
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p evidence
           container="$(docker ps --format '{{.Names}}' | grep -E '^aimeton-auditor$' | head -n 1)"
           test -n "$container"
-          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-owned-evidence-after-450.txt
+          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-owned-evidence-after-451.txt
           import asyncio
 
           from app.mission_bounded_runtime import _collect_deep_site_evidence
@@ -33,7 +33,7 @@ jobs:
           async def main():
               seed, page_count, evidence = await _collect_deep_site_evidence(
                   ROOT,
-                  owned_mission_id='diag-owned-reputation-after-450',
+                  owned_mission_id='diag-owned-reputation-after-451',
               )
               print(f'seed_url={seed["final_url"]}')
               print(f'seed_title={seed["title"]}')
