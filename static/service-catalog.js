@@ -137,7 +137,8 @@
     document.querySelector('#companyName').focus({preventScroll: true});
   }
 
-  function appendCandidate(container, candidate, fallbackRegion, classification) {
+  function appendCandidate(container, candidate, fallbackRegion) {
+    const classification = classifyCandidate(candidate);
     const item = document.createElement('article');
     item.className = `service-summary__item service-summary__candidate service-summary__candidate--${classification.kind}`;
     const name = String(candidate.company_name || candidate.url || 'Результат без названия').trim();
@@ -196,12 +197,12 @@
     const groups = {company: [], supporting: [], observation: []};
     candidates.forEach(candidate => {
       const classification = classifyCandidate(candidate);
-      groups[classification.kind].push({candidate, classification});
+      groups[classification.kind].push(candidate);
     });
 
     if (groups.company.length) {
       const list = appendGroup(container, 'Компании-кандидаты', 'Наиболее пригодные для следующего шага: сайт был глубоко обработан.', 'company');
-      groups.company.forEach(item => appendCandidate(list, item.candidate, fallbackRegion, item.classification));
+      groups.company.forEach(candidate => appendCandidate(list, candidate, fallbackRegion));
     }
     if (groups.supporting.length) {
       const details = document.createElement('details');
@@ -210,7 +211,7 @@
       summary.textContent = `Источники для дополнительной проверки (${groups.supporting.length})`;
       const list = document.createElement('div');
       list.className = 'hunter-group__list';
-      groups.supporting.forEach(item => appendCandidate(list, item.candidate, fallbackRegion, item.classification));
+      groups.supporting.forEach(candidate => appendCandidate(list, candidate, fallbackRegion));
       details.append(summary, list);
       container.append(details);
     }
@@ -221,7 +222,7 @@
       summary.textContent = `Наблюдение (${groups.observation.length})`;
       const list = document.createElement('div');
       list.className = 'hunter-group__list';
-      groups.observation.forEach(item => appendCandidate(list, item.candidate, fallbackRegion, item.classification));
+      groups.observation.forEach(candidate => appendCandidate(list, candidate, fallbackRegion));
       details.append(summary, list);
       container.append(details);
     }
