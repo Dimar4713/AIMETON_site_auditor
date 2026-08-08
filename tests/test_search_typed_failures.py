@@ -142,3 +142,25 @@ async def test_gateway_preserves_typed_reason_and_avoids_tight_retry():
 
     assert provider.calls == 1
     assert response.diagnostics.attempts[0].reason == FallbackReason.RATE_LIMITED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reason",
+    [
+        FallbackReason.RATE_LIMITED,
+        FallbackReason.PROVIDER_BLOCKED,
+        FallbackReason.CAPTCHA,
+    ],
+)
+async def test_hard_upstream_failure_opens_circuit_before_next_query(reason):
+    provider = TypedFailureProvider(reason)
+    gateway = SearchGateway([provider], failure_threshold=3, recovery_seconds=60)
+    policy = SearchPolicy(provider_order=("typed",), retries=0, cache_ttl_seconds=0)
+
+    first = await gateway.search(request(f"first-{reason}"), policy)
+    second = await gateway.search(request(f"second-{reason}"), policy)
+
+    assert provider.calls == 1
+    assert first.diagnostics.attempts[0].reason == reason
+    assert second.diagnostics.attempts[0].reason == FallbackReason.CIRCUIT_OPEN
