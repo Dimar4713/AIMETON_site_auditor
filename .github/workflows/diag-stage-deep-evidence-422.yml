@@ -13,23 +13,42 @@ permissions:
 jobs:
   diagnose:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 15
+    environment: stage
+    timeout-minutes: 20
+    env:
+      YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
+      YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
+      TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
     steps:
-      - name: Verify deployed deep collection and external search enrichment
+      - name: Verify all providers with debug-unbounded process overrides
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$YANDEX_SEARCH_API_KEY"
+          test -n "$YANDEX_CLOUD_FOLDER_ID"
+          test -n "$TAVILY_TOKEN"
           docker ps --format '{{.Names}}|{{.Status}}' | grep '^aimeton-auditor|'
-          docker exec -i aimeton-auditor python - <<'PY'
+          docker exec -i \
+            -e YANDEX_SEARCH_API_KEY="$YANDEX_SEARCH_API_KEY" \
+            -e YANDEX_CLOUD_FOLDER_ID="$YANDEX_CLOUD_FOLDER_ID" \
+            -e TAVILY_TOKEN="$TAVILY_TOKEN" \
+            -e SEARCH_PROVIDER_ORDER='yandex,tavily,searxng' \
+            -e SEARCH_ALLOW_PAID_FALLBACK='true' \
+            -e SEARCH_MISSION_BUDGET_RUB='999999' \
+            -e SEARCH_MISSION_BUDGET_USD='999999' \
+            -e SEARCH_QUOTA_YANDEX='' \
+            -e SEARCH_QUOTA_TAVILY='' \
+            aimeton-auditor python - <<'PY'
           import asyncio
           from collections import Counter
           from app.mission_bounded_runtime import _collect_deep_site_evidence
           from app.external_sources import collect_external_sources
+          from app.search_gateway import get_search_gateway, search_policy_from_env
 
           async def main():
               seed, page_count, evidence = await _collect_deep_site_evidence(
                   'https://stomadv.ru/',
-                  owned_mission_id='diag-stage-deep-evidence-422-full',
+                  owned_mission_id='diag-stage-all-providers',
               )
               print(f'final_url={seed["final_url"]}')
               print(f'page_count={page_count}')
@@ -37,6 +56,10 @@ jobs:
               for line in evidence.splitlines():
                   if line.startswith('SOURCE: '):
                       print(line)
+
+              policy = search_policy_from_env()
+              for health in get_search_gateway().health(policy):
+                  print(f'HEALTH provider={health.provider} state={health.state} ready={health.ready} configured={health.configured} quota_remaining={health.quota_remaining}')
 
               company_hint = seed['title'].split('—')[0].split('|')[0].strip()
               sources, notes, diagnostics = await collect_external_sources(
@@ -57,7 +80,7 @@ jobs:
               queries = Counter(str(s.query_kind) for s in sources)
               print(f'source_classes={dict(classes)}')
               print(f'query_kinds={dict(queries)}')
-              for source in sources[:40]:
+              for source in sources[:60]:
                   print(f'EXT {source.id} class={source.source_class} query={source.query_kind} url={source.url}')
               for note in notes:
                   print(f'NOTE {note}')
