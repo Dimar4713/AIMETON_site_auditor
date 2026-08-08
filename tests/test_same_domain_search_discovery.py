@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.evidence_crawler import search_discovery
@@ -14,39 +16,47 @@ from app.search_gateway.models import (
 class StubGateway:
     def __init__(self) -> None:
         self.queries: list[str] = []
+        self.active = 0
+        self.max_active = 0
 
     async def search(self, request, policy):
         self.queries.append(request.query)
-        if "реквизиты" in request.query:
-            results = [
-                SearchItem(
-                    url="https://www.example.ru/company/details",
-                    title="Реквизиты",
-                    provider="searxng",
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(0)
+            if "реквизиты" in request.query:
+                results = [
+                    SearchItem(
+                        url="https://www.example.ru/company/details",
+                        title="Реквизиты",
+                        provider="searxng",
+                    ),
+                    SearchItem(
+                        url="https://evil.example.net/copied-details",
+                        title="Копия реквизитов",
+                        provider="searxng",
+                    ),
+                ]
+            elif "контакты" in request.query:
+                results = [
+                    SearchItem(
+                        url="https://example.ru/contacts",
+                        title="Контакты",
+                        provider="searxng",
+                    )
+                ]
+            else:
+                results = []
+            return SearchResponse(
+                results=results,
+                diagnostics=SearchDiagnostics(
+                    state=GatewayState.SUCCESS,
+                    selected_provider="searxng",
                 ),
-                SearchItem(
-                    url="https://evil.example.net/copied-details",
-                    title="Копия реквизитов",
-                    provider="searxng",
-                ),
-            ]
-        elif "контакты" in request.query:
-            results = [
-                SearchItem(
-                    url="https://example.ru/contacts",
-                    title="Контакты",
-                    provider="searxng",
-                )
-            ]
-        else:
-            results = []
-        return SearchResponse(
-            results=results,
-            diagnostics=SearchDiagnostics(
-                state=GatewayState.SUCCESS,
-                selected_provider="searxng",
-            ),
-        )
+            )
+        finally:
+            self.active -= 1
 
 
 def test_same_host_family_accepts_www_equivalence_only():
@@ -82,6 +92,7 @@ async def test_discovery_returns_only_same_domain_and_prioritizes_identity_pages
         "https://example.ru/contacts",
     )
     assert len(gateway.queries) == len(search_discovery.DISCOVERY_TOPICS)
+    assert gateway.max_active == 1
     assert all(query.startswith("site:example.ru") for query in gateway.queries)
     assert result.diagnostics.state == GatewayState.SUCCESS
 
