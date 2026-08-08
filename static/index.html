@@ -6,7 +6,7 @@
   <title>AIMETON AI Studio</title>
   <link rel="stylesheet" href="/static/style.css?v=20260729a">
   <link rel="stylesheet" href="/static/auth-ui.css?v=20260803c">
-  <link rel="stylesheet" href="/static/service-catalog.css?v=20260804b">
+  <link rel="stylesheet" href="/static/service-catalog.css?v=20260808c">
   <link rel="stylesheet" href="/static/business-audit-workspace.css?v=20260808a">
 </head>
 <body>
@@ -115,10 +115,44 @@
 
   <section class="panel service-panel" data-service-panel="hunter" hidden>
     <h2>Поиск клиентов</h2>
-    <p class="service-panel__intro">Задайте территорию и отрасль. AIMETON найдёт и предварительно ранжирует кандидатов.</p>
+    <p class="service-panel__intro">Задайте территорию и отрасль. По умолчанию AIMETON ищет широко; при необходимости сузьте выдачу по значимым параметрам.</p>
     <form id="hunterForm" class="service-form">
       <label>Регион<input id="hunterRegion" minlength="2" maxlength="160" required placeholder="Красноярск"></label>
       <label>Отрасль<input id="hunterIndustry" maxlength="160" placeholder="Стоматология"></label>
+      <details class="hunter-settings service-form__wide">
+        <summary>Настройки поиска и отбора</summary>
+        <div class="hunter-settings__grid">
+          <label>Охват поиска
+            <select id="hunterCoverage">
+              <option value="quick">Быстрый</option>
+              <option value="wide" selected>Широкий</option>
+              <option value="maximum">Максимальный</option>
+            </select>
+            <small>Определяет ширину сбора источников до отбора и ранжирования.</small>
+          </label>
+          <label>Минимальный приоритет
+            <input id="hunterMinimumScore" type="number" min="0" max="100" value="35" step="5">
+            <small>Кандидаты ниже порога не проходят в рабочий пул.</small>
+          </label>
+          <label>Глубоко исследовать от
+            <input id="hunterDeepAuditScore" type="number" min="0" max="100" value="60" step="5">
+            <small>Порог для более глубокой и ресурсной обработки кандидата.</small>
+          </label>
+          <label>Максимум кандидатов в пуле
+            <input id="hunterMaxCandidates" type="number" min="10" max="500" value="100" step="10">
+            <small>Сколько уникальных кандидатов сохранять после дедупликации.</small>
+          </label>
+          <label>Показывать за раз
+            <select id="hunterPageSize">
+              <option value="10">10</option>
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            <small>Размер первой страницы; не ограничивает общий поиск.</small>
+          </label>
+        </div>
+      </details>
       <button type="submit">Найти компании</button>
     </form>
     <p id="hunterStatus" class="service-status" role="status" aria-live="polite"></p>
@@ -153,7 +187,7 @@
 <script src="/static/instant-umel-reporter.js?v=20260805a"></script>
 <script src="/static/live-analysis.js?v=20260804a"></script>
 <script src="/static/business-audit-workspace.js?v=20260808a"></script>
-<script src="/static/service-catalog.js?v=20260804b"></script>
+<script src="/static/service-catalog.js?v=20260808c"></script>
 <script src="/static/analyze-response-guard.js?v=20260803b"></script>
 <script src="/static/sources.js?v=20260720e"></script>
 </body>
