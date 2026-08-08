@@ -83,6 +83,16 @@ def test_hunter_results_are_grouped_for_commercial_scanability() -> None:
     assert "Источники для дополнительной проверки" in script
     assert "балл выше = ближе к профилю потенциального клиента" in script
     assert "candidate_kind" not in script
+    assert "function appendCandidate(container, candidate, fallbackRegion)" in script
     assert ".service-summary__candidate-top" in styles
     assert ".hunter-supporting-details" in styles
     assert ".hunter-candidate-action" in styles
+
+
+def test_hunter_desktop_results_have_visible_scroll_without_trapping_mobile() -> None:
+    styles = (STATIC / "service-catalog.css").read_text(encoding="utf-8")
+
+    assert "#hunterOutput .service-summary{max-height:min(62vh,720px);overflow-y:auto" in styles
+    assert "scrollbar-gutter:stable" in styles
+    assert "overscroll-behavior:contain" in styles
+    assert "#hunterOutput .service-summary{max-height:none;overflow-y:visible;scrollbar-gutter:auto" in styles
