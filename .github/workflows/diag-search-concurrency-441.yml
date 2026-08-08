@@ -1,0 +1,141 @@
+name: Diag Search Concurrency 441
+
+on:
+  push:
+    branches:
+      - diag/search-concurrency-benchmark-441
+    paths:
+      - .github/workflows/diag-search-concurrency-441.yml
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 20
+    steps:
+      - name: Benchmark scheduled SearXNG concurrency 1 2 3 6
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p benchmark-evidence
+          auditor_container="$(docker ps --format '{{.Names}}' | grep -E '^aimeton-auditor$' | head -n 1)"
+          test -n "$auditor_container"
+          docker exec -i "$auditor_container" python - <<'PY' | tee benchmark-evidence/search-concurrency-441.txt
+          import asyncio
+          import os
+          import statistics
+          import time
+
+          from app.search_gateway.models import SearchRequest
+          from app.search_gateway.providers import ProviderError, SearxngProvider
+          from app.search_gateway.scheduler import ScheduledProvider
+
+          base_url = os.environ.get('SEARXNG_BASE_URL', '').strip()
+          if not base_url:
+              raise SystemExit('SEARXNG_BASE_URL is not configured in deployed auditor container')
+          engines = tuple(
+              item.strip()
+              for item in os.environ.get(
+                  'SEARXNG_ENGINES',
+                  'brave,duckduckgo,google cse,startpage,bing',
+              ).split(',')
+              if item.strip()
+          )
+
+          cases = [
+              ('stomadv', 'Стоматология для вас Красноярск', ('stomadv.ru', 'краснояр', 'стоматолог')),
+              ('dns', 'DNS интернет магазин электроники Россия', ('dns-shop.ru', 'dns')),
+              ('timeweb', 'Timeweb Cloud российское облако', ('timeweb.cloud', 'timeweb')),
+              ('reputation', 'Reputation.ru управление репутацией', ('reputation.ru', 'reputation')),
+          ]
+
+          async def run_level(level: int):
+              raw = SearxngProvider(base_url, engines=engines)
+              provider = ScheduledProvider(
+                  raw,
+                  max_concurrency=level,
+                  jitter_min_seconds=0.2,
+                  jitter_max_seconds=0.8,
+              )
+              latencies = []
+              total_results = 0
+              relevant_results = 0
+              case_hits = 0
+              failures = 0
+              blocked = 0
+
+              async def one(round_no, case_idx, name, query, markers):
+                  nonce = f'aimeton_c{level}_r{round_no}_q{case_idx}_{time.time_ns()}'
+                  request = SearchRequest(
+                      query=f'{query} -{nonce}',
+                      limit=10,
+                      mission_id=f'benchmark-441-c{level}',
+                      correlation_id=f'benchmark-441-c{level}-r{round_no}-q{case_idx}',
+                  )
+                  started = time.perf_counter()
+                  try:
+                      results = await provider.search(request, timeout_seconds=25)
+                      error = None
+                  except ProviderError as exc:
+                      results = []
+                      error = str(exc)
+                  latency_ms = round((time.perf_counter() - started) * 1000)
+                  relevant = []
+                  for item in results:
+                      text = f'{item.url} {item.title} {item.snippet}'.casefold()
+                      if any(marker.casefold() in text for marker in markers):
+                          relevant.append(str(item.url))
+                  return name, latency_ms, results, relevant, error
+
+              for round_no in range(1, 4):
+                  batch = await asyncio.gather(*[
+                      one(round_no, idx, name, query, markers)
+                      for idx, (name, query, markers) in enumerate(cases)
+                  ])
+                  for name, latency_ms, results, relevant, error in batch:
+                      latencies.append(latency_ms)
+                      total_results += len(results)
+                      relevant_results += len(relevant)
+                      case_hits += int(bool(relevant))
+                      if error:
+                          failures += 1
+                          lowered = error.casefold()
+                          if any(token in lowered for token in ('unavailable', 'captcha', '429', '403', 'rate')):
+                              blocked += 1
+                      print(
+                          f'CASE concurrency={level} round={round_no} name={name} '
+                          f'latency_ms={latency_ms} results={len(results)} relevant={len(relevant)} '
+                          f'error={error or "none"} sample={relevant[:2]}'
+                      )
+                  await asyncio.sleep(1.0)
+
+              attempts = len(cases) * 3
+              precision = relevant_results / total_results if total_results else 0.0
+              print(
+                  f'CONCURRENCY_SUMMARY concurrency={level} attempts={attempts} '
+                  f'hits={case_hits}/{attempts} success_rate={(attempts-failures)/attempts:.3f} '
+                  f'block_rate={blocked/attempts:.3f} failures={failures} '
+                  f'results={total_results} relevant={relevant_results} precision={precision:.3f} '
+                  f'latency_p50_ms={statistics.median(latencies):.0f} '
+                  f'latency_mean_ms={statistics.mean(latencies):.0f} '
+                  f'latency_max_ms={max(latencies):.0f}'
+              )
+
+          async def main():
+              print(f'BENCHMARK engines={engines}')
+              for level in (1, 2, 3, 6):
+                  await run_level(level)
+                  await asyncio.sleep(3.0)
+
+          asyncio.run(main())
+          PY
+
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-concurrency-441-${{ github.run_id }}
+          path: benchmark-evidence/
+          if-no-files-found: error
+          retention-days: 30
