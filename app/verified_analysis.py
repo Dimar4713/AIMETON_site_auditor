@@ -10,6 +10,7 @@ from app.external_sources import (
 )
 from app.external_verification import verify_external_sources
 from app.heuristics import heuristic_analysis
+from app.identity_anchor_guard import guard_identity_anchors
 from app.llm import analyze_with_routerai
 from app.models import EvidenceSource, SiteAnalysis
 
@@ -29,7 +30,7 @@ async def run_verified_enriched_site_analysis(
     primary URL and confirms the resolved company identity in fetched content.
     """
     company_hint = title.split("—")[0].split("|")[0].strip() or _host(url)
-    anchors = extract_identity_anchors(text, url)
+    anchors = guard_identity_anchors(extract_identity_anchors(text, url), text)
     external_sources, notes, diagnostics = await collect_external_sources(
         company_hint,
         url,
