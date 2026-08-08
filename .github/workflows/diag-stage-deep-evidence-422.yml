@@ -15,7 +15,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 15
     steps:
-      - name: Benchmark resilient SearXNG pools and second-line engines
+      - name: Cross-check core plus Bing pool on unrelated domains
         shell: bash
         run: |
           set -euo pipefail
@@ -28,28 +28,18 @@ jobs:
           import time
 
           base = 'http://127.0.0.1:8080/search'
+          pools = {
+              'core': 'brave,duckduckgo,google cse,startpage',
+              'core_plus_bing': 'brave,duckduckgo,google cse,startpage,bing',
+              'bing': 'bing',
+          }
           cases = [
-              ('default_core', 'brave,duckduckgo,google cse,startpage'),
-              ('core_plus_bing', 'brave,duckduckgo,google cse,startpage,bing'),
-              ('core_plus_bing_seznam', 'brave,duckduckgo,google cse,startpage,bing,seznam'),
-              ('bing_only', 'bing'),
-              ('yep_only', 'yep'),
-              ('privacywall_only', 'privacywall'),
-              ('vuhuv_only', 'vuhuv'),
-              ('reloado_only', 'reloado'),
-              ('resulthunter_only', 'resulthunter'),
-              ('searchch_only', 'searchch'),
-              ('wiby_only', 'wiby'),
-              ('gmx_only', 'gmx'),
-              ('fireball_only', 'fireball'),
-          ]
-          queries = [
-              'site:stomadv.ru "Стоматология для вас"',
-              'Стоматология для вас Красноярск',
-              'site:stomadv.ru врачи',
+              ('dns', 'site:dns-shop.ru DNS', 'dns-shop.ru'),
+              ('timeweb', 'site:timeweb.cloud "Timeweb Cloud"', 'timeweb.cloud'),
+              ('reputation', 'site:reputation.ru reputation', 'reputation.ru'),
           ]
 
-          def request(engines, query):
+          def search(engines, query):
               params = urllib.parse.urlencode({
                   'q': query,
                   'format': 'json',
@@ -66,39 +56,28 @@ jobs:
 
           for round_no in range(1, 3):
               print(f'ROUND {round_no}')
-              for label, engines in cases:
-                  unique = {}
+              for pool_name, engines in pools.items():
+                  hits = 0
+                  total_results = 0
                   failures = []
-                  for query in queries:
-                      results, blocked = request(engines, query)
+                  for case_name, query, expected_domain in cases:
+                      results, blocked = search(engines, query)
                       failures.extend(blocked)
-                      for item in results:
-                          url = str(item.get('url') or '')
-                          if url:
-                              unique.setdefault(url, item)
-                      time.sleep(0.25)
-                  relevant = []
-                  unrelated = []
-                  for url, item in unique.items():
-                      text = f"{url} {item.get('title','')} {item.get('content','')}".casefold()
-                      row = (
-                          (urllib.parse.urlparse(url).hostname or ''),
-                          url,
-                          item.get('engine'),
-                          item.get('engines'),
+                      total_results += len(results)
+                      domain_hits = [
+                          str(item.get('url') or '')
+                          for item in results
+                          if expected_domain in (urllib.parse.urlparse(str(item.get('url') or '')).hostname or '')
+                      ]
+                      hits += int(bool(domain_hits))
+                      print(
+                          f'CASE pool={pool_name} name={case_name} results={len(results)} '
+                          f'domain_hit={bool(domain_hits)} sample={domain_hits[:3]}'
                       )
-                      if 'stomadv.ru' in text or 'краснояр' in text or 'железногор' in text:
-                          relevant.append(row)
-                      else:
-                          unrelated.append(row)
-                  precision = (len(relevant) / len(unique)) if unique else 0.0
+                      time.sleep(0.35)
                   print(
-                      f'POOL label={label} engines={engines} unique={len(unique)} '
-                      f'relevant={len(relevant)} precision={precision:.3f} failures={failures[:8]}'
+                      f'POOL_SUMMARY pool={pool_name} case_hits={hits}/{len(cases)} '
+                      f'total_results={total_results} failures={failures[:12]}'
                   )
-                  for row in relevant[:8]:
-                      print(f'RELEVANT label={label} host={row[0]} engine={row[2]} engines={row[3]} url={row[1]}')
-                  for row in unrelated[:4]:
-                      print(f'NOISE label={label} host={row[0]} engine={row[2]} url={row[1]}')
               time.sleep(2)
           PY
