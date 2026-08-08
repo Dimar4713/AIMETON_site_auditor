@@ -10,6 +10,7 @@ COMPOSE_OVERRIDE_FILE="$STACK_DIR/docker-compose.runtime-secrets.yml"
 DADATA_API="${DADATA_API:-}"
 DADATA_SECRET="${DADATA_SECRET:-}"
 DADATA_SMOKE_QUERY="${DADATA_SMOKE_QUERY:-7707083893}"
+DADATA_PUBLIC_READY_ATTEMPTS="${DADATA_PUBLIC_READY_ATTEMPTS:-8}"
 
 log() {
   printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
@@ -20,6 +21,15 @@ fail() {
   exit 1
 }
 
+retry_delay() {
+  local attempt="$1"
+  if (( attempt <= 4 )); then
+    printf '%s' "$(( attempt * 2 ))"
+  else
+    printf '%s' '10'
+  fi
+}
+
 [[ -d "$STACK_DIR" ]] || fail "Stack directory not found"
 [[ -f "$STACK_DIR/docker-compose.yml" ]] || fail "docker-compose.yml not found"
 [[ -f "$COMPOSE_OVERRIDE_FILE" ]] || fail "runtime compose override not found"
@@ -28,6 +38,7 @@ fail() {
 [[ "$DADATA_API" != *$'\n'* ]] || fail "DADATA_API contains a newline"
 [[ "$DADATA_SECRET" != *$'\n'* ]] || fail "DADATA_SECRET contains a newline"
 [[ "$DADATA_SMOKE_QUERY" =~ ^[0-9]{10,15}$ ]] || fail "DADATA_SMOKE_QUERY must be an INN or OGRN"
+[[ "$DADATA_PUBLIC_READY_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || fail "DADATA_PUBLIC_READY_ATTEMPTS must be a positive integer"
 
 umask 077
 tmp="$(mktemp "$STACK_DIR/.runtime-secrets.dadata.XXXXXX")"
@@ -72,25 +83,45 @@ done
 
 status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
 [[ "$status" == "healthy" ]] || fail "container did not become healthy"
+log "Container health is ready; waiting for public Stage route readiness"
 
-health="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/missions/registry-mirror/dadata/health")"
+health=""
+for attempt in $(seq 1 "$DADATA_PUBLIC_READY_ATTEMPTS"); do
+  if health="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/missions/registry-mirror/dadata/health" 2>/dev/null)"; then
+    break
+  fi
+  delay="$(retry_delay "$attempt")"
+  log "DaData public health not ready (attempt $attempt/$DADATA_PUBLIC_READY_ATTEMPTS); retrying in ${delay}s"
+  sleep "$delay"
+done
+[[ -n "$health" ]] || fail "DaData public health endpoint did not become ready"
+
 python3 - "$health" <<'PY'
 import json
 import sys
 payload = json.loads(sys.argv[1])
 assert payload.get("provider") == "dadata", payload
-assert payload.get("configured") is True, payload
-assert "api_token_present" in payload, payload
-assert "secret_present" in payload, payload
-assert payload["api_token_present"] is True, payload
-assert payload["secret_present"] is True, payload
-print(json.dumps({"provider": "dadata", "configured": True}, ensure_ascii=False))
+assert payload.get("state") == "active", payload
+assert payload.get("api_token_configured") is True, payload
+assert payload.get("secret_configured") is True, payload
+assert payload.get("secrets_exposed") is False, payload
+print(json.dumps({"provider": "dadata", "state": "active", "secrets_exposed": False}, ensure_ascii=False, sort_keys=True))
 PY
 
-lookup="$(curl --fail --silent --show-error --max-time 30 \
-  -H 'Content-Type: application/json' \
-  --data "{\"query\":\"$DADATA_SMOKE_QUERY\"}" \
-  "$STAGE_URL/api/missions/registry-mirror/dadata/find-party")"
+lookup=""
+for attempt in $(seq 1 "$DADATA_PUBLIC_READY_ATTEMPTS"); do
+  if lookup="$(curl --fail --silent --show-error --max-time 30 \
+    -H 'Content-Type: application/json' \
+    --data "{\"query\":\"$DADATA_SMOKE_QUERY\"}" \
+    "$STAGE_URL/api/missions/registry-mirror/dadata/find-party" 2>/dev/null)"; then
+    break
+  fi
+  delay="$(retry_delay "$attempt")"
+  log "DaData live lookup not ready (attempt $attempt/$DADATA_PUBLIC_READY_ATTEMPTS); retrying in ${delay}s"
+  sleep "$delay"
+done
+[[ -n "$lookup" ]] || fail "DaData live lookup endpoint did not become ready"
+
 python3 - "$lookup" <<'PY'
 import json
 import sys
@@ -98,11 +129,15 @@ payload = json.loads(sys.argv[1])
 assert payload.get("provider") == "dadata", payload
 assert payload.get("authority_verified") is False, payload
 assert payload.get("state") in {"registry_mirror_verified", "unresolved", "conflicting"}, payload
-assert "document_digest" in payload or payload.get("state") == "unresolved", payload
+records = payload.get("records") or []
+if payload.get("state") != "unresolved":
+    assert records, payload
+    assert all(record.get("response_digest") for record in records), payload
 print(json.dumps({
     "provider": payload.get("provider"),
     "state": payload.get("state"),
     "authority_verified": payload.get("authority_verified"),
+    "records": len(records),
 }, ensure_ascii=False, sort_keys=True))
 PY
 
