@@ -186,6 +186,38 @@ function renderLiveFeed(mission, records) {
   liveUpdatedBox.textContent = `Последнее обновление: ${new Date(updatedAt).toLocaleString()}`;
 }
 
+function renderDaDataRegistryMirror(card, report) {
+  const providerState = report.readiness?.provider_states?.dadata;
+  const facts = (Array.isArray(report.company_facts) ? report.company_facts : [])
+    .filter((fact) => String(fact.note || '').startsWith('DaData registry mirror'));
+  const notes = (Array.isArray(report.risks_and_assumptions) ? report.risks_and_assumptions : [])
+    .filter((note) => String(note).startsWith('DaData registry mirror'));
+
+  if (!providerState && !facts.length && !notes.length) return;
+
+  const heading = document.createElement('h4');
+  heading.textContent = 'DaData · зеркало реестров';
+  const state = document.createElement('p');
+  state.textContent = `Состояние: ${providerState || 'unknown'} · не является официальной верификацией ФНС.`;
+  card.append(heading, state);
+
+  if (facts.length) {
+    const list = document.createElement('ul');
+    for (const fact of facts) {
+      const item = document.createElement('li');
+      item.textContent = `${fact.field}: ${fact.value}`;
+      list.append(item);
+    }
+    card.append(list);
+  }
+
+  for (const note of notes.slice(0, 3)) {
+    const line = document.createElement('small');
+    line.textContent = note;
+    card.append(line);
+  }
+}
+
 async function renderReport(missionId, payload) {
   const reportMeta = payload.report_metadata;
   if (!reportMeta || payload.report_reason) {
@@ -219,6 +251,8 @@ async function renderReport(missionId, payload) {
   const sourceLine = document.createElement('p');
   sourceLine.textContent = `Подтверждённых/собранных источников: ${Array.isArray(report.sources) ? report.sources.length : 0}`;
   card.append(sourceLine);
+
+  renderDaDataRegistryMirror(card, report);
 
   const agents = Array.isArray(report.agents) ? report.agents : [];
   if (agents.length) {
