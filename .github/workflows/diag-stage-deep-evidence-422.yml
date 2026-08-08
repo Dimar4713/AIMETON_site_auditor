@@ -15,92 +15,62 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 15
     steps:
-      - name: Validate strict city anchor and SearXNG yield
+      - name: Compare strict and relaxed SearXNG query forms
         shell: bash
         run: |
           set -euo pipefail
-          docker ps --format '{{.Names}}|{{.Status}}' | grep '^aimeton-auditor|'
           docker exec -i \
             -e SEARCH_PROVIDER_ORDER='searxng' \
             -e SEARCH_EFFECTIVENESS_DEBUG='true' \
             aimeton-auditor python - <<'PY'
           import asyncio
-          import re
           from urllib.parse import urlparse
 
-          from app.external_sources import extract_identity_anchors
           from app.mission_bounded_runtime import _collect_deep_site_evidence
           from app.search_gateway import get_search_gateway, search_policy_from_env
           from app.search_gateway.models import SearchRequest
 
-          STRICT_CITY_RE = re.compile(
-              r'(?<![А-Яа-яЁё])(?:г\.\s*|г\s+|город\s+)([А-ЯЁ][А-Яа-яЁё-]{2,40})(?![А-Яа-яЁё-])',
-              re.IGNORECASE,
-          )
-
-          def strict_cities(text):
-              result = []
-              seen = set()
-              for match in STRICT_CITY_RE.finditer(text):
-                  city = match.group(1).strip(' ,.;')
-                  city = city[:1].upper() + city[1:]
-                  if city.casefold() not in seen:
-                      seen.add(city.casefold())
-                      result.append(city)
-              return result[:5]
-
           async def main():
               seed, page_count, evidence = await _collect_deep_site_evidence(
-                  'https://stomadv.ru/',
-                  owned_mission_id='diag-strict-city-searxng',
+                  'https://stomadv.ru/', owned_mission_id='diag-query-relaxation'
               )
-              legacy = extract_identity_anchors(evidence, seed['final_url'])
-              strict = strict_cities(evidence)
-              print(f'page_count={page_count}')
-              print(f'evidence_chars={len(evidence)}')
-              print(f'legacy_cities={list(legacy.cities)}')
-              print(f'strict_cities={strict}')
               company = seed['title'].split('—')[0].split('|')[0].strip()
-              region = strict[0] if strict else 'Красноярск'
+              region = 'Красноярск'
               queries = [
-                  f'site:stomadv.ru "{company}"',
-                  f'"{company}" "{region}"',
-                  f'"{company}" "{region}" врачи специалисты',
-                  f'"{company}" "{region}" отзывы',
-                  f'"{company}" "{region}" реквизиты',
+                  ('official_site', f'site:stomadv.ru {company}'),
+                  ('strict_name_region', f'"{company}" "{region}"'),
+                  ('relaxed_name_region', f'{company} {region}'),
+                  ('relaxed_doctors', f'{company} {region} врачи специалисты'),
+                  ('relaxed_reviews', f'{company} {region} отзывы'),
+                  ('relaxed_registry', f'{company} {region} ИНН ОГРН реквизиты'),
+                  ('domain_doctors', 'site:stomadv.ru врачи специалисты'),
+                  ('domain_articles', 'site:stomadv.ru статьи новости'),
+                  ('domain_jobs', 'site:stomadv.ru вакансии сотрудники'),
               ]
               gateway = get_search_gateway()
               policy = search_policy_from_env()
-              print(f'provider_order={list(policy.provider_order)}')
-              seen_urls = set()
-              relevant = 0
-              for index, query in enumerate(queries):
+              seen = set()
+              for index, (kind, query) in enumerate(queries):
                   response = await gateway.search(
                       SearchRequest(
                           query=query,
                           limit=20,
-                          mission_id='diag-strict-city-searxng',
+                          mission_id='diag-query-relaxation',
                           correlation_id=f'diag-{index}',
                       ),
                       policy,
                   )
-                  print(f'Q{index+1} state={response.diagnostics.state} results={len(response.results)} query={query}')
+                  print(f'QUERY kind={kind} state={response.diagnostics.state} count={len(response.results)} value={query}')
                   for item in response.results:
                       url = str(item.url)
-                      if url in seen_urls:
+                      if url in seen:
                           continue
-                      seen_urls.add(url)
-                      text = f'{item.title} {item.snippet} {url}'.casefold()
-                      is_relevant = (
-                          'stomadv.ru' in text
-                          or 'краснояр' in text
-                          or 'железногор' in text
-                      )
-                      relevant += int(is_relevant)
+                      seen.add(url)
                       host = (urlparse(url).hostname or '').lower()
-                      print(f'RESULT relevant={is_relevant} host={host} url={url}')
-              print(f'unique_results={len(seen_urls)}')
-              print(f'relevant_results={relevant}')
+                      text = f'{item.title} {item.snippet} {url}'.casefold()
+                      relevant = 'stomadv.ru' in text or 'краснояр' in text or 'железногор' in text
+                      print(f'RESULT kind={kind} relevant={relevant} host={host} url={url}')
+              print(f'unique_results={len(seen)}')
 
           asyncio.run(main())
           PY
