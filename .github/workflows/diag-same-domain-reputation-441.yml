@@ -15,58 +15,103 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
-      - name: Prove deployed DocumentPipeline fetch after supported-encoding fix
+      - name: Prove discovered Reputation URL through full Evidence Crawler
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p evidence
           container="$(docker ps --format '{{.Names}}' | grep -E '^aimeton-auditor$' | head -n 1)"
           test -n "$container"
-          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-pipeline-after-449.txt
+          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-crawler-after-449.txt
           import asyncio
 
-          from app.document_pipeline import DocumentPipeline, DocumentRequest, FetchPolicy
+          from app.evidence_crawler import BootstrapCrawlPolicy, get_evidence_crawler
+          from app.mission_orchestrator import (
+              ActionCandidate,
+              ActionType,
+              EntryPoint,
+              MissionOrchestrator,
+              PolicySnapshot,
+              default_site_mission_request,
+          )
 
-          URL = 'https://reputation.ru/ogrn/1151690002980'
+          ROOT = 'https://reputation.ru/'
+          DISCOVERED = 'https://reputation.ru/ogrn/1151690002980'
 
           async def main():
-              fetched = await DocumentPipeline().fetch(
-                  DocumentRequest(
-                      mission_id='diag-reputation-pipeline-after-449',
-                      source_id='source-reputation-after-449',
-                      correlation_id='diag-reputation-pipeline-after-449',
-                      url=URL,
-                  ),
-                  FetchPolicy(
-                      timeout_seconds=15,
+              orchestrator = MissionOrchestrator()
+              mission = orchestrator.create_mission(
+                  default_site_mission_request(ROOT),
+                  entry_point=EntryPoint.REST,
+              )
+              plan = orchestrator.plan(
+                  mission.contract.mission_id,
+                  deficits=['company_profile_evidence'],
+                  candidates=[
+                      ActionCandidate(
+                          action_type=ActionType.CRAWL_URL,
+                          target=DISCOVERED,
+                          deficit_code='search_assisted_same_domain',
+                          expected_sufficiency_gain=0.8,
+                      )
+                  ],
+                  policy=PolicySnapshot(
                       allowed_hosts=frozenset({'reputation.ru', 'www.reputation.ru'}),
+                      remaining_actions=5,
+                  ),
+              )
+              result = await get_evidence_crawler().run_mission(
+                  orchestrator,
+                  mission.contract.mission_id,
+                  plan=plan,
+                  policy=BootstrapCrawlPolicy(
+                      max_pages=4,
+                      max_depth=1,
+                      max_duration_seconds=45,
+                      timeout_seconds=15,
+                      min_request_interval_ms=500,
                       allow_crawl4ai=False,
                       allow_browser=False,
                   ),
               )
-              print(f'pipeline_ok=1')
-              print(f'url={fetched.document.url}')
-              print(f'title={fetched.document.title}')
-              print(f'media_type={fetched.document.media_type}')
-              print(f'fetch_path={fetched.diagnostics.path.value}')
-              print(f'raw_bytes={fetched.diagnostics.raw_bytes}')
-              print(f'encoding={fetched.diagnostics.detected_encoding}')
-              print(f'encoding_source={fetched.diagnostics.encoding_source}')
-              print(f'blocks={len(fetched.blocks)}')
-              print(f'links={len(fetched.links)}')
-              print(f'document_id={fetched.document.id}')
-              if str(fetched.document.url) != URL:
-                  raise SystemExit('unexpected final URL')
-              if fetched.diagnostics.encoding_source != 'http':
-                  raise SystemExit('declared HTTP charset was not used')
-              if not fetched.blocks:
-                  raise SystemExit('no document blocks extracted')
+
+              print(f'status={result.status.value}')
+              print(f'robots_state={result.robots_state.value}')
+              print(f'page_count={len(result.pages)}')
+              print(f'signal_count={len(result.identity_signals)}')
+              print(f'failed_url_count={len(result.failed_urls)}')
+              print(f'blocked_url_count={len(result.blocked_urls)}')
+              print('reason_codes=' + ','.join(result.reason_codes))
+              for index, page in enumerate(result.pages, 1):
+                  print(
+                      f'page_{index}='
+                      f'{page.final_url}|{page.page_type.value}|{page.fetch_path.value}|'
+                      f'{page.document_id}|{page.title}'
+                  )
+              for index, signal in enumerate(result.identity_signals[:20], 1):
+                  print(
+                      f'signal_{index}='
+                      f'{signal.kind.value}|{signal.value}|{signal.source_url}|{signal.locator}'
+                  )
+
+              if not result.pages:
+                  raise SystemExit('crawler produced no first-party page evidence')
+              discovered_pages = [
+                  page for page in result.pages
+                  if str(page.final_url) == DISCOVERED
+              ]
+              if not discovered_pages:
+                  raise SystemExit('discovered URL was not preserved as fetched crawler evidence')
+              if not all(page.document_id for page in discovered_pages):
+                  raise SystemExit('fetched crawler evidence is missing document provenance')
+              if not any(signal.source_url == DISCOVERED for signal in result.identity_signals):
+                  raise SystemExit('no identity signal was extracted from discovered first-party document')
 
           asyncio.run(main())
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: reputation-pipeline-after-449-${{ github.run_id }}
+          name: reputation-crawler-after-449-${{ github.run_id }}
           path: evidence/
           if-no-files-found: error
           retention-days: 30
