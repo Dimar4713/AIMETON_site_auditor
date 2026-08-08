@@ -15,52 +15,45 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
-      - name: Prove domain-anchored Reputation evidence reaches owned aggregation
+      - name: Isolate production owned same-domain discovery
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p evidence
           container="$(docker ps --format '{{.Names}}' | grep -E '^aimeton-auditor$' | head -n 1)"
           test -n "$container"
-          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-owned-evidence-after-451.txt
+          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-owned-discovery-after-451.txt
           import asyncio
 
-          from app.mission_bounded_runtime import _collect_deep_site_evidence
+          from app.evidence_crawler.search_discovery import discover_same_domain_urls
 
           ROOT = 'https://reputation.ru/'
-          DISCOVERED = 'https://reputation.ru/ogrn/1151690002980'
 
           async def main():
-              seed, page_count, evidence = await _collect_deep_site_evidence(
+              result = await discover_same_domain_urls(
                   ROOT,
-                  owned_mission_id='diag-owned-reputation-after-451',
+                  company_name='reputation.ru',
+                  mission_id='diag-owned-domain-hint-after-451',
+                  correlation_id='diag-owned-domain-hint-after-451',
+                  max_urls=4,
               )
-              print(f'seed_url={seed["final_url"]}')
-              print(f'seed_title={seed["title"]}')
-              print(f'page_count={page_count}')
-              print(f'evidence_chars={len(evidence)}')
-              print(f'contains_discovered_url={DISCOVERED in evidence}')
-              print(f'contains_company_inn={"1657190060" in evidence}')
-              print(f'contains_company_ogrn={"1151690002980" in evidence}')
-              print(f'contains_email={"info@reputation.ru" in evidence}')
-              sources = [
-                  line.removeprefix('SOURCE: ')
-                  for line in evidence.splitlines()
-                  if line.startswith('SOURCE: ')
-              ]
-              print(f'source_count_in_text={len(sources)}')
-              for index, source in enumerate(sources, 1):
-                  print(f'source_{index}={source}')
-              if DISCOVERED not in evidence:
-                  raise SystemExit('owned evidence still misses search-discovered first-party URL')
-              if '1657190060' not in evidence or '1151690002980' not in evidence:
-                  raise SystemExit('owned evidence misses company identity from discovered page')
+              print(f'state={result.diagnostics.state.value}')
+              print(f'selected_provider={result.diagnostics.selected_provider}')
+              print(f'url_count={len(result.urls)}')
+              for index, url in enumerate(result.urls, 1):
+                  print(f'url_{index}={url}')
+              for index, attempt in enumerate(result.diagnostics.attempts, 1):
+                  reason = attempt.reason.value if attempt.reason else 'none'
+                  print(
+                      f'attempt_{index}={attempt.provider}|{attempt.state.value}|'
+                      f'{reason}|{attempt.result_count}|{attempt.latency_ms}'
+                  )
 
           asyncio.run(main())
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: reputation-owned-evidence-${{ github.run_id }}
+          name: reputation-owned-discovery-${{ github.run_id }}
           path: evidence/
           if-no-files-found: error
           retention-days: 30
