@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.external_verification import document_matches_entity
+from app.identity_anchor_guard import strict_cities_from_evidence
 
 
 def _anchors():
@@ -44,3 +45,12 @@ def test_document_identity_rejects_same_name_from_other_region() -> None:
     )
     assert matched is False
     assert reason == "identity_not_confirmed"
+
+
+def test_strict_city_extractor_does_not_treat_menu_words_as_city_markers() -> None:
+    text = (
+        "Главная Гигиена Статьи Врачи. "
+        "Адрес: г. Красноярск, улица Тестовая. "
+        "Дополнительный офис: г Железногорск."
+    )
+    assert strict_cities_from_evidence(text) == ("Красноярск", "Железногорск")
