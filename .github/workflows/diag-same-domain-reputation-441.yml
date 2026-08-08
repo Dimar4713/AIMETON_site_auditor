@@ -15,62 +15,58 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
-      - name: Compare exact StaticHttpFetcher stream decoding
+      - name: Prove deployed DocumentPipeline fetch after supported-encoding fix
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p evidence
           container="$(docker ps --format '{{.Names}}' | grep -E '^aimeton-auditor$' | head -n 1)"
           test -n "$container"
-          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-stream-decoding.txt
+          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-pipeline-after-449.txt
           import asyncio
-          import binascii
-          import httpx
 
-          from app.scraper import BROWSER_HEADERS
+          from app.document_pipeline import DocumentPipeline, DocumentRequest, FetchPolicy
 
           URL = 'https://reputation.ru/ogrn/1151690002980'
 
-          async def capture(raw: bool):
-              async with httpx.AsyncClient(
-                  timeout=15,
-                  follow_redirects=False,
-                  headers=BROWSER_HEADERS,
-              ) as client:
-                  async with client.stream('GET', URL) as response:
-                      chunks = []
-                      iterator = response.aiter_raw() if raw else response.aiter_bytes()
-                      async for chunk in iterator:
-                          chunks.append(chunk)
-                      content = b''.join(chunks)
-                      return response, content
-
           async def main():
-              print('browser_headers=' + repr(dict(BROWSER_HEADERS)))
-              raw_response, raw = await capture(True)
-              decoded_response, decoded = await capture(False)
-              for label, response, content in (
-                  ('raw', raw_response, raw),
-                  ('decoded', decoded_response, decoded),
-              ):
-                  print(f'{label}_status={response.status_code}')
-                  print(f'{label}_content_type={response.headers.get("content-type", "")}')
-                  print(f'{label}_content_encoding={response.headers.get("content-encoding", "")}')
-                  print(f'{label}_bytes={len(content)}')
-                  print(f'{label}_first16_hex={binascii.hexlify(content[:16]).decode()}')
-                  try:
-                      content.decode('utf-8', errors='strict')
-                      utf8 = 'ok'
-                  except UnicodeDecodeError as exc:
-                      utf8 = f'fail:{exc.start}'
-                  print(f'{label}_utf8={utf8}')
-              print(f'decoded_starts_html={decoded.lstrip().lower().startswith((b"<!doctype", b"<html"))}')
+              fetched = await DocumentPipeline().fetch(
+                  DocumentRequest(
+                      mission_id='diag-reputation-pipeline-after-449',
+                      source_id='source-reputation-after-449',
+                      correlation_id='diag-reputation-pipeline-after-449',
+                      url=URL,
+                  ),
+                  FetchPolicy(
+                      timeout_seconds=15,
+                      allowed_hosts=frozenset({'reputation.ru', 'www.reputation.ru'}),
+                      allow_crawl4ai=False,
+                      allow_browser=False,
+                  ),
+              )
+              print(f'pipeline_ok=1')
+              print(f'url={fetched.document.url}')
+              print(f'title={fetched.document.title}')
+              print(f'media_type={fetched.document.media_type}')
+              print(f'fetch_path={fetched.diagnostics.path.value}')
+              print(f'raw_bytes={fetched.diagnostics.raw_bytes}')
+              print(f'encoding={fetched.diagnostics.detected_encoding}')
+              print(f'encoding_source={fetched.diagnostics.encoding_source}')
+              print(f'blocks={len(fetched.blocks)}')
+              print(f'links={len(fetched.links)}')
+              print(f'document_id={fetched.document.id}')
+              if str(fetched.document.url) != URL:
+                  raise SystemExit('unexpected final URL')
+              if fetched.diagnostics.encoding_source != 'http':
+                  raise SystemExit('declared HTTP charset was not used')
+              if not fetched.blocks:
+                  raise SystemExit('no document blocks extracted')
 
           asyncio.run(main())
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: reputation-stream-${{ github.run_id }}
+          name: reputation-pipeline-after-449-${{ github.run_id }}
           path: evidence/
           if-no-files-found: error
           retention-days: 30
