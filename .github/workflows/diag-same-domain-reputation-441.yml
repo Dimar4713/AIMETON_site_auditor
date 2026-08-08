@@ -15,96 +15,52 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
-      - name: Reprove full Reputation crawl with discovered target
+      - name: Prove search-assisted Reputation evidence reaches owned aggregation
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p evidence
           container="$(docker ps --format '{{.Names}}' | grep -E '^aimeton-auditor$' | head -n 1)"
           test -n "$container"
-          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-full-crawler-after-449.txt
+          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-owned-evidence-after-450.txt
           import asyncio
 
-          from app.evidence_crawler import BootstrapCrawlPolicy, get_evidence_crawler
-          from app.mission_orchestrator import (
-              ActionCandidate,
-              ActionType,
-              EntryPoint,
-              MissionOrchestrator,
-              PolicySnapshot,
-              default_site_mission_request,
-          )
+          from app.mission_bounded_runtime import _collect_deep_site_evidence
 
           ROOT = 'https://reputation.ru/'
           DISCOVERED = 'https://reputation.ru/ogrn/1151690002980'
 
           async def main():
-              orchestrator = MissionOrchestrator()
-              mission = orchestrator.create_mission(
-                  default_site_mission_request(ROOT),
-                  entry_point=EntryPoint.REST,
+              seed, page_count, evidence = await _collect_deep_site_evidence(
+                  ROOT,
+                  owned_mission_id='diag-owned-reputation-after-450',
               )
-              plan = orchestrator.plan(
-                  mission.contract.mission_id,
-                  deficits=['company_profile_evidence'],
-                  candidates=[
-                      ActionCandidate(
-                          action_type=ActionType.CRAWL_URL,
-                          target=DISCOVERED,
-                          deficit_code='search_assisted_same_domain',
-                          expected_sufficiency_gain=0.8,
-                      )
-                  ],
-                  policy=PolicySnapshot(
-                      allowed_hosts=frozenset({'reputation.ru', 'www.reputation.ru'}),
-                      remaining_actions=5,
-                  ),
-              )
-              result = await get_evidence_crawler().run_mission(
-                  orchestrator,
-                  mission.contract.mission_id,
-                  plan=plan,
-                  policy=BootstrapCrawlPolicy(
-                      max_pages=4,
-                      max_depth=1,
-                      max_duration_seconds=45,
-                      timeout_seconds=15,
-                      min_request_interval_ms=500,
-                      allow_crawl4ai=False,
-                      allow_browser=False,
-                  ),
-              )
-              print(f'root={result.root_url}')
-              print(f'status={result.status.value}')
-              print(f'robots_state={result.robots_state.value}')
-              print(f'page_count={len(result.pages)}')
-              print(f'signal_count={len(result.identity_signals)}')
-              print(f'failed_url_count={len(result.failed_urls)}')
-              print(f'blocked_url_count={len(result.blocked_urls)}')
-              print('reason_codes=' + ','.join(result.reason_codes))
-              for index, page in enumerate(result.pages, 1):
-                  print(
-                      f'page_{index}='
-                      f'{page.final_url}|{page.page_type.value}|{page.fetch_path.value}|'
-                      f'{page.document_id}|{page.title}'
-                  )
-              for index, signal in enumerate(result.identity_signals[:30], 1):
-                  print(
-                      f'signal_{index}='
-                      f'{signal.kind.value}|{signal.value}|{signal.source_url}|{signal.locator}'
-                  )
-              if not result.pages:
-                  raise SystemExit('full crawler produced no first-party evidence')
-              if not any(str(page.final_url) == DISCOVERED for page in result.pages):
-                  raise SystemExit('discovered target was not retained as crawler evidence')
-              if not any(signal.source_url == DISCOVERED for signal in result.identity_signals):
-                  raise SystemExit('no identity signal from discovered first-party document')
+              print(f'seed_url={seed["final_url"]}')
+              print(f'seed_title={seed["title"]}')
+              print(f'page_count={page_count}')
+              print(f'evidence_chars={len(evidence)}')
+              print(f'contains_discovered_url={DISCOVERED in evidence}')
+              print(f'contains_company_inn={"1657190060" in evidence}')
+              print(f'contains_company_ogrn={"1151690002980" in evidence}')
+              print(f'contains_email={"info@reputation.ru" in evidence}')
+              sources = [
+                  line.removeprefix('SOURCE: ')
+                  for line in evidence.splitlines()
+                  if line.startswith('SOURCE: ')
+              ]
+              print(f'source_count_in_text={len(sources)}')
+              for index, source in enumerate(sources, 1):
+                  print(f'source_{index}={source}')
+              if DISCOVERED not in evidence:
+                  raise SystemExit('owned evidence still misses search-discovered first-party URL')
+              if '1657190060' not in evidence or '1151690002980' not in evidence:
+                  raise SystemExit('owned evidence misses company identity from discovered page')
 
           asyncio.run(main())
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: reputation-full-crawler-${{ github.run_id }}
+          name: reputation-owned-evidence-${{ github.run_id }}
           path: evidence/
           if-no-files-found: error
           retention-days: 30
