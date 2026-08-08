@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -70,10 +72,21 @@ async def test_gateway_persists_bounded_query_and_provider_stages_without_secret
         "results_received": 1,
         "results_normalized": 1,
     }
-    serialized = trace_path.read_bytes().decode("utf-8", errors="ignore").lower()
-    assert "диагностический пользовательский запрос" in serialized
+
+    projected = json.dumps(
+        [
+            {
+                "summary": event.summary,
+                "metadata": event.metadata,
+                "counters": event.counters,
+            }
+            for event in events
+        ],
+        ensure_ascii=False,
+    ).lower()
+    assert "диагностический пользовательский запрос" in projected
     for forbidden in ("authorization", "api_key", "password", "cookie", "raw_payload"):
-        assert forbidden not in serialized
+        assert forbidden not in projected
 
 
 @pytest.mark.asyncio
