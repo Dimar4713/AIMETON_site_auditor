@@ -15,87 +15,43 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
-      - name: Inspect active SearXNG engine pool without exposing secrets
+      - name: Inspect effective SearXNG runtime engine pool without exposing secrets
         shell: bash
         run: |
           set -euo pipefail
-          echo 'containers:'
-          docker ps --format '{{.Names}}|{{.Status}}' | grep -Ei 'searx|auditor' || true
           searx_container="$(docker ps --format '{{.Names}}' | grep -Ei 'searx' | head -n 1)"
           test -n "$searx_container"
-          echo "searx_container=$searx_container"
-          docker inspect "$searx_container" --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
           docker exec -i "$searx_container" python - <<'PY'
+          import json
+          import urllib.request
           from pathlib import Path
           import re
 
-          candidates = [
-              Path('/etc/searxng/settings.yml'),
-              Path('/etc/searxng/settings.yaml'),
-          ]
-          path = next((item for item in candidates if item.exists()), None)
-          print(f'settings_present={bool(path)}')
-          if path is None:
-              raise SystemExit(2)
+          settings = Path('/etc/searxng/settings.yml')
+          text = settings.read_text(encoding='utf-8') if settings.exists() else ''
+          print(f'use_default_settings={bool(re.search(r"^use_default_settings\s*:", text, re.MULTILINE))}')
+          print(f'explicit_engines_block={bool(re.search(r"^engines\s*:", text, re.MULTILINE))}')
 
-          text = path.read_text(encoding='utf-8')
-          lines = text.splitlines()
-          in_engines = False
-          current = None
-          engines = []
-          for line in lines:
-              if re.match(r'^engines\s*:', line):
-                  in_engines = True
-                  continue
-              if in_engines and line and not line.startswith((' ', '\t')):
+          for url in ('http://127.0.0.1:8080/config', 'http://127.0.0.1:8080/config.json'):
+              try:
+                  with urllib.request.urlopen(url, timeout=10) as response:
+                      payload = json.load(response)
+                  print(f'CONFIG_URL {url} status=ok')
+                  engines = payload.get('engines') or []
+                  print(f'runtime_engines={len(engines)}')
+                  for item in engines:
+                      if not isinstance(item, dict):
+                          continue
+                      print(
+                          'ENGINE '
+                          f"name={item.get('name','')} "
+                          f"shortcut={item.get('shortcut','')} "
+                          f"categories={item.get('categories','')} "
+                          f"enabled={item.get('enabled', item.get('disabled', 'unknown'))}"
+                      )
                   break
-              if not in_engines:
-                  continue
-              match = re.match(r'^\s*-\s+name\s*:\s*(.+?)\s*$', line)
-              if match:
-                  if current:
-                      engines.append(current)
-                  current = {'name': match.group(1).strip('"\'')}
-                  continue
-              if current is None:
-                  continue
-              for key in ('engine', 'shortcut', 'categories', 'disabled'):
-                  item = re.match(rf'^\s+{key}\s*:\s*(.+?)\s*$', line)
-                  if item:
-                      current[key] = item.group(1).strip()
-                      break
-          if current:
-              engines.append(current)
-
-          enabled = []
-          disabled = []
-          for item in engines:
-              is_disabled = str(item.get('disabled', 'false')).lower() in {'true', 'yes', '1'}
-              record = (
-                  f"name={item.get('name','unknown')} engine={item.get('engine','')} "
-                  f"shortcut={item.get('shortcut','')} categories={item.get('categories','')}"
-              )
-              (disabled if is_disabled else enabled).append(record)
-          print(f'configured_engine_entries={len(engines)}')
-          print(f'enabled_entries={len(enabled)}')
-          for record in enabled:
-              print(f'ENABLED {record}')
-          print(f'disabled_entries={len(disabled)}')
-          for record in disabled[:80]:
-              print(f'DISABLED {record}')
-
-          safe_outgoing = {}
-          in_outgoing = False
-          for line in lines:
-              if re.match(r'^outgoing\s*:', line):
-                  in_outgoing = True
-                  continue
-              if in_outgoing and line and not line.startswith((' ', '\t')):
-                  break
-              if not in_outgoing:
-                  continue
-              match = re.match(r'^\s+(request_timeout|max_request_timeout|pool_connections|pool_maxsize|enable_http2)\s*:\s*(.+?)\s*$', line)
-              if match:
-                  safe_outgoing[match.group(1)] = match.group(2)
-          print('OUTGOING ' + ' '.join(f'{key}={value}' for key, value in safe_outgoing.items()))
+              except Exception as exc:
+                  print(f'CONFIG_URL {url} status=failed error={type(exc).__name__}')
+          else:
+              raise SystemExit('SearXNG runtime config endpoint unavailable')
           PY
