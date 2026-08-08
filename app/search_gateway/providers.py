@@ -84,7 +84,6 @@ class HttpSearchProvider(SearchProvider):
             ) from exc
         except httpx.HTTPStatusError as exc:
             reason = self._http_failure_reason(exc.response)
-            # No tight retries after explicit upstream anti-bot/access/rate-limit signals.
             retryable = reason not in {
                 FallbackReason.RATE_LIMITED,
                 FallbackReason.PROVIDER_BLOCKED,
@@ -190,7 +189,7 @@ class SearxngProvider(HttpSearchProvider):
             suffix = f" ({', '.join(failed_names)})" if failed_names else ""
             raise ProviderError(
                 f"searxng upstream engines unavailable{suffix}",
-                retryable=False,
+                retryable=reason is FallbackReason.PROVIDER_ERROR,
                 reason=reason,
             )
         return results
