@@ -11,6 +11,13 @@ from app.search_gateway.traced_gateway import TracedSearchGateway
 
 
 DEBUG_BUDGET_CEILING = Decimal("999999")
+DEFAULT_SEARXNG_ENGINES = (
+    "brave",
+    "duckduckgo",
+    "google cse",
+    "startpage",
+    "bing",
+)
 
 
 def _decimal_env(name: str, default: str = "0") -> Decimal:
@@ -37,12 +44,11 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _csv_env(name: str) -> tuple[str, ...]:
-    return tuple(
-        item.strip()
-        for item in os.getenv(name, "").split(",")
-        if item.strip()
-    )
+def _csv_env(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
 def search_effectiveness_debug_enabled() -> bool:
@@ -138,7 +144,7 @@ def get_search_gateway() -> TracedSearchGateway:
             ),
             SearxngProvider(
                 os.getenv("SEARXNG_BASE_URL"),
-                engines=_csv_env("SEARXNG_ENGINES"),
+                engines=_csv_env("SEARXNG_ENGINES", DEFAULT_SEARXNG_ENGINES),
             ),
             TavilyProvider(
                 os.getenv("TAVILY_TOKEN") or os.getenv("TAVILY_API_KEY"),
