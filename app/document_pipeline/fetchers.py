@@ -21,6 +21,7 @@ from app.scraper import (
 
 
 ALLOWED_HTML_TYPES = {"text/html", "application/xhtml+xml"}
+SUPPORTED_HTTP_CONTENT_ENCODINGS = "gzip, deflate"
 CHARSET_RE = re.compile(r"(?:^|;)\s*charset\s*=\s*[\"']?([^;\"'\s]+)", re.I)
 META_CHARSET_RE = re.compile(
     br"<meta[^>]+charset\s*=\s*[\"']?\s*([a-zA-Z0-9._-]+)",
@@ -167,10 +168,18 @@ class StaticHttpFetcher:
         max_redirects: int,
         allowed_hosts: frozenset[str] = frozenset(),
     ) -> RawDocument:
+        headers = {
+            **BROWSER_HEADERS,
+            # Do not advertise Brotli unless the runtime has an explicit decoder.
+            # httpx always supports gzip/deflate; constraining negotiation prevents
+            # a `Content-Encoding: br` body from reaching the charset decoder as
+            # opaque compressed bytes.
+            "Accept-Encoding": SUPPORTED_HTTP_CONTENT_ENCODINGS,
+        }
         async with httpx.AsyncClient(
             follow_redirects=False,
             timeout=timeout_seconds,
-            headers=BROWSER_HEADERS,
+            headers=headers,
             transport=self._transport,
         ) as client:
             current = url
