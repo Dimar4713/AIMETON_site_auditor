@@ -15,48 +15,49 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
-      - name: Inspect SearXNG raw JSON and upstream engine state
+      - name: Inspect active SearXNG engine pool without exposing secrets
         shell: bash
         run: |
           set -euo pipefail
-          docker exec -i aimeton-auditor python - <<'PY'
-          import asyncio
-          import os
-          import httpx
+          echo 'containers:'
+          docker ps --format '{{.Names}}|{{.Status}}' | grep -Ei 'searx|auditor' || true
+          searx_container="$(docker ps --format '{{.Names}}' | grep -Ei 'searx' | head -n 1)"
+          test -n "$searx_container"
+          echo "searx_container=$searx_container"
+          docker inspect "$searx_container" --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
+          docker exec -i "$searx_container" python - <<'PY'
+          from pathlib import Path
+          import yaml
 
-          async def main():
-              base = (os.getenv('SEARXNG_BASE_URL') or '').rstrip('/')
-              print(f'searxng_configured={bool(base)}')
-              if not base:
-                  raise SystemExit(2)
-              queries = [
-                  'site:stomadv.ru "Стоматология для вас"',
-                  'Стоматология для вас Красноярск',
-              ]
-              async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                  for round_no in range(1, 4):
-                      for query in queries:
-                          response = await client.get(
-                              f'{base}/search',
-                              params={
-                                  'q': query,
-                                  'format': 'json',
-                                  'language': 'ru',
-                                  'safesearch': 1,
-                              },
-                          )
-                          print(f'RAW round={round_no} status={response.status_code} query={query}')
-                          response.raise_for_status()
-                          payload = response.json()
-                          results = payload.get('results') or []
-                          engines = payload.get('unresponsive_engines') or []
-                          suggestions = payload.get('suggestions') or []
-                          print(f'RAW_RESULT round={round_no} results={len(results)} unresponsive={len(engines)} suggestions={len(suggestions)}')
-                          for item in engines[:30]:
-                              print(f'UNRESPONSIVE {item}')
-                          for item in results[:10]:
-                              print(f'FOUND engine={item.get("engine")} engines={item.get("engines")} url={item.get("url")}')
-                      await asyncio.sleep(1)
-
-          asyncio.run(main())
+          candidates = [
+              Path('/etc/searxng/settings.yml'),
+              Path('/etc/searxng/settings.yaml'),
+          ]
+          path = next((item for item in candidates if item.exists()), None)
+          print(f'settings_present={bool(path)}')
+          if path is None:
+              raise SystemExit(2)
+          data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+          engines = data.get('engines') or []
+          print(f'configured_engine_entries={len(engines)}')
+          enabled = []
+          disabled = []
+          for item in engines:
+              if not isinstance(item, dict):
+                  continue
+              name = str(item.get('name') or item.get('engine') or 'unknown')
+              state = bool(item.get('disabled', False))
+              shortcut = str(item.get('shortcut') or '')
+              categories = item.get('categories') or item.get('category') or ''
+              record = f'name={name} shortcut={shortcut} categories={categories}'
+              (disabled if state else enabled).append(record)
+          print(f'enabled_entries={len(enabled)}')
+          for record in enabled:
+              print(f'ENABLED {record}')
+          print(f'disabled_entries={len(disabled)}')
+          for record in disabled[:60]:
+              print(f'DISABLED {record}')
+          outgoing = data.get('outgoing') or {}
+          safe_keys = ('request_timeout', 'max_request_timeout', 'pool_connections', 'pool_maxsize', 'enable_http2')
+          print('OUTGOING ' + ' '.join(f'{key}={outgoing.get(key)}' for key in safe_keys if key in outgoing))
           PY
