@@ -44,6 +44,10 @@ class FallbackReason(StrEnum):
     QUOTA_EXCEEDED = "quota_exceeded"
     CIRCUIT_OPEN = "circuit_open"
     TIMEOUT = "timeout"
+    RATE_LIMITED = "rate_limited"
+    PROVIDER_BLOCKED = "provider_blocked"
+    CAPTCHA = "captcha"
+    PROTOCOL_ERROR = "protocol_error"
     PROVIDER_ERROR = "provider_error"
     EMPTY_RESULTS = "empty_results"
 
