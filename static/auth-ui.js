@@ -67,6 +67,45 @@
     return response;
   }
 
+  function takeMagicLinkToken() {
+    if (!window.location.hash.startsWith('#')) return '';
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const token = params.get('access_token') || '';
+    if (!token) return '';
+    // Remove the secret before any further navigation or third-party interaction.
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    return token;
+  }
+
+  async function consumeMagicLink() {
+    const token = takeMagicLinkToken();
+    if (!token) return false;
+
+    state.phase = 'token-login';
+    elements.login.hidden = false;
+    elements.workspace.hidden = true;
+    elements.identity.hidden = true;
+    setBusy(true);
+    setMessage('Открываем персональный временный доступ…');
+    try {
+      const response = await request('/api/auth/token-login', {
+        method: 'POST',
+        body: JSON.stringify({token}),
+      });
+      if (response.ok) {
+        showWorkspace(await response.json());
+        return true;
+      }
+      showLogin('Временная ссылка недействительна или срок её действия закончился.');
+      return true;
+    } catch (_error) {
+      showLogin('Не удалось открыть временный доступ. Проверьте подключение и повторите переход по ссылке.');
+      return true;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function restoreSession() {
     state.phase = 'loading';
     elements.login.hidden = true;
@@ -131,6 +170,11 @@
     }
   }
 
+  async function restoreOrConsumeMagicLink() {
+    if (await consumeMagicLink()) return;
+    await restoreSession();
+  }
+
   function bind() {
     elements.login = byId('authGate');
     elements.form = byId('loginForm');
@@ -146,7 +190,7 @@
 
     elements.form.addEventListener('submit', login);
     elements.logout.addEventListener('click', logout);
-    restoreSession();
+    restoreOrConsumeMagicLink();
   }
 
   document.addEventListener('DOMContentLoaded', bind, {once: true});
