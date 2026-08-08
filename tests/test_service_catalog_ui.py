@@ -81,7 +81,6 @@ def test_hunter_results_are_grouped_for_commercial_scanability() -> None:
     assert "Источник для проверки" in script
     assert "Наблюдение" in script
     assert "Источники для дополнительной проверки" in script
-    assert "балл выше = ближе к профилю потенциального клиента" in script
     assert "candidate_kind" not in script
     assert "function appendCandidate(container, candidate, fallbackRegion)" in script
     assert ".service-summary__candidate-top" in styles
@@ -96,3 +95,53 @@ def test_hunter_desktop_results_have_visible_scroll_without_trapping_mobile() ->
     assert "scrollbar-gutter:stable" in styles
     assert "overscroll-behavior:contain" in styles
     assert "#hunterOutput .service-summary{max-height:none;overflow-y:visible;scrollbar-gutter:auto" in styles
+
+
+def test_hunter_exposes_business_facing_search_controls() -> None:
+    index = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = (STATIC / "service-catalog.css").read_text(encoding="utf-8")
+
+    for control_id in (
+        "hunterCoverage",
+        "hunterMinimumScore",
+        "hunterDeepAuditScore",
+        "hunterMaxCandidates",
+        "hunterPageSize",
+    ):
+        assert f'id="{control_id}"' in index
+
+    for label in (
+        "Охват поиска",
+        "Минимальный приоритет",
+        "Глубоко исследовать от",
+        "Максимум кандидатов в пуле",
+        "Показывать за раз",
+    ):
+        assert label in index
+
+    assert "concurrency" not in index
+    assert ".hunter-settings__grid" in styles
+
+
+def test_hunter_search_breadth_is_separate_from_display_page_size() -> None:
+    script = (STATIC / "service-catalog.js").read_text(encoding="utf-8")
+
+    assert "const HUNTER_COVERAGE" in script
+    assert "quick: {max_queries: 6, results_per_query: 5}" in script
+    assert "wide: {max_queries: 12, results_per_query: 8}" in script
+    assert "maximum: {max_queries: 20, results_per_query: 10}" in script
+    assert "minimum_pre_score: minimumPreScore" in script
+    assert "deep_audit_score: deepAuditScore" in script
+    assert "output_limit: maxCandidates" in script
+    assert "hunterRenderedCount = Math.min(hunterPageSize, hunterRetainedCandidates.length)" in script
+    assert "Показать ещё" in script
+
+
+def test_hunter_summary_uses_truthful_distinct_counts() -> None:
+    script = (STATIC / "service-catalog.js").read_text(encoding="utf-8")
+
+    assert "Найдено источников:" in script
+    assert "Отобрано кандидатов:" in script
+    assert "Компании-кандидаты:" in script
+    assert "источники для проверки:" in script
+    assert "наблюдения:" in script
