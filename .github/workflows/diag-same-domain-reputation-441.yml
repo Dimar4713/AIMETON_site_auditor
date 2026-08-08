@@ -15,17 +15,16 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     steps:
-      - name: Compare singleton DocumentPipeline with crawler path
+      - name: Reprove full Reputation crawl with discovered target
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p evidence
           container="$(docker ps --format '{{.Names}}' | grep -E '^aimeton-auditor$' | head -n 1)"
           test -n "$container"
-          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-singleton-vs-crawler.txt
+          docker exec -i "$container" python - <<'PY' | tee evidence/reputation-full-crawler-after-449.txt
           import asyncio
 
-          from app.document_pipeline import DocumentRequest, FetchPolicy, get_document_pipeline
           from app.evidence_crawler import BootstrapCrawlPolicy, get_evidence_crawler
           from app.mission_orchestrator import (
               ActionCandidate,
@@ -40,32 +39,6 @@ jobs:
           DISCOVERED = 'https://reputation.ru/ogrn/1151690002980'
 
           async def main():
-              singleton = get_document_pipeline()
-              try:
-                  fetched = await singleton.fetch(
-                      DocumentRequest(
-                          mission_id='diag-reputation-singleton',
-                          source_id='source-reputation-singleton',
-                          correlation_id='diag-reputation-singleton',
-                          url=DISCOVERED,
-                      ),
-                      FetchPolicy(
-                          timeout_seconds=15,
-                          allowed_hosts=frozenset({'reputation.ru', 'www.reputation.ru'}),
-                          allow_crawl4ai=False,
-                          allow_browser=False,
-                      ),
-                  )
-                  print('singleton_ok=1')
-                  print(f'singleton_url={fetched.document.url}')
-                  print(f'singleton_bytes={fetched.diagnostics.raw_bytes}')
-                  print(f'singleton_encoding={fetched.diagnostics.detected_encoding}')
-                  print(f'singleton_blocks={len(fetched.blocks)}')
-              except Exception as exc:
-                  print('singleton_ok=0')
-                  print(f'singleton_error_type={type(exc).__name__}')
-                  print(f'singleton_error={exc}')
-
               orchestrator = MissionOrchestrator()
               mission = orchestrator.create_mission(
                   default_site_mission_request(ROOT),
@@ -87,38 +60,51 @@ jobs:
                       remaining_actions=5,
                   ),
               )
-              print(f'plan_target={plan.selected_action.target}')
               result = await get_evidence_crawler().run_mission(
                   orchestrator,
                   mission.contract.mission_id,
                   plan=plan,
                   policy=BootstrapCrawlPolicy(
-                      max_pages=1,
-                      max_depth=0,
-                      max_sitemaps=0,
-                      max_duration_seconds=30,
+                      max_pages=4,
+                      max_depth=1,
+                      max_duration_seconds=45,
                       timeout_seconds=15,
-                      min_request_interval_ms=0,
+                      min_request_interval_ms=500,
                       allow_crawl4ai=False,
                       allow_browser=False,
                   ),
               )
-              print(f'crawler_root={result.root_url}')
-              print(f'crawler_status={result.status.value}')
-              print(f'crawler_pages={len(result.pages)}')
-              print(f'crawler_failed={list(map(str, result.failed_urls))}')
-              print('crawler_reasons=' + ','.join(result.reason_codes))
-              if result.pages:
-                  page = result.pages[0]
-                  print(f'crawler_page={page.final_url}|{page.document_id}|{page.title}')
+              print(f'root={result.root_url}')
+              print(f'status={result.status.value}')
+              print(f'robots_state={result.robots_state.value}')
+              print(f'page_count={len(result.pages)}')
+              print(f'signal_count={len(result.identity_signals)}')
+              print(f'failed_url_count={len(result.failed_urls)}')
+              print(f'blocked_url_count={len(result.blocked_urls)}')
+              print('reason_codes=' + ','.join(result.reason_codes))
+              for index, page in enumerate(result.pages, 1):
+                  print(
+                      f'page_{index}='
+                      f'{page.final_url}|{page.page_type.value}|{page.fetch_path.value}|'
+                      f'{page.document_id}|{page.title}'
+                  )
+              for index, signal in enumerate(result.identity_signals[:30], 1):
+                  print(
+                      f'signal_{index}='
+                      f'{signal.kind.value}|{signal.value}|{signal.source_url}|{signal.locator}'
+                  )
               if not result.pages:
-                  raise SystemExit('crawler still failed after singleton comparison')
+                  raise SystemExit('full crawler produced no first-party evidence')
+              if not any(str(page.final_url) == DISCOVERED for page in result.pages):
+                  raise SystemExit('discovered target was not retained as crawler evidence')
+              if not any(signal.source_url == DISCOVERED for signal in result.identity_signals):
+                  raise SystemExit('no identity signal from discovered first-party document')
 
           asyncio.run(main())
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: reputation-singleton-vs-crawler-${{ github.run_id }}
+          name: reputation-full-crawler-${{ github.run_id }}
           path: evidence/
           if-no-files-found: error
           retention-days: 30
