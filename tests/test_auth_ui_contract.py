@@ -26,7 +26,14 @@ def test_auth_ui_uses_server_session_without_browser_secret_storage():
     assert "localStorage" not in script
     assert "sessionStorage" not in script
     assert "elements.password.value = ''" in script
-    assert "token" not in script.casefold()
+
+    # A magic-link credential may exist ephemerally in the URL fragment, but it
+    # must be removed before exchange and must never become browser persistence.
+    assert "params.get('access_token')" in script
+    assert "history.replaceState" in script
+    assert "'/api/auth/token-login'" in script
+    assert "localStorage.setItem" not in script
+    assert "sessionStorage.setItem" not in script
 
 
 def test_auth_ui_exposes_typed_user_states():
