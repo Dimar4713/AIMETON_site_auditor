@@ -317,7 +317,8 @@
       const coverage = HUNTER_COVERAGE[document.querySelector('#hunterCoverage').value] || HUNTER_COVERAGE.wide;
       const maxCandidates = Math.min(100, Math.max(10, Number(document.querySelector('#hunterMaxCandidates').value) || 100));
       const minimumPreScore = Math.min(100, Math.max(0, Number(document.querySelector('#hunterMinimumScore').value) || 35));
-      const deepAuditScore = Math.min(100, Math.max(minimumPreScore, Number(document.querySelector('#hunterDeepAuditScore').value) || 60));
+      const requestedDeepAuditScore = Math.min(100, Math.max(0, Number(document.querySelector('#hunterDeepAuditScore').value) || 60));
+      const deepAuditScore = Math.max(minimumPreScore, requestedDeepAuditScore);
       hunterPageSize = Math.min(100, Math.max(10, Number(document.querySelector('#hunterPageSize').value) || 25));
       const payload = {
         region,
