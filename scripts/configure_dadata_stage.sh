@@ -11,6 +11,7 @@ DADATA_API="${DADATA_API:-}"
 DADATA_SECRET="${DADATA_SECRET:-}"
 DADATA_SMOKE_QUERY="${DADATA_SMOKE_QUERY:-7707083893}"
 DADATA_PUBLIC_READY_ATTEMPTS="${DADATA_PUBLIC_READY_ATTEMPTS:-8}"
+DADATA_FIND_PARTY_URL="https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party"
 
 log() {
   printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
@@ -120,7 +121,36 @@ for attempt in $(seq 1 "$DADATA_PUBLIC_READY_ATTEMPTS"); do
   log "DaData live lookup not ready (attempt $attempt/$DADATA_PUBLIC_READY_ATTEMPTS); retrying in ${delay}s"
   sleep "$delay"
 done
-[[ -n "$lookup" ]] || fail "DaData live lookup endpoint did not become ready"
+
+if [[ -z "$lookup" ]]; then
+  diag_body="$(mktemp "$STACK_DIR/.dadata-app-diagnostic.XXXXXX")"
+  app_http="$(curl --silent --show-error --max-time 30 -o "$diag_body" -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    --data "{\"query\":\"$DADATA_SMOKE_QUERY\"}" \
+    "$STAGE_URL/api/missions/registry-mirror/dadata/find-party" || true)"
+  app_detail="$(python3 - "$diag_body" <<'PY'
+import json
+import sys
+from pathlib import Path
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    print("unavailable")
+else:
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    print(detail if isinstance(detail, str) and len(detail) <= 120 else "unavailable")
+PY
+)"
+  rm -f "$diag_body"
+  direct_http="$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' \
+    -H 'Accept: application/json' \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Token $DADATA_API" \
+    --data "{\"query\":\"$DADATA_SMOKE_QUERY\"}" \
+    "$DADATA_FIND_PARTY_URL" || true)"
+  log "DaData lookup diagnostics: app_http=${app_http:-transport_error}; app_detail=${app_detail:-unavailable}; direct_provider_http=${direct_http:-transport_error}"
+  fail "DaData live lookup endpoint did not become ready"
+fi
 
 python3 - "$lookup" <<'PY'
 import json
