@@ -77,28 +77,34 @@ class SearxngProvider(HttpSearchProvider):
         self,
         base_url: str | None,
         *,
+        engines: tuple[str, ...] = (),
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         super().__init__(transport=transport)
         self._base_url = (base_url or "").strip().rstrip("/")
+        self._engines = tuple(item.strip() for item in engines if item.strip())
 
     @property
     def configured(self) -> bool:
         return bool(self._base_url)
 
     async def search(self, request: SearchRequest, *, timeout_seconds: float) -> list[SearchItem]:
+        params: dict[str, str | int] = {
+            "q": request.query,
+            "format": "json",
+            "language": request.language,
+            "safesearch": 1,
+        }
+        if self._engines:
+            params["engines"] = ",".join(self._engines)
+
         payload = await self._request_json(
             "GET",
             f"{self._base_url}/search",
             timeout_seconds=timeout_seconds,
-            params={
-                "q": request.query,
-                "format": "json",
-                "language": request.language,
-                "safesearch": 1,
-            },
+            params=params,
         )
-        return [
+        results = [
             SearchItem(
                 url=item["url"],
                 title=str(item.get("title") or ""),
@@ -109,6 +115,25 @@ class SearxngProvider(HttpSearchProvider):
             for item in payload.get("results", [])
             if isinstance(item, dict) and item.get("url")
         ][: request.limit]
+
+        # SearXNG can return HTTP 200 + zero results even when all selected
+        # upstream engines are blocked by CAPTCHA/rate limiting. This is not a
+        # semantic empty result: mark it as provider failure so SearchGateway can
+        # record the correct reason and continue the provider waterfall.
+        unresponsive = payload.get("unresponsive_engines") or []
+        if not results and isinstance(unresponsive, list) and unresponsive:
+            failed_names = []
+            for item in unresponsive[:8]:
+                if isinstance(item, (list, tuple)) and item:
+                    failed_names.append(str(item[0]))
+                elif isinstance(item, str):
+                    failed_names.append(item)
+            suffix = f" ({', '.join(failed_names)})" if failed_names else ""
+            raise ProviderError(
+                f"searxng upstream engines unavailable{suffix}",
+                retryable=True,
+            )
+        return results
 
 
 class TavilyProvider(HttpSearchProvider):
