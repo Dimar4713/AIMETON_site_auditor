@@ -12,6 +12,17 @@
     'рейтинг', 'лучшие', 'отзывы', 'каталог', 'список', 'обзор', 'топ ',
     'новости', 'рейтинг клиник', 'рейтинг стоматолог', 'врачи', 'про докторов',
   ];
+  const HUNTER_COVERAGE = {
+    quick: {max_queries: 6, results_per_query: 5},
+    wide: {max_queries: 12, results_per_query: 8},
+    maximum: {max_queries: 20, results_per_query: 10},
+  };
+
+  let hunterRetainedCandidates = [];
+  let hunterRenderedCount = 0;
+  let hunterPageSize = 25;
+  let hunterRegion = '';
+  let hunterDiscovered = 0;
 
   function clearSelection() {
     cards.forEach(card => card.setAttribute('aria-pressed', 'false'));
@@ -191,6 +202,12 @@
     container.append(item);
   }
 
+  function candidateCounts(candidates) {
+    const counts = {company: 0, supporting: 0, observation: 0};
+    candidates.forEach(candidate => { counts[classifyCandidate(candidate).kind] += 1; });
+    return counts;
+  }
+
   function renderHunterCandidates(container, candidates, fallbackRegion) {
     const groups = {company: [], supporting: [], observation: []};
     candidates.forEach(candidate => {
@@ -199,7 +216,7 @@
     });
 
     if (groups.company.length) {
-      const list = appendGroup(container, 'Компании-кандидаты', 'Наиболее пригодные для следующего шага: сайт был глубоко обработан.', 'company');
+      const list = appendGroup(container, `Компании-кандидаты (${groups.company.length})`, 'Наиболее пригодные для следующего шага: сайт был глубоко обработан.', 'company');
       groups.company.forEach(candidate => appendCandidate(list, candidate, fallbackRegion));
     }
     if (groups.supporting.length) {
@@ -223,6 +240,32 @@
       groups.observation.forEach(candidate => appendCandidate(list, candidate, fallbackRegion));
       details.append(summary, list);
       container.append(details);
+    }
+  }
+
+  function renderHunterPage() {
+    const output = document.querySelector('#hunterOutput');
+    const list = output.querySelector('.service-summary');
+    list.replaceChildren();
+    const counts = candidateCounts(hunterRetainedCandidates);
+    appendItem(
+      list,
+      'Результат поиска',
+      `Найдено источников: ${hunterDiscovered} · Отобрано кандидатов: ${hunterRetainedCandidates.length} · Компании-кандидаты: ${counts.company}`,
+      `Регион: ${hunterRegion} · источники для проверки: ${counts.supporting} · наблюдения: ${counts.observation}`,
+    );
+    const visible = hunterRetainedCandidates.slice(0, hunterRenderedCount);
+    renderHunterCandidates(list, visible, hunterRegion);
+    if (hunterRenderedCount < hunterRetainedCandidates.length) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'btn-ghost hunter-load-more';
+      more.textContent = `Показать ещё ${Math.min(hunterPageSize, hunterRetainedCandidates.length - hunterRenderedCount)}`;
+      more.addEventListener('click', () => {
+        hunterRenderedCount = Math.min(hunterRenderedCount + hunterPageSize, hunterRetainedCandidates.length);
+        renderHunterPage();
+      });
+      list.append(more);
     }
   }
 
@@ -263,7 +306,7 @@
     const status = document.querySelector('#hunterStatus');
     const output = document.querySelector('#hunterOutput');
     const list = output.querySelector('.service-summary');
-    const button = huntForm.querySelector('button');
+    const button = huntForm.querySelector('button[type="submit"]');
     button.disabled = true;
     output.hidden = true;
     list.replaceChildren();
@@ -271,18 +314,28 @@
     try {
       const region = document.querySelector('#hunterRegion').value.trim();
       const industry = document.querySelector('#hunterIndustry').value.trim();
+      const coverage = HUNTER_COVERAGE[document.querySelector('#hunterCoverage').value] || HUNTER_COVERAGE.wide;
+      const maxCandidates = Math.min(100, Math.max(10, Number(document.querySelector('#hunterMaxCandidates').value) || 100));
+      const minimumPreScore = Math.min(100, Math.max(0, Number(document.querySelector('#hunterMinimumScore').value) || 35));
+      const deepAuditScore = Math.min(100, Math.max(minimumPreScore, Number(document.querySelector('#hunterDeepAuditScore').value) || 60));
+      hunterPageSize = Math.min(100, Math.max(10, Number(document.querySelector('#hunterPageSize').value) || 25));
       const payload = {
         region,
         industries: industry ? [industry] : [],
-        max_queries: 6,
-        results_per_query: 5,
-        max_candidates: 30,
-        output_limit: 10,
+        max_queries: coverage.max_queries,
+        results_per_query: coverage.results_per_query,
+        max_candidates: maxCandidates,
+        minimum_pre_score: minimumPreScore,
+        deep_audit_score: deepAuditScore,
+        output_limit: maxCandidates,
         concurrency: 2,
       };
       const data = await postJson('/api/hunt', payload);
-      appendItem(list, 'Результат поиска', `Обнаружено источников-кандидатов: ${data.discovered ?? 0}`, `Регион: ${data.region || region} · балл выше = ближе к профилю потенциального клиента`);
-      renderHunterCandidates(list, (data.candidates || []).slice(0, 10), data.region || region);
+      hunterDiscovered = data.discovered ?? 0;
+      hunterRetainedCandidates = Array.isArray(data.candidates) ? data.candidates : [];
+      hunterRegion = data.region || region;
+      hunterRenderedCount = Math.min(hunterPageSize, hunterRetainedCandidates.length);
+      renderHunterPage();
       output.hidden = false;
       setStatus(status, 'Список кандидатов подготовлен.', 'success');
     } catch (error) {
