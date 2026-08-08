@@ -13,78 +13,110 @@ permissions:
 jobs:
   diagnose:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    environment: stage
-    timeout-minutes: 10
-    env:
-      YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
-      YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
-      TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
+    timeout-minutes: 15
     steps:
-      - name: Capture sanitized provider authorization diagnostics
+      - name: Verify native runtime debug policy and anchored external discovery
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$YANDEX_SEARCH_API_KEY"
-          test -n "$YANDEX_CLOUD_FOLDER_ID"
-          test -n "$TAVILY_TOKEN"
-          docker exec -i \
-            -e YANDEX_SEARCH_API_KEY="$YANDEX_SEARCH_API_KEY" \
-            -e YANDEX_CLOUD_FOLDER_ID="$YANDEX_CLOUD_FOLDER_ID" \
-            -e TAVILY_TOKEN="$TAVILY_TOKEN" \
-            aimeton-auditor python - <<'PY'
+          docker ps --format '{{.Names}}|{{.Status}}' | grep '^aimeton-auditor|'
+          docker exec -i aimeton-auditor python - <<'PY'
           import asyncio
-          import json
           import os
-          import httpx
+          from collections import Counter
 
-          SAFE_KEYS = {"code", "message", "error", "detail", "status", "type", "description"}
-
-          def safe_payload(response):
-              content_type = response.headers.get("content-type", "").split(";")[0]
-              payload = {}
-              try:
-                  raw = response.json()
-                  if isinstance(raw, dict):
-                      for key, value in raw.items():
-                          if key.lower() in SAFE_KEYS and isinstance(value, (str, int, float, bool, type(None))):
-                              payload[key] = value
-              except Exception:
-                  pass
-              return content_type, payload
+          from app.external_sources import (
+              collect_external_sources,
+              extract_identity_anchors,
+              query_plan,
+          )
+          from app.mission_bounded_runtime import _collect_deep_site_evidence
+          from app.search_gateway import get_search_gateway, search_policy_from_env
 
           async def main():
-              async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                  tavily = await client.get(
-                      "https://api.tavily.com/usage",
-                      headers={"Authorization": f"Bearer {os.environ['TAVILY_TOKEN']}"},
-                  )
-                  content_type, payload = safe_payload(tavily)
-                  print(f"TAVILY_USAGE status={tavily.status_code} content_type={content_type} safe={json.dumps(payload, ensure_ascii=False, sort_keys=True)}")
+              print(f'deployment_sha={os.getenv("AIMETON_DEPLOYMENT_SHA", "unknown")}')
+              print(f'search_effectiveness_debug={os.getenv("SEARCH_EFFECTIVENESS_DEBUG", "")}')
+              print(f'search_allow_paid_fallback={os.getenv("SEARCH_ALLOW_PAID_FALLBACK", "")}')
+              print(f'yandex_key_present={bool(os.getenv("YANDEX_SEARCH_API_KEY"))}')
+              print(f'yandex_folder_present={bool(os.getenv("YANDEX_CLOUD_FOLDER_ID"))}')
+              print(f'tavily_key_present={bool(os.getenv("TAVILY_TOKEN"))}')
 
-                  yandex = await client.post(
-                      "https://searchapi.api.cloud.yandex.net/v2/web/search",
-                      headers={"Authorization": f"Api-Key {os.environ['YANDEX_SEARCH_API_KEY']}"},
-                      json={
-                          "query": {
-                              "searchType": "SEARCH_TYPE_RU",
-                              "queryText": 'site:stomadv.ru "Стоматология для вас"',
-                              "familyMode": "FAMILY_MODE_MODERATE",
-                              "page": "0",
-                              "fixTypoMode": "FIX_TYPO_MODE_ON",
-                          },
-                          "groupSpec": {
-                              "groupMode": "GROUP_MODE_FLAT",
-                              "groupsOnPage": "5",
-                              "docsInGroup": "1",
-                          },
-                          "maxPassages": "1",
-                          "l10N": "LOCALIZATION_RU",
-                          "folderId": os.environ["YANDEX_CLOUD_FOLDER_ID"],
-                          "responseFormat": "FORMAT_XML",
-                      },
+              policy = search_policy_from_env()
+              print(f'policy_paid_fallback={policy.allow_paid_fallback}')
+              print(f'policy_budgets={dict(policy.max_cost_by_currency)}')
+              for health in get_search_gateway().health(policy):
+                  print(
+                      f'HEALTH provider={health.provider} state={health.state} '
+                      f'ready={health.ready} configured={health.configured} '
+                      f'quota_remaining={health.quota_remaining}'
                   )
-                  content_type, payload = safe_payload(yandex)
-                  print(f"YANDEX_SEARCH status={yandex.status_code} content_type={content_type} safe={json.dumps(payload, ensure_ascii=False, sort_keys=True)}")
+
+              seed, page_count, evidence = await _collect_deep_site_evidence(
+                  'https://stomadv.ru/',
+                  owned_mission_id='diag-native-anchored-search',
+              )
+              anchors = extract_identity_anchors(evidence, seed['final_url'])
+              print(f'page_count={page_count}')
+              print(f'evidence_chars={len(evidence)}')
+              print(f'anchor_domain={anchors.domain}')
+              print(f'anchor_legal_name_present={bool(anchors.legal_name)}')
+              print(f'anchor_inn_present={bool(anchors.inn)}')
+              print(f'anchor_ogrn_present={bool(anchors.ogrn)}')
+              print(f'anchor_cities={list(anchors.cities)}')
+              print(f'anchor_phones_count={len(anchors.phones)}')
+
+              company_hint = seed['title'].split('—')[0].split('|')[0].strip()
+              for kind, query in query_plan(company_hint, anchors=anchors):
+                  redacted = query
+                  if anchors.inn:
+                      redacted = redacted.replace(anchors.inn, '<INN>')
+                  if anchors.ogrn:
+                      redacted = redacted.replace(anchors.ogrn, '<OGRN>')
+                  for phone in anchors.phones:
+                      redacted = redacted.replace(phone, '<PHONE>')
+                  print(f'QUERY kind={kind} value={redacted}')
+
+              sources, notes, diagnostics = await collect_external_sources(
+                  company_hint,
+                  seed['final_url'],
+                  max_sources=100,
+                  anchors=anchors,
+              )
+              print(f'external_sources={len(sources)}')
+              print(f'diagnostics_state={diagnostics.state}')
+              provider_states = Counter(
+                  (a.provider, str(a.state), str(a.reason or ''))
+                  for a in diagnostics.attempts
+              )
+              for key, count in sorted(provider_states.items()):
+                  print(
+                      f'ATTEMPT provider={key[0]} state={key[1]} '
+                      f'reason={key[2]} count={count}'
+                  )
+
+              host_counts = Counter()
+              relevant = []
+              for source in sources:
+                  host = source.url.host if hasattr(source.url, 'host') else ''
+                  host_counts[str(host)] += 1
+                  text = f'{source.url} {source.title} {source.snippet}'.lower()
+                  if (
+                      'stomadv.ru' in text
+                      or 'краснояр' in text
+                      or 'железногор' in text
+                      or (anchors.inn and anchors.inn in text)
+                      or (anchors.ogrn and anchors.ogrn in text)
+                  ):
+                      relevant.append(source)
+              print(f'relevant_hint_count={len(relevant)}')
+              print(f'top_hosts={host_counts.most_common(15)}')
+              for source in relevant[:40]:
+                  print(
+                      f'RELEVANT class={source.source_class} '
+                      f'query={source.query_kind} url={source.url}'
+                  )
+              for note in notes:
+                  print(f'NOTE {note}')
 
           asyncio.run(main())
           PY
