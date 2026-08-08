@@ -37,6 +37,28 @@ def test_workspace_uses_canonical_customer_term_and_defensive_rendering() -> Non
     assert "percentage" not in script.lower()
 
 
+def test_workspace_has_decision_first_conversion_hierarchy() -> None:
+    script = (STATIC / "business-audit-workspace.js").read_text(encoding="utf-8")
+    assert "Решение для руководителя" in script
+    assert "Главная возможность" in script
+    assert "Почему это важно" in script
+    assert "Что предлагает AIMETON" in script
+    assert "Ближайший шаг" in script
+    assert "Предлагаемый следующий шаг" in script
+    assert "Черновик первого сообщения" in script
+
+
+def test_workspace_keeps_complexity_progressively_disclosed() -> None:
+    script = (STATIC / "business-audit-workspace.js").read_text(encoding="utf-8")
+    assert "Почему AIMETON так решил?" in script
+    assert "Показать подтверждение" in script
+    assert "Качество и достоверность анализа" in script
+    assert "Технические ограничения" in script
+    assert "Что требует проверки" in script
+    assert "Показать все зоны" in script
+    assert ".slice(-6).reverse()" in script
+
+
 def test_existing_integrations_remain_available() -> None:
     index = (STATIC / "index.html").read_text(encoding="utf-8")
     app = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -56,4 +78,6 @@ def test_workspace_styles_are_namespaced_and_responsive() -> None:
     styles = (STATIC / "business-audit-workspace.css").read_text(encoding="utf-8")
     assert ".business-audit-workspace" in styles
     assert ".baw-" in styles
+    assert ".baw-decision-card" in styles
+    assert ".baw-decision-flow" in styles
     assert "@media(max-width:760px)" in styles
