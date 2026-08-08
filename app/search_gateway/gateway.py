@@ -257,11 +257,7 @@ class SearchGateway:
                     error_reason = None
                     break
                 except ProviderError as exc:
-                    error_reason = (
-                        FallbackReason.TIMEOUT
-                        if "timeout" in str(exc).lower()
-                        else FallbackReason.PROVIDER_ERROR
-                    )
+                    error_reason = exc.reason
                     if not exc.retryable or retry >= policy.retries:
                         break
                 except Exception:

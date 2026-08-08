@@ -262,6 +262,10 @@
         "quota_exceeded",
         "circuit_open",
         "timeout",
+        "rate_limited",
+        "provider_blocked",
+        "captcha",
+        "protocol_error",
         "provider_error",
         "empty_results"
       ],

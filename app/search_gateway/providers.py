@@ -9,13 +9,20 @@ from typing import Any
 
 import httpx
 
-from app.search_gateway.models import SearchItem, SearchRequest
+from app.search_gateway.models import FallbackReason, SearchItem, SearchRequest
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, message: str, *, retryable: bool = True) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = True,
+        reason: FallbackReason = FallbackReason.PROVIDER_ERROR,
+    ) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.reason = reason
 
 
 class SearchProvider(ABC):
@@ -41,6 +48,17 @@ class HttpSearchProvider(SearchProvider):
     def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport
 
+    @staticmethod
+    def _http_failure_reason(response: httpx.Response) -> FallbackReason:
+        body_hint = response.text[:2000].casefold()
+        if "captcha" in body_hint or "recaptcha" in body_hint:
+            return FallbackReason.CAPTCHA
+        if response.status_code == 429:
+            return FallbackReason.RATE_LIMITED
+        if response.status_code in {401, 403}:
+            return FallbackReason.PROVIDER_BLOCKED
+        return FallbackReason.PROVIDER_ERROR
+
     async def _request_json(
         self,
         method: str,
@@ -59,11 +77,41 @@ class HttpSearchProvider(SearchProvider):
                 response.raise_for_status()
                 payload = response.json()
         except httpx.TimeoutException as exc:
-            raise ProviderError(f"{self.name} timeout") from exc
-        except (httpx.HTTPError, ValueError) as exc:
-            raise ProviderError(f"{self.name} request failed") from exc
+            raise ProviderError(
+                f"{self.name} timeout",
+                retryable=True,
+                reason=FallbackReason.TIMEOUT,
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            reason = self._http_failure_reason(exc.response)
+            retryable = reason not in {
+                FallbackReason.RATE_LIMITED,
+                FallbackReason.PROVIDER_BLOCKED,
+                FallbackReason.CAPTCHA,
+            }
+            raise ProviderError(
+                f"{self.name} http {exc.response.status_code}",
+                retryable=retryable,
+                reason=reason,
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise ProviderError(
+                f"{self.name} request failed",
+                retryable=True,
+                reason=FallbackReason.PROVIDER_ERROR,
+            ) from exc
+        except ValueError as exc:
+            raise ProviderError(
+                f"{self.name} invalid json payload",
+                retryable=False,
+                reason=FallbackReason.PROTOCOL_ERROR,
+            ) from exc
         if not isinstance(payload, dict):
-            raise ProviderError(f"{self.name} returned an invalid payload", retryable=False)
+            raise ProviderError(
+                f"{self.name} returned an invalid payload",
+                retryable=False,
+                reason=FallbackReason.PROTOCOL_ERROR,
+            )
         return payload
 
 
@@ -116,22 +164,33 @@ class SearxngProvider(HttpSearchProvider):
             if isinstance(item, dict) and item.get("url")
         ][: request.limit]
 
-        # SearXNG can return HTTP 200 + zero results even when all selected
-        # upstream engines are blocked by CAPTCHA/rate limiting. This is not a
-        # semantic empty result: mark it as provider failure so SearchGateway can
-        # record the correct reason and continue the provider waterfall.
         unresponsive = payload.get("unresponsive_engines") or []
         if not results and isinstance(unresponsive, list) and unresponsive:
-            failed_names = []
+            failed_names: list[str] = []
+            failure_text: list[str] = []
             for item in unresponsive[:8]:
                 if isinstance(item, (list, tuple)) and item:
                     failed_names.append(str(item[0]))
+                    failure_text.extend(str(part) for part in item[1:])
                 elif isinstance(item, str):
                     failed_names.append(item)
+                    failure_text.append(item)
+            diagnostic = " ".join(failure_text).casefold()
+            if "captcha" in diagnostic or "recaptcha" in diagnostic:
+                reason = FallbackReason.CAPTCHA
+            elif "too many" in diagnostic or "429" in diagnostic or "rate" in diagnostic:
+                reason = FallbackReason.RATE_LIMITED
+            elif "access denied" in diagnostic or "403" in diagnostic or "forbidden" in diagnostic:
+                reason = FallbackReason.PROVIDER_BLOCKED
+            elif "protocol" in diagnostic or "parse" in diagnostic:
+                reason = FallbackReason.PROTOCOL_ERROR
+            else:
+                reason = FallbackReason.PROVIDER_ERROR
             suffix = f" ({', '.join(failed_names)})" if failed_names else ""
             raise ProviderError(
                 f"searxng upstream engines unavailable{suffix}",
-                retryable=True,
+                retryable=reason is FallbackReason.PROVIDER_ERROR,
+                reason=reason,
             )
         return results
 
@@ -232,12 +291,20 @@ class YandexProvider(HttpSearchProvider):
         )
         raw_data = payload.get("rawData")
         if not isinstance(raw_data, str):
-            raise ProviderError("yandex returned no rawData", retryable=False)
+            raise ProviderError(
+                "yandex returned no rawData",
+                retryable=False,
+                reason=FallbackReason.PROTOCOL_ERROR,
+            )
         try:
             xml_text = base64.b64decode(raw_data, validate=True).decode("utf-8")
             root = ET.fromstring(xml_text)
         except (ValueError, UnicodeDecodeError, ET.ParseError) as exc:
-            raise ProviderError("yandex returned invalid XML data", retryable=False) from exc
+            raise ProviderError(
+                "yandex returned invalid XML data",
+                retryable=False,
+                reason=FallbackReason.PROTOCOL_ERROR,
+            ) from exc
         results: list[SearchItem] = []
         for document in root.findall(".//doc"):
             url = document.findtext("url")

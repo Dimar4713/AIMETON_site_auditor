@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.search_gateway.models import SearchRequest
+from app.search_gateway.models import FallbackReason, SearchRequest
 from app.search_gateway.providers import ProviderError, SearxngProvider
 
 
@@ -62,7 +62,7 @@ async def test_true_empty_result_stays_empty_when_upstreams_are_responsive() -> 
 
 
 @pytest.mark.asyncio
-async def test_zero_results_with_unresponsive_engines_is_provider_failure() -> None:
+async def test_zero_results_with_antibot_upstream_failures_is_not_tightly_retried() -> None:
     provider = SearxngProvider(
         "https://search.internal",
         transport=httpx.MockTransport(
@@ -82,7 +82,8 @@ async def test_zero_results_with_unresponsive_engines_is_provider_failure() -> N
     with pytest.raises(ProviderError) as caught:
         await provider.search(_request(), timeout_seconds=1)
 
-    assert caught.value.retryable is True
+    assert caught.value.retryable is False
+    assert caught.value.reason == FallbackReason.CAPTCHA
     assert "upstream engines unavailable" in str(caught.value)
     assert "brave" in str(caught.value)
     assert "duckduckgo" in str(caught.value)
