@@ -13,64 +13,50 @@ permissions:
 jobs:
   diagnose:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Compare strict and relaxed SearXNG query forms
+      - name: Inspect SearXNG raw JSON and upstream engine state
         shell: bash
         run: |
           set -euo pipefail
-          docker exec -i \
-            -e SEARCH_PROVIDER_ORDER='searxng' \
-            -e SEARCH_EFFECTIVENESS_DEBUG='true' \
-            aimeton-auditor python - <<'PY'
+          docker exec -i aimeton-auditor python - <<'PY'
           import asyncio
-          from urllib.parse import urlparse
-
-          from app.mission_bounded_runtime import _collect_deep_site_evidence
-          from app.search_gateway import get_search_gateway, search_policy_from_env
-          from app.search_gateway.models import SearchRequest
+          import os
+          import httpx
 
           async def main():
-              seed, page_count, evidence = await _collect_deep_site_evidence(
-                  'https://stomadv.ru/', owned_mission_id='diag-query-relaxation'
-              )
-              company = seed['title'].split('—')[0].split('|')[0].strip()
-              region = 'Красноярск'
+              base = (os.getenv('SEARXNG_BASE_URL') or '').rstrip('/')
+              print(f'searxng_configured={bool(base)}')
+              if not base:
+                  raise SystemExit(2)
               queries = [
-                  ('official_site', f'site:stomadv.ru {company}'),
-                  ('strict_name_region', f'"{company}" "{region}"'),
-                  ('relaxed_name_region', f'{company} {region}'),
-                  ('relaxed_doctors', f'{company} {region} врачи специалисты'),
-                  ('relaxed_reviews', f'{company} {region} отзывы'),
-                  ('relaxed_registry', f'{company} {region} ИНН ОГРН реквизиты'),
-                  ('domain_doctors', 'site:stomadv.ru врачи специалисты'),
-                  ('domain_articles', 'site:stomadv.ru статьи новости'),
-                  ('domain_jobs', 'site:stomadv.ru вакансии сотрудники'),
+                  'site:stomadv.ru "Стоматология для вас"',
+                  'Стоматология для вас Красноярск',
               ]
-              gateway = get_search_gateway()
-              policy = search_policy_from_env()
-              seen = set()
-              for index, (kind, query) in enumerate(queries):
-                  response = await gateway.search(
-                      SearchRequest(
-                          query=query,
-                          limit=20,
-                          mission_id='diag-query-relaxation',
-                          correlation_id=f'diag-{index}',
-                      ),
-                      policy,
-                  )
-                  print(f'QUERY kind={kind} state={response.diagnostics.state} count={len(response.results)} value={query}')
-                  for item in response.results:
-                      url = str(item.url)
-                      if url in seen:
-                          continue
-                      seen.add(url)
-                      host = (urlparse(url).hostname or '').lower()
-                      text = f'{item.title} {item.snippet} {url}'.casefold()
-                      relevant = 'stomadv.ru' in text or 'краснояр' in text or 'железногор' in text
-                      print(f'RESULT kind={kind} relevant={relevant} host={host} url={url}')
-              print(f'unique_results={len(seen)}')
+              async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                  for round_no in range(1, 4):
+                      for query in queries:
+                          response = await client.get(
+                              f'{base}/search',
+                              params={
+                                  'q': query,
+                                  'format': 'json',
+                                  'language': 'ru',
+                                  'safesearch': 1,
+                              },
+                          )
+                          print(f'RAW round={round_no} status={response.status_code} query={query}')
+                          response.raise_for_status()
+                          payload = response.json()
+                          results = payload.get('results') or []
+                          engines = payload.get('unresponsive_engines') or []
+                          suggestions = payload.get('suggestions') or []
+                          print(f'RAW_RESULT round={round_no} results={len(results)} unresponsive={len(engines)} suggestions={len(suggestions)}')
+                          for item in engines[:30]:
+                              print(f'UNRESPONSIVE {item}')
+                          for item in results[:10]:
+                              print(f'FOUND engine={item.get("engine")} engines={item.get("engines")} url={item.get("url")}')
+                      await asyncio.sleep(1)
 
           asyncio.run(main())
           PY
