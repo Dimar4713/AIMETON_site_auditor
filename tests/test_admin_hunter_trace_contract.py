@@ -33,6 +33,16 @@ def test_admin_workspace_loads_recent_trace_browser() -> None:
     assert "query_variants" in ADMIN_JS
 
 
+def test_admin_trace_timeline_opens_inline_and_scrolls_to_selected_attempt() -> None:
+    assert "hunter-trace-inline" in ADMIN_JS
+    assert "node.append(button, inlineTimeline)" in ADMIN_JS
+    assert "showTimeline(item.mission_id, item.attempt_id, inlineTimeline, button)" in ADMIN_JS
+    assert "host.scrollIntoView" in ADMIN_JS
+    assert "button.textContent = 'Закрыть timeline'" in ADMIN_JS
+    assert "button.textContent = 'Повторить открытие'" in ADMIN_JS
+    assert "timelineBox" not in ADMIN_JS
+
+
 def test_admin_trace_ui_does_not_render_sensitive_transport_fields() -> None:
     lowered = ADMIN_JS.lower()
     for forbidden in ("authorization", "api_key", "password", "cookie", "raw_payload"):
