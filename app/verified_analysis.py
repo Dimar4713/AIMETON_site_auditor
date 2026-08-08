@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
+from app.adaptive_external_sources import collect_external_sources_adaptive
 from app.external_sources import (
-    collect_external_sources,
     extract_identity_anchors,
     source_type,
     to_llm_sources,
@@ -28,10 +28,12 @@ async def run_verified_enriched_site_analysis(
 
     Search results remain discovery hints until the document pipeline fetches the
     primary URL and confirms the resolved company identity in fetched content.
+    Entity discovery uses an exact query first and one relaxed fallback only when
+    the exact attempt is empty/degraded.
     """
     company_hint = title.split("—")[0].split("|")[0].strip() or _host(url)
     anchors = guard_identity_anchors(extract_identity_anchors(text, url), text)
-    external_sources, notes, diagnostics = await collect_external_sources(
+    external_sources, notes, diagnostics = await collect_external_sources_adaptive(
         company_hint,
         url,
         region=anchors.primary_region,
