@@ -27,7 +27,7 @@ jobs:
           docker inspect "$searx_container" --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
           docker exec -i "$searx_container" python - <<'PY'
           from pathlib import Path
-          import yaml
+          import re
 
           candidates = [
               Path('/etc/searxng/settings.yml'),
@@ -37,27 +37,65 @@ jobs:
           print(f'settings_present={bool(path)}')
           if path is None:
               raise SystemExit(2)
-          data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
-          engines = data.get('engines') or []
-          print(f'configured_engine_entries={len(engines)}')
+
+          text = path.read_text(encoding='utf-8')
+          lines = text.splitlines()
+          in_engines = False
+          current = None
+          engines = []
+          for line in lines:
+              if re.match(r'^engines\s*:', line):
+                  in_engines = True
+                  continue
+              if in_engines and line and not line.startswith((' ', '\t')):
+                  break
+              if not in_engines:
+                  continue
+              match = re.match(r'^\s*-\s+name\s*:\s*(.+?)\s*$', line)
+              if match:
+                  if current:
+                      engines.append(current)
+                  current = {'name': match.group(1).strip('"\'')}
+                  continue
+              if current is None:
+                  continue
+              for key in ('engine', 'shortcut', 'categories', 'disabled'):
+                  item = re.match(rf'^\s+{key}\s*:\s*(.+?)\s*$', line)
+                  if item:
+                      current[key] = item.group(1).strip()
+                      break
+          if current:
+              engines.append(current)
+
           enabled = []
           disabled = []
           for item in engines:
-              if not isinstance(item, dict):
-                  continue
-              name = str(item.get('name') or item.get('engine') or 'unknown')
-              state = bool(item.get('disabled', False))
-              shortcut = str(item.get('shortcut') or '')
-              categories = item.get('categories') or item.get('category') or ''
-              record = f'name={name} shortcut={shortcut} categories={categories}'
-              (disabled if state else enabled).append(record)
+              is_disabled = str(item.get('disabled', 'false')).lower() in {'true', 'yes', '1'}
+              record = (
+                  f"name={item.get('name','unknown')} engine={item.get('engine','')} "
+                  f"shortcut={item.get('shortcut','')} categories={item.get('categories','')}"
+              )
+              (disabled if is_disabled else enabled).append(record)
+          print(f'configured_engine_entries={len(engines)}')
           print(f'enabled_entries={len(enabled)}')
           for record in enabled:
               print(f'ENABLED {record}')
           print(f'disabled_entries={len(disabled)}')
-          for record in disabled[:60]:
+          for record in disabled[:80]:
               print(f'DISABLED {record}')
-          outgoing = data.get('outgoing') or {}
-          safe_keys = ('request_timeout', 'max_request_timeout', 'pool_connections', 'pool_maxsize', 'enable_http2')
-          print('OUTGOING ' + ' '.join(f'{key}={outgoing.get(key)}' for key in safe_keys if key in outgoing))
+
+          safe_outgoing = {}
+          in_outgoing = False
+          for line in lines:
+              if re.match(r'^outgoing\s*:', line):
+                  in_outgoing = True
+                  continue
+              if in_outgoing and line and not line.startswith((' ', '\t')):
+                  break
+              if not in_outgoing:
+                  continue
+              match = re.match(r'^\s+(request_timeout|max_request_timeout|pool_connections|pool_maxsize|enable_http2)\s*:\s*(.+?)\s*$', line)
+              if match:
+                  safe_outgoing[match.group(1)] = match.group(2)
+          print('OUTGOING ' + ' '.join(f'{key}={value}' for key, value in safe_outgoing.items()))
           PY
