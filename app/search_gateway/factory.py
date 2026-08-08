@@ -37,6 +37,14 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _csv_env(name: str) -> tuple[str, ...]:
+    return tuple(
+        item.strip()
+        for item in os.getenv(name, "").split(",")
+        if item.strip()
+    )
+
+
 def search_effectiveness_debug_enabled() -> bool:
     """Return whether search quality is intentionally prioritized over internal cost caps.
 
@@ -128,7 +136,10 @@ def get_search_gateway() -> TracedSearchGateway:
                 ),
                 cost_amount=_decimal_env("YANDEX_SEARCH_COST_RUB"),
             ),
-            SearxngProvider(os.getenv("SEARXNG_BASE_URL")),
+            SearxngProvider(
+                os.getenv("SEARXNG_BASE_URL"),
+                engines=_csv_env("SEARXNG_ENGINES"),
+            ),
             TavilyProvider(
                 os.getenv("TAVILY_TOKEN") or os.getenv("TAVILY_API_KEY"),
                 cost_amount=_decimal_env("TAVILY_SEARCH_COST_USD"),
