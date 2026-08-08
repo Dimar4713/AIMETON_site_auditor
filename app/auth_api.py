@@ -253,3 +253,7 @@ def admin_reset_user_password(
         _admin_service(auth).reset_password(_operation(admin, payload.reason), user_id, payload.password)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail={"reason": "user_not_found"}) from exc
+
+
+from app.temporary_access_api import router as temporary_access_router
+router.include_router(temporary_access_router)
