@@ -32,6 +32,12 @@ TRACKING_QUERY_KEYS = {
     "_openstat",
 }
 
+HARD_UPSTREAM_FAILURES = {
+    FallbackReason.RATE_LIMITED,
+    FallbackReason.PROVIDER_BLOCKED,
+    FallbackReason.CAPTCHA,
+}
+
 
 def canonical_url(value: str) -> str:
     parsed = urlsplit(value.strip())
@@ -104,11 +110,15 @@ class SearchGateway:
         async with self._lock:
             self._circuits[provider] = _Circuit()
 
-    async def _record_failure(self, provider: str) -> None:
+    async def _record_failure(
+        self,
+        provider: str,
+        reason: FallbackReason = FallbackReason.PROVIDER_ERROR,
+    ) -> None:
         async with self._lock:
             circuit = self._circuits[provider]
             circuit.failures += 1
-            if circuit.failures >= self._failure_threshold:
+            if reason in HARD_UPSTREAM_FAILURES or circuit.failures >= self._failure_threshold:
                 circuit.opened_at = time.monotonic()
 
     async def _reserve_cost(
@@ -266,7 +276,7 @@ class SearchGateway:
             latency_ms = max(0, round((time.perf_counter() - started) * 1000))
             charged = provider.cost_amount * calls_made
             if error_reason is not None:
-                await self._record_failure(provider_name)
+                await self._record_failure(provider_name, error_reason)
                 attempts.append(
                     ProviderAttempt(
                         provider=provider_name,
