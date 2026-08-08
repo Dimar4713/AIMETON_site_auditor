@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/style.css?v=20260729a">
   <link rel="stylesheet" href="/static/auth-ui.css?v=20260803c">
   <link rel="stylesheet" href="/static/service-catalog.css?v=20260804b">
+  <link rel="stylesheet" href="/static/business-audit-workspace.css?v=20260808a">
 </head>
 <body>
 <section id="authGate" class="auth-shell" aria-labelledby="loginTitle" hidden>
@@ -99,6 +100,8 @@
     <p id="status"></p>
   </section>
 
+  <section id="businessAuditWorkspace" class="business-audit-workspace" aria-live="polite" hidden></section>
+
   <section class="panel service-panel" data-service-panel="company-intelligence" hidden>
     <h2>Исследование компании</h2>
     <p class="service-panel__intro">Укажите название компании. Сайт и регион помогут точнее сопоставить организацию.</p>
@@ -151,6 +154,7 @@
 <script src="/static/app.js?v=20260803e"></script>
 <script src="/static/instant-umel-reporter.js?v=20260805a"></script>
 <script src="/static/live-analysis.js?v=20260804a"></script>
+<script src="/static/business-audit-workspace.js?v=20260808a"></script>
 <script src="/static/service-catalog.js?v=20260804b"></script>
 <script src="/static/analyze-response-guard.js?v=20260803b"></script>
 <script src="/static/sources.js?v=20260720e"></script>
