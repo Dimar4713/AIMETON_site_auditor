@@ -4,7 +4,7 @@ from enum import StrEnum
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from app.entity_resolution.factory import get_entity_resolver
 from app.evidence_crawler.factory import get_evidence_crawler
@@ -13,6 +13,7 @@ from app.evidence_crawler.models import (
     BootstrapCrawlResult,
     IdentitySignalKind,
 )
+from app.evidence_crawler.search_discovery import discover_same_domain_urls
 from app.mission_orchestrator import (
     ActionCandidate,
     ActionOutcomeState,
@@ -51,6 +52,9 @@ class TargetedCrawlEnvelope(TargetedApiModel):
     guard_state: IdentityGuardState
     expected_identifiers: dict[str, list[str]]
     observed_identifiers: dict[str, list[str]]
+    search_state: str = "not_attempted"
+    search_discovered_urls: list[AnyHttpUrl] = Field(default_factory=list)
+    search_selected_url: AnyHttpUrl | None = None
     crawl: BootstrapCrawlResult
 
 
@@ -77,6 +81,17 @@ def _identifier_map(candidate) -> dict[str, list[str]]:
         if item.scheme in {"inn", "ogrn", "legal_name"}:
             values.setdefault(item.scheme, set()).add(item.normalized_value)
     return {key: sorted(value) for key, value in sorted(values.items())}
+
+
+def _company_name(candidate) -> str | None:
+    return next(
+        (
+            item.normalized_value
+            for item in candidate.identifiers
+            if item.scheme == "legal_name" and item.normalized_value
+        ),
+        None,
+    )
 
 
 def _observed_map(crawl: BootstrapCrawlResult) -> dict[str, list[str]]:
@@ -113,11 +128,12 @@ def _guard(expected: dict[str, list[str]], observed: dict[str, list[str]]) -> Id
     return IdentityGuardState.NOT_OBSERVED
 
 
-def _targeted_plan(mission_id: str) -> NextActionPlan:
+def _targeted_plan(mission_id: str, target_override: str | None = None) -> NextActionPlan:
     orchestrator = get_mission_orchestrator()
     snapshot = orchestrator.get(mission_id)
-    target = str(snapshot.contract.target_url)
-    host = (urlsplit(target).hostname or "").lower()
+    mission_target = str(snapshot.contract.target_url)
+    target = target_override or mission_target
+    host = (urlsplit(mission_target).hostname or "").lower()
     return orchestrator.plan(
         mission_id,
         deficits=["targeted_company_profile"],
@@ -151,7 +167,23 @@ async def run_targeted_crawl(mission_id: str, request: TargetedCrawlRequest):
             request.identity_result_id,
         )
         orchestrator = get_mission_orchestrator()
-        plan = request.plan or _targeted_plan(mission_id)
+        snapshot = orchestrator.get(mission_id)
+        search_state = "not_attempted"
+        search_urls: list[str] = []
+        search_selected: str | None = None
+
+        if request.plan is None:
+            discovery = await discover_same_domain_urls(
+                str(snapshot.contract.target_url),
+                company_name=_company_name(candidate),
+                mission_id=mission_id,
+                correlation_id=snapshot.contract.correlation_id,
+            )
+            search_state = discovery.diagnostics.state.value
+            search_urls = list(discovery.urls)
+            search_selected = search_urls[0] if search_urls else None
+
+        plan = request.plan or _targeted_plan(mission_id, search_selected)
         crawl = await get_evidence_crawler().run_mission(
             orchestrator,
             mission_id,
@@ -187,6 +219,9 @@ async def run_targeted_crawl(mission_id: str, request: TargetedCrawlRequest):
             guard_state=guard_state,
             expected_identifiers=expected,
             observed_identifiers=observed,
+            search_state=search_state,
+            search_discovered_urls=search_urls,
+            search_selected_url=search_selected,
             crawl=crawl,
         )
     except KeyError as exc:
