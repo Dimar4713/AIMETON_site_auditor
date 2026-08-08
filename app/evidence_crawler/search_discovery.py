@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -50,6 +49,11 @@ async def discover_same_domain_urls(
     Search is only a URL discovery mechanism. Only exact host-family URLs are
     returned; the Evidence Crawler remains responsible for robots policy,
     fetching and evidence extraction.
+
+    Topics are intentionally executed sequentially. The SearchGateway owns
+    provider circuit state, so a hard upstream signal from an earlier topic
+    (403/429/CAPTCHA) can suppress later calls in the same discovery batch
+    instead of launching a fan-out before the circuit has time to open.
     """
     domain = _host(root_url)
     if not domain:
@@ -61,9 +65,10 @@ async def discover_same_domain_urls(
     gateway = get_search_gateway()
     policy = search_policy_from_env()
     name = " ".join((company_name or "").split()).strip()
+    identity = f' "{name}"' if name else ""
 
-    async def search_topic(topic: str, priority: int):
-        identity = f' "{name}"' if name else ""
+    batches = []
+    for topic, priority in DISCOVERY_TOPICS:
         response = await gateway.search(
             SearchRequest(
                 query=f"site:{domain}{identity} {topic}",
@@ -73,11 +78,8 @@ async def discover_same_domain_urls(
             ),
             policy,
         )
-        return priority, response
+        batches.append((priority, response))
 
-    batches = await asyncio.gather(
-        *(search_topic(topic, priority) for topic, priority in DISCOVERY_TOPICS)
-    )
     diagnostics = SearchDiagnostics.aggregate(
         [response.diagnostics for _, response in batches]
     )
