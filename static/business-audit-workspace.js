@@ -33,16 +33,20 @@
     if (!state.events.length) {
       return '<p class="baw-empty">Ожидаем первое подтверждённое событие миссии.</p>';
     }
-    return `<ol class="baw-timeline">${state.events.slice(-8).map(event => `
-      <li class="baw-event">
-        <span class="baw-event__icon" aria-hidden="true">${esc(event.icon || '•')}</span>
-        <div>
-          <strong>${esc(event.message || event.phase || event.event_code || 'Событие миссии')}</strong>
-          ${event.detail ? `<p>${esc(event.detail)}</p>` : ''}
-          ${event.next_action ? `<p class="baw-muted">Далее: ${esc(event.next_action)}</p>` : ''}
-          ${event.timestamp ? `<time>${esc(new Date(event.timestamp).toLocaleTimeString('ru-RU'))}</time>` : ''}
-        </div>
-      </li>`).join('')}</ol>`;
+    const recent = state.events.slice(-6).reverse();
+    return `<details class="baw-details baw-timeline-details" ${state.events.length <= 3 ? 'open' : ''}>
+      <summary>Ход миссии · ${state.events.length} событий</summary>
+      <ol class="baw-timeline">${recent.map(event => `
+        <li class="baw-event">
+          <span class="baw-event__icon" aria-hidden="true">${esc(event.icon || '•')}</span>
+          <div>
+            <strong>${esc(event.message || event.phase || event.event_code || 'Событие миссии')}</strong>
+            ${event.detail ? `<p>${esc(event.detail)}</p>` : ''}
+            ${event.next_action ? `<p class="baw-muted">Далее: ${esc(event.next_action)}</p>` : ''}
+            ${event.timestamp ? `<time>${esc(new Date(event.timestamp).toLocaleTimeString('ru-RU'))}</time>` : ''}
+          </div>
+        </li>`).join('')}</ol>
+    </details>`;
   }
 
   function renderFacts(result) {
@@ -59,19 +63,26 @@
     </section>`;
   }
 
-  function renderOpportunity(result) {
+  function renderDecisionCard(result) {
     const opportunity = result.commercial_opportunity || {};
-    if (!Object.keys(opportunity).length) return '';
-    return `<section class="baw-section baw-opportunity">
-      <div class="baw-section__head">
-        <h3>Ключевая коммерческая возможность</h3>
-        ${opportunity.score != null ? `<span class="baw-score">${esc(opportunity.score)}/100</span>` : ''}
+    const action = result.action_package || {};
+    const hasOpportunity = Object.keys(opportunity).length > 0;
+    return `<section class="baw-hero baw-decision-card">
+      <p class="baw-kicker">Решение для руководителя</p>
+      <div class="baw-hero__row">
+        <div>
+          <h2>${esc(result.company_name || 'Компания')}</h2>
+          ${result.url ? `<a href="${esc(safeHref(result.url))}" target="_blank" rel="noopener">${esc(result.url)}</a>` : ''}
+        </div>
+        ${hasOpportunity && (opportunity.score != null || opportunity.qualification) ? `<div class="baw-decision-score">${opportunity.score != null ? `<span class="baw-score">${esc(opportunity.score)}/100</span>` : ''}${opportunity.qualification ? `<span class="baw-chip">${esc(opportunity.qualification)}</span>` : ''}</div>` : ''}
       </div>
-      ${opportunity.opportunity_type ? `<h4>${esc(opportunity.opportunity_type)}</h4>` : ''}
-      ${opportunity.problem_hypothesis ? `<p><strong>Проблема:</strong> ${esc(opportunity.problem_hypothesis)}</p>` : ''}
-      ${opportunity.recommended_solution ? `<p><strong>Решение:</strong> ${esc(opportunity.recommended_solution)}</p>` : ''}
-      ${opportunity.expected_value ? `<p><strong>Ожидаемая ценность:</strong> ${esc(opportunity.expected_value)}</p>` : ''}
-      ${opportunity.qualification ? `<span class="baw-chip">${esc(opportunity.qualification)}</span>` : ''}
+      ${result.business_summary ? `<p class="baw-summary">${esc(result.business_summary)}</p>` : ''}
+      ${hasOpportunity ? `<div class="baw-decision-flow">
+        ${(opportunity.opportunity_type || opportunity.problem_hypothesis) ? `<div><span class="baw-decision-label">Главная возможность</span>${opportunity.opportunity_type ? `<h3>${esc(opportunity.opportunity_type)}</h3>` : ''}${opportunity.problem_hypothesis ? `<p>${esc(opportunity.problem_hypothesis)}</p>` : ''}</div>` : ''}
+        ${opportunity.expected_value ? `<div><span class="baw-decision-label">Почему это важно</span><p>${esc(opportunity.expected_value)}</p></div>` : ''}
+        ${opportunity.recommended_solution ? `<div><span class="baw-decision-label">Что предлагает AIMETON</span><p>${esc(opportunity.recommended_solution)}</p></div>` : ''}
+        ${action.next_action ? `<div class="baw-decision-next"><span class="baw-decision-label">Ближайший шаг</span><strong>${esc(action.next_action)}</strong></div>` : ''}
+      </div>` : ''}
     </section>`;
   }
 
@@ -82,26 +93,38 @@
       <div class="baw-section__head"><h3>AI-возможности</h3><span>${agents.length}</span></div>
       <div class="baw-grid">${agents.map(agent => `
         <article class="baw-card">
-          ${agent.priority ? `<span class="baw-chip">${esc(agent.priority)}</span>` : ''}
-          ${agent.name ? `<h4>${esc(agent.name)}</h4>` : ''}
-          ${agent.purpose ? `<p>${esc(agent.purpose)}</p>` : ''}
-          ${agent.benefit ? `<p class="baw-value"><strong>Польза:</strong> ${esc(agent.benefit)}</p>` : ''}
+          <div class="baw-card__top">${agent.priority ? `<span class="baw-chip">${esc(agent.priority)}</span>` : ''}${agent.name ? `<h4>${esc(agent.name)}</h4>` : ''}</div>
+          ${agent.purpose ? `<p><strong>Задача:</strong> ${esc(agent.purpose)}</p>` : ''}
+          ${agent.benefit ? `<p class="baw-value"><strong>Практическая польза:</strong> ${esc(agent.benefit)}</p>` : ''}
         </article>`).join('')}</div>
     </section>`;
+  }
+
+  function renderZoneCard(zone) {
+    return `<article class="baw-card">
+      <div class="baw-card__meta">${esc(zone.code)}${zone.status ? ` · ${esc(zone.status)}` : ''}</div>
+      ${zone.vertex ? `<h4>${esc(zone.vertex)}</h4>` : ''}
+      ${zone.finding ? `<p>${esc(zone.finding)}</p>` : ''}
+      ${zone.sales_relevance ? `<p class="baw-value"><strong>Коммерческое значение:</strong> ${esc(zone.sales_relevance)}</p>` : ''}
+    </article>`;
   }
 
   function renderZones(result) {
     const zones = asArray(result.business_machine_4x4);
     if (!zones.length) return '';
+    const prioritized = [...zones].sort((a, b) => Number(Boolean(b.sales_relevance)) - Number(Boolean(a.sales_relevance)));
+    const featured = prioritized.slice(0, Math.min(5, prioritized.length));
+    const remaining = prioritized.slice(featured.length);
+    const statusCounts = zones.reduce((acc, zone) => {
+      const key = asText(zone.status || 'без статуса');
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
     return `<section class="baw-section">
       <div class="baw-section__head"><h3>Анализ бизнеса по 16 зонам</h3><span>${zones.length}</span></div>
-      <div class="baw-grid">${zones.map(zone => `
-        <article class="baw-card">
-          <div class="baw-card__meta">${esc(zone.code)}${zone.status ? ` · ${esc(zone.status)}` : ''}</div>
-          ${zone.vertex ? `<h4>${esc(zone.vertex)}</h4>` : ''}
-          ${zone.finding ? `<p>${esc(zone.finding)}</p>` : ''}
-          ${zone.sales_relevance ? `<p class="baw-value"><strong>Значение:</strong> ${esc(zone.sales_relevance)}</p>` : ''}
-        </article>`).join('')}</div>
+      <div class="baw-zone-summary">${Object.entries(statusCounts).map(([status, count]) => `<span class="baw-chip">${esc(status)} · ${count}</span>`).join('')}</div>
+      <div class="baw-grid">${featured.map(renderZoneCard).join('')}</div>
+      ${remaining.length ? `<details class="baw-details baw-zone-details"><summary>Показать все зоны (${zones.length})</summary><div class="baw-grid">${remaining.map(renderZoneCard).join('')}</div></details>` : ''}
     </section>`;
   }
 
@@ -110,12 +133,12 @@
     if (!Object.keys(action).length) return '';
     const scenario = asArray(action.demo_scenario);
     return `<section class="baw-section baw-next">
-      <p class="baw-kicker">Следующий практический шаг</p>
+      <p class="baw-kicker">Предлагаемый следующий шаг</p>
       ${action.next_action ? `<h3>${esc(action.next_action)}</h3>` : '<h3>Перейти от анализа к пилоту</h3>'}
       ${action.contact_reason ? `<p>${esc(action.contact_reason)}</p>` : ''}
-      ${action.decision_maker_hypothesis ? `<p><strong>Кому:</strong> ${esc(action.decision_maker_hypothesis)}</p>` : ''}
-      ${scenario.length ? `<ol>${scenario.map(step => `<li>${esc(step)}</li>`).join('')}</ol>` : ''}
-      ${action.first_message ? `<details><summary>Первое сообщение</summary><blockquote>${esc(action.first_message)}</blockquote></details>` : ''}
+      ${action.decision_maker_hypothesis ? `<p><strong>Кому адресовать:</strong> ${esc(action.decision_maker_hypothesis)}</p>` : ''}
+      ${scenario.length ? `<details class="baw-details"><summary>Сценарий демонстрации</summary><ol>${scenario.map(step => `<li>${esc(step)}</li>`).join('')}</ol></details>` : ''}
+      ${action.first_message ? `<details class="baw-details"><summary>Черновик первого сообщения</summary><blockquote>${esc(action.first_message)}</blockquote></details>` : ''}
     </section>`;
   }
 
@@ -130,11 +153,11 @@
         ${sources.length ? `<div class="baw-sources">${sources.map(source => `
           <article>
             <strong>${esc(source.title || source.id)}</strong>
+            ${source.evidence_level ? `<span class="baw-chip">${esc(source.evidence_level)}</span>` : ''}
             ${source.url ? `<a href="${esc(safeHref(source.url))}" target="_blank" rel="noopener">${esc(source.url)}</a>` : ''}
-            ${source.evidence_quote ? `<p>${esc(source.evidence_quote)}</p>` : ''}
-            ${source.evidence_level ? `<small>Уровень evidence: ${esc(source.evidence_level)}</small>` : ''}
+            ${source.evidence_quote ? `<details class="baw-source-detail"><summary>Показать подтверждение</summary><p>${esc(source.evidence_quote)}</p>${source.accessed_at ? `<small>Проверено: ${esc(source.accessed_at)}</small>` : ''}${source.source_type ? `<small> · Тип: ${esc(source.source_type)}</small>` : ''}</details>` : ''}
           </article>`).join('')}</div>` : ''}
-        ${assumptions.length ? `<div class="baw-assumptions"><h4>Ограничения и предположения</h4><ul>${assumptions.map(item => `<li>${esc(item)}</li>`).join('')}</ul></div>` : ''}
+        ${assumptions.length ? `<div class="baw-assumptions"><h4>Что требует проверки</h4><ul>${assumptions.map(item => `<li>${esc(item)}</li>`).join('')}</ul></div>` : ''}
       </details>
     </section>`;
   }
@@ -143,17 +166,17 @@
     const readiness = result.readiness || {};
     if (!Object.keys(readiness).length) return '';
     const blockers = asArray(readiness.release_blockers);
+    const providerEntries = Object.entries(readiness.provider_states || {});
     return `<section class="baw-section">
       <details class="baw-details">
         <summary>Качество и достоверность анализа</summary>
         <div class="baw-quality">
-          ${readiness.profile_completeness != null ? `<p><strong>Полнота профиля:</strong> ${esc(Math.round(Number(readiness.profile_completeness) * 100))}%</p>` : ''}
           ${readiness.evidence_quality != null ? `<p><strong>Качество evidence:</strong> ${esc(Math.round(Number(readiness.evidence_quality) * 100))}%</p>` : ''}
-          ${readiness.identity_state ? `<p><strong>Identity:</strong> ${esc(readiness.identity_state)}</p>` : ''}
+          ${readiness.profile_completeness != null ? `<p><strong>Полнота профиля:</strong> ${esc(Math.round(Number(readiness.profile_completeness) * 100))}%</p>` : ''}
+          ${readiness.identity_state ? `<p><strong>Идентификация:</strong> ${esc(readiness.identity_state)}</p>` : ''}
           ${readiness.sufficiency_level ? `<p><strong>Достаточность:</strong> ${esc(readiness.sufficiency_level)}</p>` : ''}
-          ${readiness.analysis_state ? `<p><strong>Состояние анализа:</strong> ${esc(readiness.analysis_state)}</p>` : ''}
-          ${blockers.length ? `<p><strong>Блокеры выпуска:</strong> ${esc(blockers.join(', '))}</p>` : ''}
         </div>
+        ${(readiness.analysis_state || blockers.length || providerEntries.length) ? `<details class="baw-details baw-technical"><summary>Технические ограничения</summary>${readiness.analysis_state ? `<p><strong>Состояние анализа:</strong> ${esc(readiness.analysis_state)}</p>` : ''}${blockers.length ? `<p><strong>Блокеры выпуска:</strong> ${esc(blockers.join(', '))}</p>` : ''}${providerEntries.length ? `<p><strong>Провайдеры:</strong> ${esc(providerEntries.map(([key, value]) => `${key}=${value}`).join(', '))}</p>` : ''}</details>` : ''}
       </details>
     </section>`;
   }
@@ -161,17 +184,7 @@
   function renderResult(result) {
     if (!result) return '';
     return `<div class="baw-result">
-      <section class="baw-hero">
-        <p class="baw-kicker">Результат исследования</p>
-        <div class="baw-hero__row">
-          <div>
-            <h2>${esc(result.company_name || 'Компания')}</h2>
-            ${result.url ? `<a href="${esc(safeHref(result.url))}" target="_blank" rel="noopener">${esc(result.url)}</a>` : ''}
-          </div>
-        </div>
-        ${result.business_summary ? `<p class="baw-summary">${esc(result.business_summary)}</p>` : ''}
-      </section>
-      ${renderOpportunity(result)}
+      ${renderDecisionCard(result)}
       ${renderAgents(result)}
       ${renderZones(result)}
       ${renderAction(result)}
