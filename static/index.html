@@ -139,8 +139,8 @@
             <small>Порог для более глубокой и ресурсной обработки кандидата.</small>
           </label>
           <label>Максимум кандидатов в пуле
-            <input id="hunterMaxCandidates" type="number" min="10" max="500" value="100" step="10">
-            <small>Сколько уникальных кандидатов сохранять после дедупликации.</small>
+            <input id="hunterMaxCandidates" type="number" min="10" max="100" value="100" step="10">
+            <small>До 100 кандидатов в текущем ответе; большие рынки перейдут на серверную пагинацию следующим шагом.</small>
           </label>
           <label>Показывать за раз
             <select id="hunterPageSize">
@@ -149,7 +149,7 @@
               <option value="50">50</option>
               <option value="100">100</option>
             </select>
-            <small>Размер первой страницы; не ограничивает общий поиск.</small>
+            <small>Размер первой страницы; не ограничивает сбор источников.</small>
           </label>
         </div>
       </details>
