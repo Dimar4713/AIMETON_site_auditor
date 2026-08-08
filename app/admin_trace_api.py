@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 
@@ -13,6 +14,16 @@ from app.auth_api import require_admin
 
 
 router = APIRouter(prefix="/api/admin/missions", tags=["admin-trace"])
+
+
+class RecentTraceAttemptProjection(BaseModel):
+    mission_id: str
+    attempt_id: str
+    event_count: int = Field(ge=1)
+    started_at: str
+    updated_at: str
+    terminal_state: str | None = None
+    components: list[str] = Field(default_factory=list)
 
 
 class TraceAttemptProjection(BaseModel):
@@ -80,6 +91,52 @@ def _event(row: sqlite3.Row) -> TraceEventProjection:
         runtime_version=row["runtime_version"],
         created_at=row["created_at"],
     )
+
+
+@router.get("/trace/recent-attempts", response_model=list[RecentTraceAttemptProjection])
+def recent_trace_attempts(
+    hours: int = Query(default=168, ge=1, le=24 * 31),
+    limit: int = Query(default=100, ge=1, le=500),
+    _admin: User = Depends(require_admin),
+) -> list[RecentTraceAttemptProjection]:
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with _connect() as db:
+        rows = db.execute(
+            """
+            SELECT mission_id, attempt_id, COUNT(*) AS event_count,
+                   MIN(created_at) AS started_at, MAX(created_at) AS updated_at,
+                   GROUP_CONCAT(DISTINCT component) AS components
+            FROM mission_trace_events
+            WHERE created_at >= ?
+            GROUP BY mission_id, attempt_id
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (since, limit),
+        ).fetchall()
+        result: list[RecentTraceAttemptProjection] = []
+        for row in rows:
+            terminal = db.execute(
+                """
+                SELECT state FROM mission_trace_events
+                WHERE mission_id = ? AND attempt_id = ?
+                  AND state IN ('succeeded','failed','cancelled','blocked','degraded')
+                ORDER BY sequence DESC LIMIT 1
+                """,
+                (row["mission_id"], row["attempt_id"]),
+            ).fetchone()
+            result.append(
+                RecentTraceAttemptProjection(
+                    mission_id=row["mission_id"],
+                    attempt_id=row["attempt_id"],
+                    event_count=row["event_count"],
+                    started_at=row["started_at"],
+                    updated_at=row["updated_at"],
+                    terminal_state=terminal["state"] if terminal else None,
+                    components=sorted(filter(None, str(row["components"] or "").split(","))),
+                )
+            )
+    return result
 
 
 @router.get("/{mission_id}/trace/attempts", response_model=list[TraceAttemptProjection])
