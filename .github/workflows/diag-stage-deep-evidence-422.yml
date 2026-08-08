@@ -20,18 +20,19 @@ jobs:
       YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
       TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
     steps:
-      - name: Verify all providers with debug-unbounded process overrides
+      - name: Isolate Yandex and Tavily behavior, then run aggregate search
         shell: bash
         run: |
           set -euo pipefail
           test -n "$YANDEX_SEARCH_API_KEY"
           test -n "$YANDEX_CLOUD_FOLDER_ID"
           test -n "$TAVILY_TOKEN"
-          docker ps --format '{{.Names}}|{{.Status}}' | grep '^aimeton-auditor|'
           docker exec -i \
             -e YANDEX_SEARCH_API_KEY="$YANDEX_SEARCH_API_KEY" \
             -e YANDEX_CLOUD_FOLDER_ID="$YANDEX_CLOUD_FOLDER_ID" \
+            -e YANDEX_SEARCH_COST_RUB='0.01' \
             -e TAVILY_TOKEN="$TAVILY_TOKEN" \
+            -e TAVILY_SEARCH_COST_USD='0.008' \
             -e SEARCH_PROVIDER_ORDER='yandex,tavily,searxng' \
             -e SEARCH_ALLOW_PAID_FALLBACK='true' \
             -e SEARCH_MISSION_BUDGET_RUB='999999' \
@@ -41,47 +42,70 @@ jobs:
             aimeton-auditor python - <<'PY'
           import asyncio
           from collections import Counter
+          from decimal import Decimal
+          import httpx
           from app.mission_bounded_runtime import _collect_deep_site_evidence
           from app.external_sources import collect_external_sources
           from app.search_gateway import get_search_gateway, search_policy_from_env
+          from app.search_gateway.models import SearchRequest
+          from app.search_gateway.providers import TavilyProvider, YandexProvider, ProviderError
+          import os
+
+          def describe_error(label, exc):
+              cause = exc.__cause__
+              status = None
+              if isinstance(cause, httpx.HTTPStatusError) and cause.response is not None:
+                  status = cause.response.status_code
+              print(f'DIRECT {label} error={type(exc).__name__} message={str(exc)} cause={type(cause).__name__ if cause else None} http_status={status}')
+
+          async def direct_provider_checks():
+              request = SearchRequest(
+                  query='site:stomadv.ru "Стоматология для вас"',
+                  limit=10,
+                  mission_id='diag-direct-provider',
+                  correlation_id='diag-direct-provider',
+              )
+              yandex = YandexProvider(
+                  os.getenv('YANDEX_SEARCH_API_KEY'),
+                  os.getenv('YANDEX_CLOUD_FOLDER_ID'),
+                  cost_amount=Decimal('0.01'),
+              )
+              tavily = TavilyProvider(
+                  os.getenv('TAVILY_TOKEN'),
+                  cost_amount=Decimal('0.008'),
+              )
+              for label, provider in [('yandex', yandex), ('tavily', tavily)]:
+                  try:
+                      results = await provider.search(request, timeout_seconds=30)
+                      print(f'DIRECT {label} success results={len(results)}')
+                      for item in results[:5]:
+                          print(f'DIRECT_RESULT provider={label} url={item.url}')
+                  except ProviderError as exc:
+                      describe_error(label, exc)
 
           async def main():
+              await direct_provider_checks()
               seed, page_count, evidence = await _collect_deep_site_evidence(
                   'https://stomadv.ru/',
-                  owned_mission_id='diag-stage-all-providers',
+                  owned_mission_id='diag-stage-all-providers-v2',
               )
-              print(f'final_url={seed["final_url"]}')
               print(f'page_count={page_count}')
               print(f'evidence_chars={len(evidence)}')
-              for line in evidence.splitlines():
-                  if line.startswith('SOURCE: '):
-                      print(line)
-
               policy = search_policy_from_env()
               for health in get_search_gateway().health(policy):
                   print(f'HEALTH provider={health.provider} state={health.state} ready={health.ready} configured={health.configured} quota_remaining={health.quota_remaining}')
-
               company_hint = seed['title'].split('—')[0].split('|')[0].strip()
-              sources, notes, diagnostics = await collect_external_sources(
-                  company_hint,
-                  seed['final_url'],
-                  max_sources=100,
-              )
-              print(f'company_hint={company_hint}')
+              sources, notes, diagnostics = await collect_external_sources(company_hint, seed['final_url'], max_sources=100)
               print(f'external_sources={len(sources)}')
               print(f'diagnostics_state={diagnostics.state}')
-              print(f'fallback_used={diagnostics.fallback_used}')
-              print(f'attempts={len(diagnostics.attempts)}')
               print(f'total_cost={dict(diagnostics.total_cost_by_currency)}')
               provider_states = Counter((a.provider, str(a.state), str(a.reason or '')) for a in diagnostics.attempts)
               for key, count in sorted(provider_states.items()):
                   print(f'ATTEMPT provider={key[0]} state={key[1]} reason={key[2]} count={count}')
-              classes = Counter(str(s.source_class) for s in sources)
-              queries = Counter(str(s.query_kind) for s in sources)
-              print(f'source_classes={dict(classes)}')
-              print(f'query_kinds={dict(queries)}')
-              for source in sources[:60]:
-                  print(f'EXT {source.id} class={source.source_class} query={source.query_kind} url={source.url}')
+              relevant = [s for s in sources if 'stomadv.ru' in str(s.url) or 'krasnoyarsk' in str(s.url).lower()]
+              print(f'relevant_hint_count={len(relevant)}')
+              for source in relevant[:30]:
+                  print(f'RELEVANT class={source.source_class} query={source.query_kind} url={source.url}')
               for note in notes:
                   print(f'NOTE {note}')
 
