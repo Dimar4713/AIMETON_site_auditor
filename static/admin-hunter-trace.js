@@ -12,12 +12,10 @@
     </div>
     <p class="message">Последние 7 суток. Видны безопасные этапы цепочки данных, query text, provider-состояния и счётчики. Secrets и raw provider payload не выводятся.</p>
     <div id="hunter-trace-recent" class="mission-list" aria-live="polite"></div>
-    <div id="hunter-trace-timeline" class="mission-list" aria-live="polite"></div>
   `;
   grid.append(panel);
 
   const recentBox = panel.querySelector('#hunter-trace-recent');
-  const timelineBox = panel.querySelector('#hunter-trace-timeline');
 
   function card(title, lines = []) {
     const node = document.createElement('article');
@@ -57,8 +55,34 @@
     return lines;
   }
 
-  async function showTimeline(missionId, attemptId) {
-    timelineBox.textContent = 'Загрузка timeline…';
+  function closeOtherTimelines(activeHost) {
+    recentBox.querySelectorAll('.hunter-trace-inline[data-open="true"]').forEach(host => {
+      if (host === activeHost) return;
+      host.replaceChildren();
+      host.hidden = true;
+      host.dataset.open = 'false';
+      const button = host.parentElement?.querySelector('.hunter-trace-toggle');
+      if (button) button.textContent = 'Открыть timeline';
+    });
+  }
+
+  async function showTimeline(missionId, attemptId, host, button) {
+    if (host.dataset.open === 'true') {
+      host.replaceChildren();
+      host.hidden = true;
+      host.dataset.open = 'false';
+      button.textContent = 'Открыть timeline';
+      return;
+    }
+
+    closeOtherTimelines(host);
+    host.hidden = false;
+    host.dataset.open = 'loading';
+    host.textContent = 'Загрузка timeline…';
+    button.disabled = true;
+    button.textContent = 'Загрузка…';
+    host.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+
     const base = `/api/admin/missions/${encodeURIComponent(missionId)}/trace/attempts/${encodeURIComponent(attemptId)}`;
     try {
       const events = await getJson(base);
@@ -75,19 +99,28 @@
         lines.push(...metadataLines(event.metadata || {}));
         return card(event.summary || event.operation, lines);
       });
+      const heading = document.createElement('h3');
+      heading.textContent = `Timeline · ${missionId}`;
       const download = document.createElement('a');
       download.className = 'secondary button-link';
       download.href = `${base}/bundle.jsonl`;
       download.textContent = 'Скачать JSONL трассу';
-      timelineBox.replaceChildren(download, ...nodes);
+      host.replaceChildren(heading, download, ...nodes);
+      host.dataset.open = 'true';
+      button.textContent = 'Закрыть timeline';
+      host.scrollIntoView({behavior: 'smooth', block: 'start'});
     } catch (error) {
-      timelineBox.textContent = `Timeline недоступен: ${error.message}`;
+      host.textContent = `Timeline недоступен: ${error.message}`;
+      host.dataset.open = 'error';
+      button.textContent = 'Повторить открытие';
+      host.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    } finally {
+      button.disabled = false;
     }
   }
 
   async function loadRecent() {
     recentBox.textContent = 'Загрузка поисковых трасс…';
-    timelineBox.replaceChildren();
     try {
       const attempts = await getJson('/api/admin/missions/trace/recent-attempts?hours=168&limit=100');
       if (!attempts.length) {
@@ -105,10 +138,16 @@
         ]);
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = 'secondary';
+        button.className = 'secondary hunter-trace-toggle';
         button.textContent = 'Открыть timeline';
-        button.addEventListener('click', () => showTimeline(item.mission_id, item.attempt_id));
-        node.append(button);
+
+        const inlineTimeline = document.createElement('div');
+        inlineTimeline.className = 'mission-list hunter-trace-inline';
+        inlineTimeline.hidden = true;
+        inlineTimeline.dataset.open = 'false';
+
+        button.addEventListener('click', () => showTimeline(item.mission_id, item.attempt_id, inlineTimeline, button));
+        node.append(button, inlineTimeline);
         return node;
       }));
     } catch (error) {
