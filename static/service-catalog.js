@@ -159,12 +159,10 @@
     top.append(heading, badge);
     item.append(top);
 
-    if (summary) {
-      const body = document.createElement('div');
-      body.className = 'service-summary__description';
-      body.textContent = summary;
-      item.append(body);
-    }
+    const body = document.createElement('div');
+    body.className = 'service-summary__description';
+    body.textContent = summary || 'Недостаточно данных: найдено только название компании.';
+    item.append(body);
 
     if (url) {
       const link = document.createElement('a');
