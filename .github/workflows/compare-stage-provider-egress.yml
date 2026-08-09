@@ -1,0 +1,53 @@
+name: Compare Stage Provider Egress
+
+on:
+  push:
+    branches:
+      - diag/stage-search-egress
+    paths:
+      - .github/workflows/compare-stage-provider-egress.yml
+
+permissions:
+  contents: read
+
+jobs:
+  yandex-stage-identical-collector:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: YANDEX_SEARCH
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact successful collector
+        uses: actions/checkout@v4
+        with:
+          ref: bench/krasnoyarsk-dentistry-search-strategies
+      - name: Run identical Yandex collector from Stage
+        shell: bash
+        env:
+          YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
+          YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
+          SNAPSHOT_PROVIDER: yandex
+          SNAPSHOT_LIMIT: '20'
+          SNAPSHOT_OUT: /tmp/stage-yandex-identical.json
+        run: |
+          set -Eeuo pipefail
+          python scripts/collect_search_snapshot.py
+
+  tavily-stage-identical-collector:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact successful collector
+        uses: actions/checkout@v4
+        with:
+          ref: bench/krasnoyarsk-dentistry-search-strategies
+      - name: Run identical Tavily collector from Stage
+        shell: bash
+        env:
+          TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
+          SNAPSHOT_PROVIDER: tavily
+          SNAPSHOT_LIMIT: '20'
+          SNAPSHOT_OUT: /tmp/stage-tavily-identical.json
+        run: |
+          set -Eeuo pipefail
+          python scripts/collect_search_snapshot.py
