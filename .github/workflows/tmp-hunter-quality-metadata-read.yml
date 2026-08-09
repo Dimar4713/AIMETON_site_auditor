@@ -1,0 +1,121 @@
+name: Temporary Hunter Quality Metadata Read
+
+on:
+  push:
+    branches:
+      - chore/hunter-real-e2e-router
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: 10ad34b8fc2b9d1957f5b467999e738946fb2d6a
+      MISSION_ID: hunt-39b88c7b-0a1c-4bee-a7f4-af9791560c60
+      ATTEMPT_ID: corr-4b3fbbee-b990-4627-bbc6-373e0582f862
+      REPORT: /tmp/hunter-quality-metadata-${{ github.run_id }}.md
+
+    steps:
+      - name: Read corrected forensic quality metrics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$status" == healthy ]]
+          result="$(docker exec -e MISSION_ID="$MISSION_ID" -e ATTEMPT_ID="$ATTEMPT_ID" -i "$CONTAINER" python - <<'PY'
+          import json, os, sqlite3
+          from collections import Counter
+          from urllib.parse import urlsplit
+
+          db_path=os.getenv('AIMETON_RUNTIME_DB','data/runtime-core.sqlite3')
+          db=sqlite3.connect(db_path,timeout=30); db.row_factory=sqlite3.Row
+          rows=db.execute('''SELECT sequence,operation,reason_code,counters_json,metadata_json FROM mission_trace_events WHERE mission_id=? AND attempt_id=? AND component='hunter' ORDER BY sequence''',(os.environ['MISSION_ID'],os.environ['ATTEMPT_ID'])).fetchall(); db.close()
+          assert rows
+          events=[]
+          for r in rows:
+              events.append({'sequence':r['sequence'],'operation':r['operation'],'reason':r['reason_code'],'counters':json.loads(r['counters_json'] or '{}'),'metadata':json.loads(r['metadata_json'] or '{}')})
+
+          pre=[e for e in events if e['operation']=='candidate_pre_scored']
+          ret=[e for e in events if e['operation']=='candidate_returned']
+          deep=[e for e in events if e['operation']=='candidate_deep_audit_completed']
+
+          def truth(v):
+              if isinstance(v,bool): return v
+              if isinstance(v,(int,float)): return v>0
+              return str(v or '').strip().lower() in {'1','true','yes','matched','positive'}
+
+          pre_scores=[int(e['metadata'].get('pre_score',e['counters'].get('pre_score',0)) or 0) for e in pre]
+          factors={k:sum(1 for e in pre if truth(e['metadata'].get(k))) for k in ['factor_industry_match','factor_region_match','factor_focus_match','factor_local_domain','factor_commercial_choice','factor_commercial_complexity']}
+          both=sum(1 for e in pre if truth(e['metadata'].get('factor_industry_match')) and truth(e['metadata'].get('factor_region_match')))
+
+          directory_hosts={
+              'dentistfind.ru','www.32top.ru','32top.ru','zoon.ru','krsk.infodoctor.ru','infodoctor.ru','www.kp.ru','kp.ru',
+              'prodoctorov.ru','www.prodoctorov.ru','krsk.docdoc.ru','docdoc.ru','krasnoyarsk.jsprav.ru','jsprav.ru','zubbo.ru',
+              'www.kleos.ru','kleos.ru','stomatologiya-info.ru','krasnoyarsk.yp.ru','yp.ru'
+          }
+          directory_title_tokens=('лучшие стоматологии','топ-','рейтинг','рядом со мной','адреса, отзывы','клиник, цены','каталог','бьюти-гид')
+          blocked_tokens=('ограничение доступа','проверка браузера','проверка пользователя')
+
+          def classify(title,url):
+              host=(urlsplit(url or '').hostname or '').lower()
+              t=(title or '').lower()
+              if any(tok in t for tok in blocked_tokens): return 'blocked_or_challenge'
+              if host in directory_hosts or any(tok in t for tok in directory_title_tokens): return 'directory_or_article'
+              return 'direct_or_institution'
+
+          compact=[]; classes=Counter(); quals=Counter(); deep_flags=Counter(); score_bins=Counter()
+          for e in ret:
+              m=e['metadata']; c=e['counters']; title=m.get('candidate_title'); url=m.get('candidate_url'); cls=classify(title,url); classes[cls]+=1
+              q=str(m.get('qualification') or 'unknown'); quals[q]+=1
+              deep_flag=bool(m.get('deep_analysis_performed')); deep_flags[str(deep_flag).lower()]+=1
+              score=int(c.get('final_score',0) or 0); score_bins[f'{(score//10)*10:02d}-{(score//10)*10+9:02d}']+=1
+              compact.append({'rank':c.get('output_rank'),'final_score':score,'classification':cls,'qualification':q,'deep':deep_flag,'title':title,'url':url})
+
+          deep_qual=Counter(str(e['metadata'].get('qualification') or 'unknown') for e in deep)
+          safe={
+              'pre_score':{'count':len(pre_scores),'min':min(pre_scores) if pre_scores else None,'max':max(pre_scores) if pre_scores else None,'avg':round(sum(pre_scores)/len(pre_scores),2) if pre_scores else None,'factor_positive_counts':factors,'industry_and_region_positive':both},
+              'returned':{'count':len(ret),'classification_counts':dict(classes),'qualification_counts':dict(quals),'deep_analysis_flags':dict(deep_flags),'final_score_bins':dict(sorted(score_bins.items()))},
+              'deep_audit':{'completed':len(deep),'qualification_counts':dict(deep_qual)},
+              'returned_items':compact,
+          }
+          print(json.dumps(safe,ensure_ascii=False,sort_keys=True))
+          PY
+          )"
+          {
+            echo '## Hunter E2E corrected forensic quality metrics'
+            echo
+            echo "- exact deployed SHA: \`$deployed\`"
+            echo "- mission: \`$MISSION_ID\`"
+            echo '- provider calls: `0`'
+            echo
+            echo '```json'
+            echo "$result"
+            echo '```'
+          } | tee "$REPORT" "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload corrected quality evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: hunter-quality-metadata-${{ github.run_id }}
+          path: ${{ env.REPORT }}
+          retention-days: 30
+
+      - name: Publish corrected quality evidence to P1-501
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ env.REPORT }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs=require('fs'); const body=fs.readFileSync(process.env.REPORT_PATH,'utf8');
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:501,body:body.slice(0,60000)});
