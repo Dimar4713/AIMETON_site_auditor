@@ -10,7 +10,7 @@
       <h2 id="hunter-trace-title">Детальные поисковые трассы</h2>
       <button id="refresh-hunter-traces" class="secondary" type="button">Обновить</button>
     </div>
-    <p class="message">Последние 7 суток. Видны безопасные этапы цепочки данных, query text, provider-состояния и счётчики. Secrets и raw provider payload не выводятся.</p>
+    <p class="message">Последние 7 суток. Видны безопасные этапы цепочки данных, query text, provider-состояния, счётчики и нормализованные результаты поиска. Secrets и raw provider payload не выводятся.</p>
     <div id="hunter-trace-recent" class="mission-list" aria-live="polite"></div>
   `;
   grid.append(panel);
@@ -52,6 +52,11 @@
       lines.push(`Варианты: ${metadata.query_variants.join(' | ')}`);
     }
     if (metadata?.query_intelligence) lines.push(`Query Intelligence: ${metadata.query_intelligence}`);
+    if (metadata?.result_rank != null) lines.push(`Результат #${metadata.result_rank}`);
+    if (metadata?.result_url) lines.push(`URL: ${metadata.result_url}`);
+    if (metadata?.result_title) lines.push(`Title: ${metadata.result_title}`);
+    if (metadata?.result_snippet) lines.push(`Snippet: ${metadata.result_snippet}`);
+    if (metadata?.published_at) lines.push(`Опубликовано: ${metadata.published_at}`);
     return lines;
   }
 

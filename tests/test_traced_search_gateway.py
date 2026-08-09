@@ -20,9 +20,9 @@ async def test_gateway_persists_bounded_query_and_provider_stages_without_secret
             json={
                 "results": [
                     {
-                        "url": "https://example.ru/company",
-                        "title": "Example",
-                        "content": "Описание компании",
+                        "url": "https://example.ru/company?utm_source=trace-test#section",
+                        "title": "Example dental clinic",
+                        "content": "Описание компании и стоматологических услуг",
                     }
                 ]
             },
@@ -61,17 +61,27 @@ async def test_gateway_persists_bounded_query_and_provider_stages_without_secret
         "request_started",
         "response_received",
         "normalized",
+        "result_item",
     ]
     assert events[0].provider is None
     assert events[0].metadata["query_text"] == "диагностический пользовательский запрос"
     assert events[0].counters == {"requested_limit": 5}
     assert all(event.provider == "searxng" for event in events[1:])
-    assert events[-1].state.value == "succeeded"
-    assert events[-1].reason_code == "search_items_normalized"
-    assert events[-1].counters == {
+    assert events[4].state.value == "succeeded"
+    assert events[4].reason_code == "search_items_normalized"
+    assert events[4].counters == {
         "results_received": 1,
         "results_normalized": 1,
     }
+
+    result_event = events[5]
+    assert result_event.reason_code == "normalized_search_result"
+    assert result_event.metadata["result_rank"] == 1
+    assert result_event.metadata["result_url"] == "https://example.ru/company"
+    assert result_event.metadata["result_title"] == "Example dental clinic"
+    assert result_event.metadata["result_snippet"] == "Описание компании и стоматологических услуг"
+    assert "utm_source" not in result_event.metadata["result_url"]
+    assert "#section" not in result_event.metadata["result_url"]
 
     projected = json.dumps(
         [
@@ -85,6 +95,9 @@ async def test_gateway_persists_bounded_query_and_provider_stages_without_secret
         ensure_ascii=False,
     ).lower()
     assert "диагностический пользовательский запрос" in projected
+    assert "https://example.ru/company" in projected
+    assert "example dental clinic" in projected
+    assert "описание компании и стоматологических услуг" in projected
     for forbidden in ("authorization", "api_key", "password", "cookie", "raw_payload"):
         assert forbidden not in projected
 

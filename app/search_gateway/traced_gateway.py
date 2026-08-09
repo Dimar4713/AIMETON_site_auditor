@@ -3,13 +3,25 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from app.search_gateway.gateway import SearchGateway, request_fingerprint
-from app.search_gateway.models import SearchPolicy, SearchRequest, SearchResponse
+from app.search_gateway.models import SearchItem, SearchPolicy, SearchRequest, SearchResponse
 from app.search_gateway.trace_bridge import persist_provider_waterfall
 from app.trace_context import current_trace_identity
 from app.trace_ledger import TraceEventCreate, TraceState
 from app.trace_write_metrics import InstrumentedSQLiteTraceLedger
+
+
+_TRACE_TITLE_LIMIT = 500
+_TRACE_SNIPPET_LIMIT = 1200
+_TRACE_URL_LIMIT = 1500
+
+
+def _diagnostic_url(item: SearchItem) -> str:
+    """Return a public result URL without query/fragment tracking material."""
+    parts = urlsplit(str(item.url))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))[:_TRACE_URL_LIMIT]
 
 
 class TracedSearchGateway(SearchGateway):
@@ -37,6 +49,7 @@ class TracedSearchGateway(SearchGateway):
         bound = current_trace_identity()
         mission_id = bound.mission_id if bound else request.mission_id
         attempt_id = bound.attempt_id if bound else request.correlation_id
+        runtime_version = os.getenv("AIMETON_RUNTIME_VERSION") or None
 
         try:
             self._trace_ledger.append(
@@ -55,7 +68,7 @@ class TracedSearchGateway(SearchGateway):
                         "language": request.language[:32],
                     },
                     event_key=f"{mission_id}:{attempt_id}:query:{query_index}:planned",
-                    runtime_version=os.getenv("AIMETON_RUNTIME_VERSION") or None,
+                    runtime_version=runtime_version,
                 )
             )
         except Exception:
@@ -69,9 +82,42 @@ class TracedSearchGateway(SearchGateway):
                 mission_id=mission_id,
                 attempt_id=attempt_id,
                 query_index=query_index,
-                runtime_version=os.getenv("AIMETON_RUNTIME_VERSION") or None,
+                runtime_version=runtime_version,
             )
         except Exception:
             # Observability is fail-open by design: never suppress search output.
             pass
+
+        # Persist normalized public result projections as individual bounded trace
+        # events. This deliberately stores neither raw provider payloads nor
+        # transport/request headers. One event per item avoids the 4 KiB metadata
+        # envelope truncating an entire result set.
+        for rank, item in enumerate(response.results, start=1):
+            try:
+                self._trace_ledger.append(
+                    TraceEventCreate(
+                        mission_id=mission_id,
+                        attempt_id=attempt_id,
+                        component="search_gateway",
+                        operation="result_item",
+                        state=TraceState.SUCCEEDED,
+                        reason_code="normalized_search_result",
+                        summary=f"Normalized search result #{rank} retained for admin diagnostics",
+                        provider=item.provider,
+                        counters={"result_rank": rank},
+                        metadata={
+                            "query_index": query_index,
+                            "result_rank": rank,
+                            "result_url": _diagnostic_url(item),
+                            "result_title": item.title[:_TRACE_TITLE_LIMIT],
+                            "result_snippet": item.snippet[:_TRACE_SNIPPET_LIMIT],
+                            "published_at": item.published_at,
+                        },
+                        event_key=f"{mission_id}:{attempt_id}:query:{query_index}:result:{rank}",
+                        runtime_version=runtime_version,
+                    )
+                )
+            except Exception:
+                # Diagnostic persistence is fail-open per item as well.
+                pass
         return response
