@@ -15,10 +15,15 @@ def test_admin_can_list_recent_trace_attempts_without_known_ids() -> None:
     assert "GROUP BY mission_id, attempt_id" in ADMIN_API
 
 
-def test_search_trace_records_bounded_query_text_without_raw_payload() -> None:
+def test_search_trace_records_bounded_query_and_normalized_results_without_raw_payload() -> None:
     assert 'operation="query_planned"' in TRACED_GATEWAY
     assert '"query_text": " ".join(request.query.split())[:500]' in TRACED_GATEWAY
     assert '"requested_limit": request.limit' in TRACED_GATEWAY
+    assert 'operation="result_item"' in TRACED_GATEWAY
+    assert '"result_url": _diagnostic_url(item)' in TRACED_GATEWAY
+    assert '"result_title": item.title[:_TRACE_TITLE_LIMIT]' in TRACED_GATEWAY
+    assert '"result_snippet": item.snippet[:_TRACE_SNIPPET_LIMIT]' in TRACED_GATEWAY
+    assert 'urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))' in TRACED_GATEWAY
     for forbidden in ("authorization", "api_key", "cookies", "raw_payload"):
         assert forbidden not in TRACED_GATEWAY.lower()
 
@@ -31,6 +36,10 @@ def test_admin_workspace_loads_recent_trace_browser() -> None:
     assert "Скачать JSONL трассу" in ADMIN_JS
     assert "query_text" in ADMIN_JS
     assert "query_variants" in ADMIN_JS
+    assert "result_url" in ADMIN_JS
+    assert "result_title" in ADMIN_JS
+    assert "result_snippet" in ADMIN_JS
+    assert "Результат #" in ADMIN_JS
 
 
 def test_admin_trace_timeline_opens_inline_and_scrolls_to_selected_attempt() -> None:
