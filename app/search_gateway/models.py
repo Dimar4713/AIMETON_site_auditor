@@ -52,6 +52,19 @@ class FallbackReason(StrEnum):
     EMPTY_RESULTS = "empty_results"
 
 
+class SearchStrategy(StrEnum):
+    PRIMARY_ONLY = "primary_only"
+    FALLBACK_FIRST_NONEMPTY = "fallback_first_nonempty"
+    CASCADE_UNTIL_TARGET = "cascade_until_target"
+    SEQUENTIAL_UNION = "sequential_union"
+    PARALLEL_UNION = "parallel_union"
+    CONSENSUS_UNION = "consensus_union"
+    SPLIT_QUERY_ROUTING = "split_query_routing"
+    ADAPTIVE_COST_QUALITY = "adaptive_cost_quality"
+    EXHAUSTIVE_COVERAGE = "exhaustive_coverage"
+    SHADOW_COMPARE = "shadow_compare"
+
+
 class SearchItem(GatewayModel):
     url: AnyHttpUrl
     title: str = Field(default="", max_length=1000)
@@ -82,7 +95,11 @@ class SearchRequest(GatewayModel):
 class SearchPolicy(GatewayModel):
     provider_order: tuple[str, ...] = ("yandex", "searxng", "tavily")
     allowed_providers: frozenset[str] | None = None
+    strategy: SearchStrategy = SearchStrategy.FALLBACK_FIRST_NONEMPTY
+    target_results: int = Field(default=10, ge=1, le=100)
+    max_providers_per_query: int = Field(default=3, ge=1, le=16)
     allow_paid_fallback: bool = False
+    allow_paid_fanout: bool = False
     max_cost_by_currency: dict[str, Decimal] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=15.0, ge=0.1, le=120)
     retries: int = Field(default=1, ge=0, le=3)

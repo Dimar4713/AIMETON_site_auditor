@@ -21,21 +21,22 @@ from app.search_gateway.models import (
     SearchPolicy,
     SearchRequest,
     SearchResponse,
+    SearchStrategy,
 )
 from app.search_gateway.providers import ProviderError, SearchProvider
 
 
-TRACKING_QUERY_KEYS = {
-    "fbclid",
-    "gclid",
-    "yclid",
-    "_openstat",
-}
-
+TRACKING_QUERY_KEYS = {"fbclid", "gclid", "yclid", "_openstat"}
 HARD_UPSTREAM_FAILURES = {
     FallbackReason.RATE_LIMITED,
     FallbackReason.PROVIDER_BLOCKED,
     FallbackReason.CAPTCHA,
+}
+IMPLEMENTED_STRATEGIES = {
+    SearchStrategy.PRIMARY_ONLY,
+    SearchStrategy.FALLBACK_FIRST_NONEMPTY,
+    SearchStrategy.CASCADE_UNTIL_TARGET,
+    SearchStrategy.SEQUENTIAL_UNION,
 }
 
 
@@ -66,10 +67,21 @@ def request_fingerprint(request: SearchRequest) -> str:
         "limit": request.limit,
         "language": request.language.casefold(),
     }
-    digest = hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    ).hexdigest()
+    digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
+
+
+def policy_cache_suffix(policy: SearchPolicy) -> str:
+    payload = {
+        "strategy": str(policy.strategy),
+        "provider_order": list(policy.provider_order),
+        "allowed_providers": sorted(policy.allowed_providers) if policy.allowed_providers is not None else None,
+        "target_results": policy.target_results,
+        "max_providers_per_query": policy.max_providers_per_query,
+        "allow_paid_fallback": policy.allow_paid_fallback,
+        "allow_paid_fanout": policy.allow_paid_fanout,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:20]
 
 
 @dataclass
@@ -110,11 +122,7 @@ class SearchGateway:
         async with self._lock:
             self._circuits[provider] = _Circuit()
 
-    async def _record_failure(
-        self,
-        provider: str,
-        reason: FallbackReason = FallbackReason.PROVIDER_ERROR,
-    ) -> None:
+    async def _record_failure(self, provider: str, reason: FallbackReason = FallbackReason.PROVIDER_ERROR) -> None:
         async with self._lock:
             circuit = self._circuits[provider]
             circuit.failures += 1
@@ -127,9 +135,10 @@ class SearchGateway:
         provider: SearchProvider,
         policy: SearchPolicy,
         *,
-        fallback: bool,
+        secondary: bool,
+        secondary_paid_allowed: bool,
     ) -> FallbackReason | None:
-        if provider.paid and fallback and not policy.allow_paid_fallback:
+        if provider.paid and secondary and not secondary_paid_allowed:
             return FallbackReason.POLICY_BLOCKED
         if provider.paid and provider.cost_amount <= 0:
             return FallbackReason.PRICING_UNKNOWN
@@ -158,14 +167,19 @@ class SearchGateway:
                 break
         return list(unique.values())
 
-    async def search(
-        self,
-        request: SearchRequest,
-        policy: SearchPolicy | None = None,
-    ) -> SearchResponse:
+    @staticmethod
+    def _totals(attempts: list[ProviderAttempt]) -> dict[str, Decimal]:
+        totals: dict[str, Decimal] = {}
+        for attempt in attempts:
+            if attempt.state in {AttemptState.SUCCEEDED, AttemptState.EMPTY, AttemptState.FAILED}:
+                totals[attempt.cost_currency] = totals.get(attempt.cost_currency, Decimal("0")) + attempt.cost_amount
+        return totals
+
+    async def search(self, request: SearchRequest, policy: SearchPolicy | None = None) -> SearchResponse:
         policy = policy or SearchPolicy()
+        strategy = policy.strategy if policy.strategy in IMPLEMENTED_STRATEGIES else SearchStrategy.FALLBACK_FIRST_NONEMPTY
         fingerprint = request_fingerprint(request)
-        cache_key = fingerprint
+        cache_key = f"{fingerprint}:{policy_cache_suffix(policy)}"
         cached = await self._cache.get(cache_key)
         if cached is not None:
             attempt = ProviderAttempt(
@@ -176,7 +190,7 @@ class SearchGateway:
                 result_count=len(cached),
             )
             return SearchResponse(
-                results=cached[: request.limit],
+                results=cached,
                 diagnostics=SearchDiagnostics(
                     state=GatewayState.SUCCESS,
                     selected_provider="cache",
@@ -187,18 +201,20 @@ class SearchGateway:
 
         attempts: list[ProviderAttempt] = []
         executed = 0
+        accumulated: list[SearchItem] = []
+        successful_providers: list[str] = []
+        final_limit = min(100, max(request.limit, policy.target_results))
+
         for provider_name in policy.provider_order:
+            if executed >= policy.max_providers_per_query:
+                break
+            if strategy is SearchStrategy.PRIMARY_ONLY and executed >= 1:
+                break
+
             provider = self._providers.get(provider_name)
-            policy_blocked = (
-                policy.allowed_providers is not None
-                and provider_name not in policy.allowed_providers
-            )
+            policy_blocked = policy.allowed_providers is not None and provider_name not in policy.allowed_providers
             if provider is None or policy_blocked or not provider.configured:
-                reason = (
-                    FallbackReason.POLICY_BLOCKED
-                    if policy_blocked
-                    else FallbackReason.NOT_CONFIGURED
-                )
+                reason = FallbackReason.POLICY_BLOCKED if policy_blocked else FallbackReason.NOT_CONFIGURED
                 attempts.append(
                     ProviderAttempt(
                         provider=provider_name,
@@ -222,11 +238,19 @@ class SearchGateway:
                     )
                 )
                 continue
+
+            secondary = executed > 0
+            secondary_paid_allowed = (
+                policy.allow_paid_fallback
+                if strategy in {SearchStrategy.FALLBACK_FIRST_NONEMPTY, SearchStrategy.PRIMARY_ONLY}
+                else policy.allow_paid_fanout
+            )
             blocked = await self._reserve_cost(
                 request,
                 provider,
                 policy,
-                fallback=executed > 0,
+                secondary=secondary,
+                secondary_paid_allowed=secondary_paid_allowed,
             )
             if blocked:
                 attempts.append(
@@ -253,17 +277,15 @@ class SearchGateway:
                         request,
                         provider,
                         policy,
-                        fallback=executed > 1,
+                        secondary=secondary,
+                        secondary_paid_allowed=secondary_paid_allowed,
                     )
                     if retry_blocked:
                         error_reason = retry_blocked
                         break
                 try:
                     calls_made += 1
-                    results = await provider.search(
-                        request,
-                        timeout_seconds=policy.timeout_seconds,
-                    )
+                    results = await provider.search(request, timeout_seconds=policy.timeout_seconds)
                     error_reason = None
                     break
                 except ProviderError as exc:
@@ -273,6 +295,7 @@ class SearchGateway:
                 except Exception:
                     error_reason = FallbackReason.PROVIDER_ERROR
                     break
+
             latency_ms = max(0, round((time.perf_counter() - started) * 1000))
             charged = provider.cost_amount * calls_made
             if error_reason is not None:
@@ -293,11 +316,10 @@ class SearchGateway:
 
             await self._record_success(provider_name)
             results = self._dedupe(results, request.limit)
-            state = AttemptState.SUCCEEDED if results else AttemptState.EMPTY
             attempts.append(
                 ProviderAttempt(
                     provider=provider_name,
-                    state=state,
+                    state=AttemptState.SUCCEEDED if results else AttemptState.EMPTY,
                     request_fingerprint=fingerprint,
                     latency_ms=latency_ms,
                     result_count=len(results),
@@ -306,32 +328,43 @@ class SearchGateway:
                     cost_currency=provider.cost_currency,
                 )
             )
+
+            if strategy in {SearchStrategy.PRIMARY_ONLY, SearchStrategy.FALLBACK_FIRST_NONEMPTY}:
+                if results:
+                    await self._cache.set(cache_key, results, policy.cache_ttl_seconds)
+                    return SearchResponse(
+                        results=results,
+                        diagnostics=SearchDiagnostics(
+                            state=GatewayState.DEGRADED if executed > 1 else GatewayState.SUCCESS,
+                            selected_provider=provider_name,
+                            fallback_used=executed > 1,
+                            attempts=attempts,
+                            total_cost_by_currency=self._totals(attempts),
+                        ),
+                    )
+                continue
+
             if results:
-                await self._cache.set(cache_key, results, policy.cache_ttl_seconds)
-                totals: dict[str, Decimal] = {}
-                for attempt in attempts:
-                    if attempt.state in {AttemptState.SUCCEEDED, AttemptState.EMPTY, AttemptState.FAILED}:
-                        totals[attempt.cost_currency] = (
-                            totals.get(attempt.cost_currency, Decimal("0")) + attempt.cost_amount
-                        )
-                return SearchResponse(
-                    results=results,
-                    diagnostics=SearchDiagnostics(
-                        state=GatewayState.DEGRADED if executed > 1 else GatewayState.SUCCESS,
-                        selected_provider=provider_name,
-                        fallback_used=executed > 1,
-                        attempts=attempts,
-                        total_cost_by_currency=totals,
-                    ),
-                )
+                successful_providers.append(provider_name)
+                accumulated = self._dedupe([*accumulated, *results], final_limit)
+                if strategy is SearchStrategy.CASCADE_UNTIL_TARGET and len(accumulated) >= policy.target_results:
+                    break
+
+        if accumulated:
+            await self._cache.set(cache_key, accumulated, policy.cache_ttl_seconds)
+            degraded = any(attempt.state == AttemptState.FAILED for attempt in attempts)
+            return SearchResponse(
+                results=accumulated,
+                diagnostics=SearchDiagnostics(
+                    state=GatewayState.DEGRADED if degraded else GatewayState.SUCCESS,
+                    selected_provider="+".join(successful_providers) or None,
+                    fallback_used=executed > 1,
+                    attempts=attempts,
+                    total_cost_by_currency=self._totals(attempts),
+                ),
+            )
 
         state = GatewayState.DEGRADED if executed else GatewayState.UNAVAILABLE
-        totals: dict[str, Decimal] = {}
-        for attempt in attempts:
-            if attempt.cost_amount:
-                totals[attempt.cost_currency] = (
-                    totals.get(attempt.cost_currency, Decimal("0")) + attempt.cost_amount
-                )
         return SearchResponse(
             results=[],
             diagnostics=SearchDiagnostics(
@@ -339,7 +372,7 @@ class SearchGateway:
                 selected_provider=None,
                 fallback_used=executed > 1,
                 attempts=attempts,
-                total_cost_by_currency=totals,
+                total_cost_by_currency=self._totals(attempts),
             ),
         )
 
@@ -359,9 +392,7 @@ class SearchGateway:
                 state = ProviderReadiness.QUOTA_BLOCKED
             elif provider.paid and provider.cost_amount <= 0:
                 state = ProviderReadiness.PRICING_UNKNOWN
-            elif provider.paid and (
-                maximum is None or maximum < provider.cost_amount
-            ):
+            elif provider.paid and (maximum is None or maximum < provider.cost_amount):
                 state = ProviderReadiness.BUDGET_BLOCKED
             else:
                 state = ProviderReadiness.ACTIVE
