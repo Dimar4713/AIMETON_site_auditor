@@ -1,0 +1,63 @@
+name: Diagnose Stage Search Egress
+
+on:
+  push:
+    branches:
+      - diag/stage-search-egress
+    paths:
+      - .github/workflows/diagnose-stage-search-egress.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Collect redacted host and container egress diagnostics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p egress-evidence
+          out=egress-evidence/stage-search-egress.txt
+          {
+            echo "timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "runner=$(hostname)"
+            echo "--- host routes ---"
+            ip -4 route || true
+            ip -6 route || true
+            echo "--- host DNS ---"
+            getent ahostsv4 searchapi.api.cloud.yandex.net || true
+            getent ahostsv4 api.tavily.com || true
+            getent ahostsv6 searchapi.api.cloud.yandex.net || true
+            getent ahostsv6 api.tavily.com || true
+            echo "--- host public egress ---"
+            printf 'host_ipv4='; curl -4 -fsS --max-time 10 https://api.ipify.org || true; echo
+            printf 'host_ipv6='; curl -6 -fsS --max-time 10 https://api64.ipify.org || true; echo
+            echo "--- unauthenticated provider reachability (host) ---"
+            printf 'yandex_https_status='; curl -4 -sS -o /dev/null -w '%{http_code}' --max-time 15 https://searchapi.api.cloud.yandex.net/v2/web/search || true; echo
+            printf 'tavily_https_status='; curl -4 -sS -o /dev/null -w '%{http_code}' --max-time 15 https://api.tavily.com/search || true; echo
+            echo "--- container network ---"
+            docker inspect -f 'container={{.Name}} network={{range $k,$v := .NetworkSettings.Networks}}{{$k}} ip={{$v.IPAddress}} gateway={{$v.Gateway}} {{end}}' aimeton-auditor || true
+            printf 'container_ipv4='; docker exec aimeton-auditor sh -lc "curl -4 -fsS --max-time 10 https://api.ipify.org" || true; echo
+            printf 'container_ipv6='; docker exec aimeton-auditor sh -lc "curl -6 -fsS --max-time 10 https://api64.ipify.org" || true; echo
+            printf 'container_yandex_https_status='; docker exec aimeton-auditor sh -lc "curl -4 -sS -o /dev/null -w '%{http_code}' --max-time 15 https://searchapi.api.cloud.yandex.net/v2/web/search" || true; echo
+            printf 'container_tavily_https_status='; docker exec aimeton-auditor sh -lc "curl -4 -sS -o /dev/null -w '%{http_code}' --max-time 15 https://api.tavily.com/search" || true; echo
+          } | tee "$out"
+
+      - name: Upload egress evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-search-egress-${{ github.run_id }}
+          path: egress-evidence/
+          if-no-files-found: error
+          retention-days: 30
