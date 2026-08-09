@@ -1,0 +1,211 @@
+name: Accept Hunter Real E2E Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to accept
+        required: true
+        type: string
+      region:
+        description: Public Hunter region input
+        required: true
+        default: Красноярск
+        type: string
+      industry:
+        description: Public Hunter industry input
+        required: true
+        default: Стоматология
+        type: string
+      expected_providers:
+        description: Comma-separated providers expected to participate
+        required: true
+        default: searxng,yandex
+        type: string
+      minimum_returned:
+        description: Minimum returned candidates required for acceptance
+        required: true
+        default: "10"
+        type: string
+      allow_paid_calls:
+        description: Explicitly authorize provider calls that may incur configured Stage search cost
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-accept-hunter-real-e2e-stage
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 35
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      REPORT: /tmp/hunter-real-e2e-stage-${{ github.run_id }}.md
+
+    steps:
+      - name: Require explicit live-cost authorization
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${{ inputs.allow_paid_calls }}" != "true" ]]; then
+            echo "Refusing to execute the public Hunter E2E because configured Stage providers may incur cost. Re-run with allow_paid_calls=true after owner authorization." >&2
+            exit 78
+          fi
+
+      - name: Verify exact deployed SHA and healthy auditor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$expected" ]]
+          [[ "$status" == healthy ]]
+          {
+            echo '## Hunter real website E2E Stage acceptance'
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- expected/deployed SHA: \`$deployed\`"
+            echo "- stage auditor status: \`$status\`"
+            echo "- public payload: region=\`${{ inputs.region }}\`, industries=[\`${{ inputs.industry }}\`]"
+          } > "$REPORT"
+
+      - name: Execute exact public Hunter route and inspect forensic funnel
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          result="$(docker exec \
+            -e E2E_REGION='${{ inputs.region }}' \
+            -e E2E_INDUSTRY='${{ inputs.industry }}' \
+            -e E2E_EXPECTED_PROVIDERS='${{ inputs.expected_providers }}' \
+            -e E2E_MIN_RETURNED='${{ inputs.minimum_returned }}' \
+            -i "$CONTAINER" python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          import time
+          import httpx
+
+          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          db = sqlite3.connect(db_path, timeout=30)
+          try:
+              before = db.execute('SELECT COALESCE(MAX(rowid), 0) FROM mission_trace_events').fetchone()[0]
+          finally:
+              db.close()
+
+          payload = {
+              'region': os.environ['E2E_REGION'],
+              'industries': [os.environ['E2E_INDUSTRY']],
+          }
+          started = time.monotonic()
+          response = httpx.post('http://127.0.0.1:5000/api/hunt', json=payload, timeout=1800.0)
+          elapsed = round(time.monotonic() - started, 3)
+          response.raise_for_status()
+          data = response.json()
+
+          db = sqlite3.connect(db_path, timeout=30)
+          db.row_factory = sqlite3.Row
+          try:
+              row = db.execute(
+                  '''
+                  SELECT mission_id, attempt_id, counters_json
+                  FROM mission_trace_events
+                  WHERE rowid > ? AND component = 'hunter' AND operation = 'hunt_funnel_complete'
+                  ORDER BY rowid DESC
+                  LIMIT 1
+                  ''',
+                  (before,),
+              ).fetchone()
+          finally:
+              db.close()
+          assert row is not None, 'no hunt_funnel_complete event created by public /api/hunt request'
+          funnel = json.loads(row['counters_json'])
+
+          candidates = data.get('candidates') or []
+          search = data.get('search') or {}
+          attempts = search.get('attempts') or []
+          called_states = {'succeeded', 'empty', 'failed', 'cache_hit'}
+          participating = sorted({
+              str(item.get('provider'))
+              for item in attempts
+              if item.get('provider') and str(item.get('state')) in called_states
+          })
+          expected = sorted({item.strip() for item in os.environ['E2E_EXPECTED_PROVIDERS'].split(',') if item.strip()})
+          missing = sorted(set(expected) - set(participating))
+
+          raw = int(funnel.get('raw_results', 0))
+          unique = int(funnel.get('unique_candidates', 0))
+          qualified = int(funnel.get('qualified_candidates', 0))
+          returned = int(funnel.get('returned_candidates', 0))
+          minimum_returned = int(os.environ['E2E_MIN_RETURNED'])
+
+          assert raw >= unique >= qualified >= returned, funnel
+          assert returned == len(candidates), (returned, len(candidates))
+          assert int(data.get('discovered', -1)) == unique, (data.get('discovered'), unique)
+          assert returned >= minimum_returned, (returned, minimum_returned)
+          assert not missing, {'missing_expected_providers': missing, 'participating': participating}
+
+          provider_counts = {}
+          provider_costs = {}
+          for attempt in attempts:
+              provider = str(attempt.get('provider') or '')
+              state = str(attempt.get('state') or '')
+              if not provider:
+                  continue
+              key = f'{provider}:{state}'
+              provider_counts[key] = provider_counts.get(key, 0) + 1
+              currency = str(attempt.get('cost_currency') or '')
+              amount = str(attempt.get('cost_amount') or '0')
+              provider_costs.setdefault(provider, []).append({'currency': currency, 'amount': amount, 'state': state})
+
+          safe = {
+              'elapsed_seconds': elapsed,
+              'region': data.get('region'),
+              'query_count': len(data.get('queries') or []),
+              'funnel': {
+                  'raw': raw,
+                  'unique': unique,
+                  'qualified': qualified,
+                  'returned': returned,
+              },
+              'candidate_count_in_api': len(candidates),
+              'participating_providers': participating,
+              'provider_attempt_states': provider_counts,
+              'search_total_cost_by_currency': search.get('total_cost_by_currency') or {},
+              'mission_id': row['mission_id'],
+              'attempt_id': row['attempt_id'],
+          }
+          print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          PY
+          )"
+          {
+            echo
+            echo '### Exact public `/api/hunt` result'
+            echo
+            echo '```json'
+            echo "$result"
+            echo '```'
+            echo
+            echo '- verdict: ✅ real user-path Hunter E2E passed.'
+          } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hunter-real-e2e-stage-${{ github.run_id }}
+          path: ${{ env.REPORT }}
+          if-no-files-found: warn
+          retention-days: 30
