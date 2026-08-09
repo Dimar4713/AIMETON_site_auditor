@@ -19,17 +19,12 @@ _TRACE_URL_LIMIT = 1500
 
 
 def _diagnostic_url(item: SearchItem) -> str:
-    """Return a public result URL without query/fragment tracking material."""
     parts = urlsplit(str(item.url))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))[:_TRACE_URL_LIMIT]
 
 
 class TracedSearchGateway(SearchGateway):
-    """Search gateway with fail-open durable diagnostics.
-
-    Search results remain authoritative. Trace persistence is diagnostic only and
-    must never turn a successful provider response into a product failure.
-    """
+    """Search gateway with fail-open durable diagnostics."""
 
     def __init__(self, *args, trace_db_path: str | Path | None = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -44,6 +39,17 @@ class TracedSearchGateway(SearchGateway):
         request: SearchRequest,
         policy: SearchPolicy | None = None,
     ) -> SearchResponse:
+        effective_policy = policy or SearchPolicy()
+        if request.mission_id.startswith("hunt-"):
+            try:
+                from app.search_strategy_settings import get_search_strategy_settings_repository
+
+                effective_policy = get_search_strategy_settings_repository().get().settings.apply_search_policy(effective_policy)
+            except Exception:
+                # Runtime strategy settings are optional/fail-open. The provided
+                # policy remains the safe fallback if the settings record is bad.
+                pass
+
         fingerprint = request_fingerprint(request).removeprefix("sha256:")
         query_index = int(hashlib.sha256(fingerprint.encode("ascii")).hexdigest()[:8], 16)
         bound = current_trace_identity()
@@ -61,11 +67,20 @@ class TracedSearchGateway(SearchGateway):
                     state=TraceState.STARTED,
                     reason_code="query_planned",
                     summary="Bounded search query prepared for provider gateway",
-                    counters={"requested_limit": request.limit},
+                    counters={
+                        "requested_limit": request.limit,
+                        "target_results": effective_policy.target_results,
+                        "max_providers_per_query": effective_policy.max_providers_per_query,
+                    },
                     metadata={
                         "query_index": query_index,
                         "query_text": " ".join(request.query.split())[:500],
                         "language": request.language[:32],
+                        "search_strategy": str(effective_policy.strategy),
+                        "provider_order": list(effective_policy.provider_order),
+                        "allowed_providers": sorted(effective_policy.allowed_providers) if effective_policy.allowed_providers is not None else None,
+                        "allow_paid_fallback": effective_policy.allow_paid_fallback,
+                        "allow_paid_fanout": effective_policy.allow_paid_fanout,
                     },
                     event_key=f"{mission_id}:{attempt_id}:query:{query_index}:planned",
                     runtime_version=runtime_version,
@@ -74,7 +89,7 @@ class TracedSearchGateway(SearchGateway):
         except Exception:
             pass
 
-        response = await super().search(request, policy)
+        response = await super().search(request, effective_policy)
         try:
             persist_provider_waterfall(
                 self._trace_ledger,
@@ -85,13 +100,8 @@ class TracedSearchGateway(SearchGateway):
                 runtime_version=runtime_version,
             )
         except Exception:
-            # Observability is fail-open by design: never suppress search output.
             pass
 
-        # Persist normalized public result projections as individual bounded trace
-        # events. This deliberately stores neither raw provider payloads nor
-        # transport/request headers. One event per item avoids the 4 KiB metadata
-        # envelope truncating an entire result set.
         for rank, item in enumerate(response.results, start=1):
             try:
                 self._trace_ledger.append(
@@ -118,6 +128,5 @@ class TracedSearchGateway(SearchGateway):
                     )
                 )
             except Exception:
-                # Diagnostic persistence is fail-open per item as well.
                 pass
         return response
