@@ -49,6 +49,7 @@ jobs:
           set -Eeuo pipefail
           mkdir -p benchmark-output
           docker exec \
+            -w /app \
             -e BENCHMARK_OUT=/tmp/search-strategy-benchmark \
             aimeton-auditor \
             python /tmp/benchmark_search_strategies.py \
