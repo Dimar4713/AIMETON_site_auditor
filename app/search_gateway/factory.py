@@ -185,7 +185,12 @@ def get_search_gateway() -> TracedSearchGateway:
         jitter_max_env="SEARCH_JITTER_SEARXNG_MAX_SECONDS", jitter_max_default=0.8,
     )
     tavily = _scheduled(
-        TavilyProvider(os.getenv("TAVILY_TOKEN") or os.getenv("TAVILY_API_KEY"), cost_amount=_decimal_env("TAVILY_SEARCH_COST_USD")),
+        TavilyProvider(
+            os.getenv("TAVILY_TOKEN") or os.getenv("TAVILY_API_KEY"),
+            cost_amount=_decimal_env("TAVILY_SEARCH_COST_USD"),
+            proxy_url=os.getenv("TAVILY_PROXY_URL"),
+            contract_allowed=_bool_env("TAVILY_CONTRACT_ALLOWED", False),
+        ),
         concurrency_env="SEARCH_CONCURRENCY_TAVILY", concurrency_default=3,
         jitter_min_env="SEARCH_JITTER_TAVILY_MIN_SECONDS", jitter_min_default=0.0,
         jitter_max_env="SEARCH_JITTER_TAVILY_MAX_SECONDS", jitter_max_default=0.0,
