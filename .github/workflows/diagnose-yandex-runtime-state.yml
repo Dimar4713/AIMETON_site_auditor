@@ -1,0 +1,62 @@
+name: Diagnose Yandex Runtime State
+
+on:
+  push:
+    branches:
+      - diag/stage-search-egress
+    paths:
+      - .github/workflows/diagnose-yandex-runtime-state.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: YANDEX_SEARCH
+    timeout-minutes: 10
+    env:
+      YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
+      YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
+    steps:
+      - name: Compare configured credentials without exposing secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected_key_sha="$(printf '%s' "$YANDEX_SEARCH_API_KEY" | sha256sum | awk '{print $1}')"
+          container_key_sha="$(docker exec aimeton-auditor sh -lc 'printf %s "$YANDEX_SEARCH_API_KEY" | sha256sum | awk '\''{print $1}'\'')"
+          expected_folder_sha="$(printf '%s' "$YANDEX_CLOUD_FOLDER_ID" | sha256sum | awk '{print $1}')"
+          container_folder_sha="$(docker exec aimeton-auditor sh -lc 'printf %s "$YANDEX_CLOUD_FOLDER_ID" | sha256sum | awk '\''{print $1}'\'')"
+          [[ "$expected_key_sha" == "$container_key_sha" ]] && echo 'container_api_key_matches_current=true' || echo 'container_api_key_matches_current=false'
+          [[ "$expected_folder_sha" == "$container_folder_sha" ]] && echo 'container_folder_id_matches_current=true' || echo 'container_folder_id_matches_current=false'
+
+      - name: Call legacy endpoint internally and publicly
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          payload='{"query":"Стоматология Красноярск официальный сайт компания"}'
+          for endpoint in \
+            'http://127.0.0.1:5000/api/missions/search/yandex/web' \
+            'https://stage-auditor.aimeton.ru/api/missions/search/yandex/web'
+          do
+            tmp="$(mktemp)"
+            code="$(curl -sS -H 'Content-Type: application/json' --data "$payload" -o "$tmp" -w '%{http_code}' "$endpoint")"
+            python3 - "$endpoint" "$code" "$tmp" <<'PY'
+          import json, sys
+          endpoint, code, path = sys.argv[1:]
+          raw = open(path, encoding='utf-8').read()
+          state = ''
+          detail = ''
+          records = None
+          try:
+              payload = json.loads(raw)
+              state = str(payload.get('state') or '')
+              detail = str(payload.get('detail') or '')[:180]
+              if isinstance(payload.get('records'), list):
+                  records = len(payload['records'])
+          except Exception:
+              detail = 'non_json'
+          print(json.dumps({'endpoint': endpoint, 'http_status': int(code), 'state': state, 'records': records, 'detail': detail}, ensure_ascii=False))
+          PY
+            rm -f "$tmp"
+          done
