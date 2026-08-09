@@ -49,6 +49,26 @@
       <div id="temporary-access-list" class="mission-list" aria-live="polite"></div>
     </section>
 
+    <section class="panel" aria-labelledby="hunter-settings-title">
+      <div class="panel-title"><h2 id="hunter-settings-title">Настройки Hunter</h2><button id="refresh-hunter-settings" class="secondary" type="button">Обновить</button></div>
+      <p class="message">Технический профиль новых поисков. Пользовательская форма задаёт бизнес-запрос; ширина поиска, размеры пула и пороги задаются здесь.</p>
+      <form id="hunter-settings-form" class="auth-form">
+        <label>Максимум поисковых запросов<input id="hunter-setting-max-queries" type="number" min="1" max="100" required></label>
+        <label>Результатов на один запрос<input id="hunter-setting-results-per-query" type="number" min="1" max="30" required></label>
+        <label>Максимум кандидатов в пуле<input id="hunter-setting-max-candidates" type="number" min="1" max="500" required></label>
+        <label>Возвращать кандидатов в ответе<input id="hunter-setting-output-limit" type="number" min="1" max="100" required></label>
+        <label>Минимальный pre-score<input id="hunter-setting-minimum-pre-score" type="number" min="0" max="100" required></label>
+        <label>Глубокое исследование от<input id="hunter-setting-deep-audit-score" type="number" min="0" max="100" required></label>
+        <label>Параллельность обработки<input id="hunter-setting-concurrency" type="number" min="1" max="12" required></label>
+        <label>Стратегия providers<select id="hunter-setting-provider-strategy" disabled><option value="fallback_first_nonempty">Fallback: первый непустой provider</option></select></label>
+        <p class="message">Объединение выдач нескольких providers пока не реализовано и поэтому здесь не выдаётся за рабочую настройку.</p>
+        <label>Причина изменения<input id="hunter-setting-reason" minlength="1" maxlength="500" value="Настройка качества и глубины Hunter" required></label>
+        <button type="submit">Сохранить профиль Hunter</button>
+        <p id="hunter-settings-message" class="message" aria-live="polite"></p>
+        <p id="hunter-settings-updated" class="message"></p>
+      </form>
+    </section>
+
     <section class="panel" aria-labelledby="missions-title">
       <div class="panel-title"><h2 id="missions-title">Все миссии</h2><button id="refresh-missions" class="secondary">Обновить</button></div>
       <p class="message">Технические secrets, snapshots и внутренние пути не отображаются.</p>
@@ -72,6 +92,7 @@
   </main>
   <script src="/static/admin-workspace.js" defer></script>
   <script src="/static/admin-temporary-access.js" defer></script>
+  <script src="/static/admin-hunter-settings.js?v=20260809a" defer></script>
   <script src="/static/admin-hunter-trace.js?v=20260809c" defer></script>
 </body>
 </html>
