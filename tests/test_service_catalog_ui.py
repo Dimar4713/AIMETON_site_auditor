@@ -92,7 +92,12 @@ def test_hunter_never_hides_returned_candidate_count_or_groups_by_default() -> N
     script = (STATIC / "service-catalog.js").read_text(encoding="utf-8")
 
     assert "function candidateGroupCounts(candidates)" in script
-    assert "API вернуло: ${candidates.length}" in script
+    assert "const funnel = data.funnel || {};" in script
+    assert "funnel.raw_results" in script
+    assert "funnel.unique_candidates" in script
+    assert "funnel.qualified_candidates" in script
+    assert "funnel.returned_candidates" in script
+    assert "Raw: ${rawResults} → уникальные: ${uniqueCandidates} → прошли фильтр: ${qualifiedCandidates} → возвращено API: ${returnedCandidates}" in script
     assert "Компании-кандидаты: ${counts.company}" in script
     assert "источники для проверки: ${counts.supporting}" in script
     assert "наблюдение: ${counts.observation}" in script
