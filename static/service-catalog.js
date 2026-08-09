@@ -6,7 +6,12 @@
     'prodoctorov.ru', '32top.ru', 'zoon.ru', 'flamp.ru', 'otzovik.com', 'irecommend.ru',
     'rusprofile.ru', 'checko.ru', 'list-org.com', 'audit-it.ru', 'companies.rbc.ru',
     'spark-interfax.ru', 'sbis.ru', 'kp.ru', 'rbc.ru', 'tass.ru', 'ria.ru',
-    'vedomosti.ru', 'kommersant.ru', 'interfax.ru',
+    'vedomosti.ru', 'kommersant.ru', 'interfax.ru', 'dentistfind.ru', 'infodoctor.ru',
+    'docdoc.ru', 'jsprav.ru', 'zubbo.ru', 'kleos.ru', 'dent-list.ru',
+    'krasotaimedicina.ru', 'startsmile.ru', 'stomotologiya.ru', 'alldantist.ru',
+    'doctu.ru', 'zdravzdrav.ru', 'totadres.ru', 'like.doctor', 'gdevrach.com',
+    'dentistpro.ru', 'dentalclinics.care', 'napopravku.ru', 'vc.ru', 'wikipedia.org',
+    'poidata.io', 'barb.pro', '1dentist.ru', 'yp.ru', 'yandex.com',
   ]);
   const SUPPORTING_TITLE_MARKERS = [
     'рейтинг', 'лучшие', 'отзывы', 'каталог', 'список', 'обзор', 'топ ',
@@ -78,6 +83,9 @@
     const sourceText = `${candidate.source_title || ''} ${candidate.source_snippet || ''}`.toLowerCase();
     if (isSupportingHost(host) || SUPPORTING_TITLE_MARKERS.some(marker => sourceText.includes(marker))) {
       return {kind: 'supporting', label: 'Источник для проверки'};
+    }
+    if (candidate.region_confirmed === false) {
+      return {kind: 'observation', label: 'Регион не подтверждён'};
     }
     if (candidate.deep_analysis_performed === true) {
       return {kind: 'company', label: 'Компания-кандидат'};
