@@ -1,0 +1,30 @@
+{
+  "yandex": {
+    "queries": 8,
+    "raw_results": 160,
+    "cost_amount_per_call": "0.01",
+    "cost_currency": "RUB",
+    "source": "fresh-live-stage"
+  },
+  "tavily": {
+    "queries": 8,
+    "raw_results": 110,
+    "cost_amount_per_call": "0.008",
+    "cost_currency": "USD",
+    "source": "durable-live-snapshot-no-new-call"
+  },
+  "searxng": {
+    "queries": 8,
+    "raw_results": 86,
+    "cost_amount_per_call": "0",
+    "cost_currency": "USD",
+    "source": "fresh-live-stage"
+  },
+  "incremental_cost_this_run": {
+    "RUB": "0.08",
+    "USD": "0"
+  },
+  "historical_cost_of_reused_tavily_corpus": {
+    "USD": "0.064"
+  }
+}

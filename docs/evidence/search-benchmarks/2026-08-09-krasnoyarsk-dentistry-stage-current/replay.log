@@ -1,0 +1,179 @@
+REPLAY_START strategy=primary_only
+REPLAY_DONE {"calls": {"yandex": 8}, "costs": {"RUB": "0.08"}, "direct": 44, "strategy": "primary_only"}
+REPLAY_START strategy=fallback_first_nonempty
+REPLAY_DONE {"calls": {"yandex": 8}, "costs": {"RUB": "0.08"}, "direct": 44, "strategy": "fallback_first_nonempty"}
+REPLAY_START strategy=cascade_until_target
+REPLAY_DONE {"calls": {"searxng": 4, "tavily": 8, "yandex": 8}, "costs": {"RUB": "0.08", "USD": "0.064"}, "direct": 64, "strategy": "cascade_until_target"}
+REPLAY_START strategy=sequential_union
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8, "yandex": 8}, "costs": {"RUB": "0.08", "USD": "0.064"}, "direct": 64, "strategy": "sequential_union"}
+REPLAY_START strategy=parallel_union
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8, "yandex": 8}, "costs": {"RUB": "0.08", "USD": "0.064"}, "direct": 64, "strategy": "parallel_union"}
+REPLAY_START strategy=consensus_union
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8, "yandex": 8}, "costs": {"RUB": "0.08", "USD": "0.064"}, "direct": 70, "strategy": "consensus_union"}
+REPLAY_START strategy=split_query_routing
+REPLAY_DONE {"calls": {"searxng": 2, "tavily": 3, "yandex": 3}, "costs": {"RUB": "0.03", "USD": "0.024"}, "direct": 40, "strategy": "split_query_routing"}
+REPLAY_START strategy=adaptive_cost_quality
+REPLAY_DONE {"calls": {"searxng": 7, "tavily": 7, "yandex": 8}, "costs": {"RUB": "0.08", "USD": "0.056"}, "direct": 62, "strategy": "adaptive_cost_quality"}
+REPLAY_START strategy=exhaustive_coverage
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8, "yandex": 8}, "costs": {"RUB": "0.08", "USD": "0.064"}, "direct": 76, "strategy": "exhaustive_coverage"}
+REPLAY_START strategy=shadow_compare
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8, "yandex": 8}, "costs": {"RUB": "0.08", "USD": "0.064"}, "direct": 44, "strategy": "shadow_compare"}
+# Krasnoyarsk dentistry Search Gateway snapshot/replay benchmark
+
+Providers: yandex, tavily, searxng
+Reference union: 76 probable direct-company domains; regional subset: 66.
+
+| Rank | Strategy | Score | Direct | Precision | Recall | Regional recall | Corroboration | Simulated seconds | Calls | Cost RUB | Cost USD |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|
+| 1 | `exhaustive_coverage` | 77.23 | 76 | 71.0% | 100.0% | 98.5% | 23.7% | 26.20 | yandex:8/tavily:8/searxng:8 | 0.08 | 0.064 |
+| 2 | `consensus_union` | 75.39 | 70 | 70.0% | 92.1% | 89.4% | 38.6% | 15.95 | yandex:8/tavily:8/searxng:8 | 0.08 | 0.064 |
+| 3 | `adaptive_cost_quality` | 73.24 | 62 | 80.5% | 81.6% | 89.4% | 37.1% | 22.02 | yandex:8/tavily:7/searxng:7 | 0.08 | 0.056 |
+| 4 | `parallel_union` | 72.77 | 64 | 79.0% | 84.2% | 81.8% | 20.3% | 15.95 | yandex:8/tavily:8/searxng:8 | 0.08 | 0.064 |
+| 5 | `cascade_until_target` | 72.27 | 64 | 79.0% | 84.2% | 81.8% | 20.3% | 21.18 | yandex:8/tavily:8/searxng:4 | 0.08 | 0.064 |
+| 6 | `sequential_union` | 71.79 | 64 | 79.0% | 84.2% | 81.8% | 20.3% | 26.20 | yandex:8/tavily:8/searxng:8 | 0.08 | 0.064 |
+| 7 | `fallback_first_nonempty` | 62.46 | 44 | 86.3% | 57.9% | 60.6% | 0.0% | 4.56 | yandex:8/tavily:0/searxng:0 | 0.08 | 0 |
+| 8 | `primary_only` | 62.46 | 44 | 86.3% | 57.9% | 60.6% | 0.0% | 4.56 | yandex:8/tavily:0/searxng:0 | 0.08 | 0 |
+| 9 | `split_query_routing` | 61.09 | 40 | 81.6% | 52.6% | 59.1% | 30.0% | 8.99 | yandex:3/tavily:3/searxng:2 | 0.03 | 0.024 |
+| 10 | `shadow_compare` | 59.69 | 44 | 86.3% | 57.9% | 60.6% | 0.0% | 20.51 | yandex:8/tavily:8/searxng:8 | 0.08 | 0.064 |
+
+## Top probable direct-company domains
+
+### 1. `exhaustive_coverage`
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=6 — searxng,tavily,yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=6 — searxng,tavily,yandex
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=6 — searxng,tavily,yandex
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=6 — tavily,yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=6 — tavily,yandex
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске - записаться на прием — q=5 — searxng,yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=5 — tavily,yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=5 — tavily,yandex
+- `san-dent-clinic.ru` — Стоматология San-Dent в Красноярске: лечение, имплантация... — q=5 — yandex
+- `voka-stom.ru` — Стоматология ВОКА в Красноярске - стоматологическая... — q=4 — searxng,yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=4 — yandex
+- `crystal-dent.ru` — Стоматология в Красноярске | CRYSTAL-DENT — q=3 — searxng,yandex
+
+### 2. `consensus_union`
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=6 — searxng,yandex
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=6 — tavily,yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=6 — tavily,yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=5 — tavily,yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=5 — tavily,yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=5 — tavily,yandex
+- `san-dent-clinic.ru` — Стоматология San-Dent в Красноярске: лечение, имплантация... — q=5 — yandex
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — tavily,yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=4 — yandex
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов без боли — q=3 — tavily,yandex
+- `stomferos.ru` — Стоматология в Красноярске - клиника «Ферос» (Октябрьский...) — q=3 — tavily,yandex
+- `7stom.ru` — Стоматология в Красноярске: имплантация лечение... — q=3 — yandex
+
+### 3. `adaptive_cost_quality`
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=6 — searxng,tavily,yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=6 — searxng,tavily,yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=6 — searxng,tavily,yandex
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=6 — searxng,tavily,yandex
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=5 — searxng,tavily,yandex
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске - записаться на прием — q=5 — searxng,yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=5 — tavily,yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=5 — tavily,yandex
+- `san-dent-clinic.ru` — Стоматология San-Dent в Красноярске: лечение, имплантация... — q=5 — yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=4 — searxng,yandex
+- `voka-stom.ru` — Стоматология ВОКА в Красноярске - стоматологическая клиника, запись на прием онлайн — q=4 — searxng,yandex
+- `7stom.ru` — Стоматология в Красноярске: имплантация лечение и протезирование зубов в семейной стоматологической клинике — q=3 — searxng,yandex
+
+### 4. `parallel_union`
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=6 — tavily,yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=6 — tavily,yandex
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=5 — searxng,tavily,yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=5 — tavily,yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=5 — tavily,yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=5 — tavily,yandex
+- `san-dent-clinic.ru` — Стоматология San-Dent в Красноярске: лечение, имплантация... — q=5 — yandex
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — tavily,yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=4 — yandex
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов без боли — q=3 — tavily,yandex
+- `stomferos.ru` — Стоматология в Красноярске - клиника «Ферос» (Октябрьский...) — q=3 — tavily,yandex
+- `7stom.ru` — Стоматология в Красноярске: имплантация лечение... — q=3 — yandex
+
+### 5. `cascade_until_target`
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=6 — tavily,yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=6 — tavily,yandex
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=5 — searxng,tavily,yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=5 — tavily,yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=5 — tavily,yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=5 — tavily,yandex
+- `san-dent-clinic.ru` — Стоматология San-Dent в Красноярске: лечение, имплантация... — q=5 — yandex
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — tavily,yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=4 — yandex
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов без боли — q=3 — tavily,yandex
+- `stomferos.ru` — Стоматология в Красноярске - клиника «Ферос» (Октябрьский...) — q=3 — tavily,yandex
+- `7stom.ru` — Стоматология в Красноярске: имплантация лечение... — q=3 — yandex
+
+### 6. `sequential_union`
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=6 — tavily,yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=6 — tavily,yandex
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=5 — searxng,tavily,yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=5 — tavily,yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=5 — tavily,yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=5 — tavily,yandex
+- `san-dent-clinic.ru` — Стоматология San-Dent в Красноярске: лечение, имплантация... — q=5 — yandex
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — tavily,yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=4 — yandex
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов без боли — q=3 — tavily,yandex
+- `stomferos.ru` — Стоматология в Красноярске - клиника «Ферос» (Октябрьский...) — q=3 — tavily,yandex
+- `7stom.ru` — Стоматология в Красноярске: имплантация лечение... — q=3 — yandex
+
+### 7. `fallback_first_nonempty`
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=5 — yandex
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=5 — yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — yandex
+- `san-dent-clinic.ru` — Стоматология San-Dent в Красноярске: лечение, имплантация... — q=5 — yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=4 — yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=4 — yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=4 — yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=4 — yandex
+- `7stom.ru` — Стоматология в Красноярске: имплантация лечение... — q=3 — yandex
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске... — q=3 — yandex
+- `dentist-stom.ru` — Стоматология Dentist: эстетическое лечение зубов в Красноярске... — q=3 — yandex
+- `klass-dent.ru` — Стоматология класса комфорт по доступным ценам в Красноярске — q=3 — yandex
+
+### 8. `primary_only`
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=5 — yandex
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=5 — yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — yandex
+- `san-dent-clinic.ru` — Стоматология San-Dent в Красноярске: лечение, имплантация... — q=5 — yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=4 — yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=4 — yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=4 — yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=4 — yandex
+- `7stom.ru` — Стоматология в Красноярске: имплантация лечение... — q=3 — yandex
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске... — q=3 — yandex
+- `dentist-stom.ru` — Стоматология Dentist: эстетическое лечение зубов в Красноярске... — q=3 — yandex
+- `klass-dent.ru` — Стоматология класса комфорт по доступным ценам в Красноярске — q=3 — yandex
+
+### 9. `split_query_routing`
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=4 — searxng,tavily,yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=4 — searxng,tavily,yandex
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — searxng,tavily,yandex
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=4 — tavily,yandex
+- `crystal-dent.ru` — Стоматология в Красноярске | CRYSTAL-DENT — q=3 — searxng,tavily,yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=3 — yandex
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске - записаться на прием — q=2 — searxng,yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=2 — searxng,yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=2 — tavily,yandex
+- `profnik.ru` — Имплантация зубов в Красноярске | цены в клинике Николаенко... — q=2 — tavily,yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=2 — tavily,yandex
+- `stomalux.ru` — Главная - Стоматологическая клиника Стомалюкс, Красноярск — q=2 — tavily,yandex
+
+### 10. `shadow_compare`
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=5 — yandex
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=5 — yandex
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — yandex
+- `san-dent-clinic.ru` — Стоматология San-Dent в Красноярске: лечение, имплантация... — q=5 — yandex
+- `klinikaps.ru` — Стоматология ЖД района Красноярска - Клиника практической... — q=4 — yandex
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=4 — yandex
+- `nita-stom.ru` — Стоматология для взрослых и детей в Красноярске: записаться... — q=4 — yandex
+- `sibstom24.info` — Сибстом - семейная стоматология в Красноярске — q=4 — yandex
+- `7stom.ru` — Стоматология в Красноярске: имплантация лечение... — q=3 — yandex
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске... — q=3 — yandex
+- `dentist-stom.ru` — Стоматология Dentist: эстетическое лечение зубов в Красноярске... — q=3 — yandex
+- `klass-dent.ru` — Стоматология класса комфорт по доступным ценам в Красноярске — q=3 — yandex
