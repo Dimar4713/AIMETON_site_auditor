@@ -1,0 +1,64 @@
+name: Diagnose Tavily 403 Evidence
+
+on:
+  push:
+    branches:
+      - diag/stage-search-egress
+    paths:
+      - .github/workflows/diagnose-tavily-403-evidence.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
+    steps:
+      - name: Capture safe Tavily response diagnostics from Stage egress
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p tavily-evidence
+          for endpoint in usage search; do
+            headers="tavily-evidence/${endpoint}-headers.txt"
+            body="tavily-evidence/${endpoint}-body.txt"
+            if [[ "$endpoint" == "usage" ]]; then
+              code="$(curl -sS -D "$headers" -o "$body" -w '%{http_code}' \
+                -H "Authorization: Bearer $TAVILY_TOKEN" \
+                https://api.tavily.com/usage || true)"
+            else
+              code="$(curl -sS -D "$headers" -o "$body" -w '%{http_code}' \
+                -H 'Content-Type: application/json' \
+                -H "Authorization: Bearer $TAVILY_TOKEN" \
+                --data '{"query":"AIMETON Tavily Stage diagnostic","search_depth":"basic","max_results":1,"include_answer":false,"include_raw_content":false}' \
+                https://api.tavily.com/search || true)"
+            fi
+            python3 - "$endpoint" "$code" "$headers" "$body" <<'PY'
+          import json, sys
+          endpoint, code, headers_path, body_path = sys.argv[1:]
+          raw_headers = open(headers_path, encoding='utf-8', errors='replace').read().splitlines()
+          safe_names = {'date','server','content-type','content-length','cf-ray','x-request-id','request-id','x-ratelimit-limit','x-ratelimit-remaining','x-ratelimit-reset','via'}
+          safe_headers = {}
+          for line in raw_headers:
+              if ':' not in line:
+                  continue
+              name, value = line.split(':', 1)
+              if name.strip().lower() in safe_names:
+                  safe_headers[name.strip().lower()] = value.strip()[:300]
+          raw_body = open(body_path, encoding='utf-8', errors='replace').read()[:2000]
+          try:
+              parsed = json.loads(raw_body)
+              if isinstance(parsed, dict):
+                  safe_body = {k: parsed.get(k) for k in ('detail','message','error','code','request_id') if k in parsed}
+              else:
+                  safe_body = {'type': type(parsed).__name__}
+          except Exception:
+              safe_body = {'text': ' '.join(raw_body.split())[:500]}
+          print(json.dumps({'endpoint': endpoint, 'http_status': int(code or 0), 'headers': safe_headers, 'body': safe_body}, ensure_ascii=False))
+          PY
+          done
+          rm -rf tavily-evidence
