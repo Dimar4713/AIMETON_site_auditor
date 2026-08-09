@@ -58,6 +58,8 @@
         <label>Глобальная стратегия по умолчанию<select id="search-default-strategy"></select></label>
         <label>Аварийное принудительное переключение<select id="search-emergency-strategy"><option value="">Нет</option></select></label>
         <label>Разрешённые движки<select id="search-enabled-providers" multiple size="3"><option value="searxng">SearXNG (self-hosted)</option><option value="yandex">Yandex Search</option><option value="tavily">Tavily</option></select></label>
+        <label>Канонический порядок движков<input id="search-canonical-provider-order" value="searxng,yandex,tavily" autocomplete="off"></label>
+        <p class="message">Используйте имена `searxng,yandex,tavily` в желаемом порядке. Тарифный порядок имеет приоритет, если после глобальных ограничений в нём остаются разрешённые движки.</p>
         <label>Платные provider-вызовы<select id="search-paid-policy"><option value="inherit">Наследовать env-policy</option><option value="deny">Запретить глобально</option><option value="allow_with_budget">Разрешить только с budget cap</option></select></label>
         <label>Платный fan-out<select id="search-paid-fanout-policy"><option value="inherit">Наследовать env-policy</option><option value="deny">Запретить глобально</option><option value="allow_with_budget">Разрешить только с budget cap</option></select></label>
         <label>Жёсткий потолок RUB на миссию<input id="search-hard-rub" type="number" min="0" step="0.01"></label>
@@ -118,7 +120,7 @@
   </main>
   <script src="/static/admin-workspace.js" defer></script>
   <script src="/static/admin-temporary-access.js" defer></script>
-  <script src="/static/admin-search-strategies.js?v=20260809a" defer></script>
+  <script src="/static/admin-search-strategies.js?v=20260809d" defer></script>
   <script src="/static/admin-hunter-settings.js?v=20260809b" defer></script>
   <script src="/static/admin-hunter-trace.js?v=20260809c" defer></script>
 </body>
