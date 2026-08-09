@@ -238,8 +238,9 @@ class SearchGateway:
     def _provider_names(self, policy: SearchPolicy) -> list[str]:
         return list(policy.provider_order[: policy.max_providers_per_query])
 
-    def _routable_names(self, policy: SearchPolicy) -> list[str]:
+    def _routable_names(self, request: SearchRequest, policy: SearchPolicy) -> list[str]:
         result: list[str] = []
+        mission_costs = self._mission_costs.get(request.mission_id, {})
         for name in self._provider_names(policy):
             if policy.allowed_providers is not None and name not in policy.allowed_providers:
                 continue
@@ -248,6 +249,16 @@ class SearchGateway:
                 continue
             if self._circuit_state(name) == "open":
                 continue
+            quota = self._global_quotas.get(name)
+            if quota is not None and self._global_usage[name] >= quota:
+                continue
+            if provider.paid:
+                if provider.cost_amount <= 0:
+                    continue
+                maximum = policy.max_cost_by_currency.get(provider.cost_currency)
+                already_spent = mission_costs.get(provider.cost_currency, Decimal("0"))
+                if maximum is None or already_spent + provider.cost_amount > maximum:
+                    continue
             result.append(name)
         return result
 
@@ -450,6 +461,8 @@ class SearchGateway:
         request: SearchRequest,
         policy: SearchPolicy,
         fingerprint: str,
+        *,
+        all_secondary: bool = False,
     ) -> list[_Execution]:
         tasks = [
             self._execute_provider(
@@ -457,7 +470,7 @@ class SearchGateway:
                 request,
                 policy,
                 fingerprint,
-                secondary=index > 0,
+                secondary=all_secondary or index > 0,
                 secondary_paid_allowed=policy.allow_paid_fanout,
             )
             for index, name in enumerate(names)
@@ -496,7 +509,7 @@ class SearchGateway:
         final_limit = min(100, max(request.limit, policy.target_results))
 
         if strategy is SearchStrategy.SPLIT_QUERY_ROUTING:
-            routable = self._routable_names(policy)
+            routable = self._routable_names(request, policy)
             if not routable:
                 names = self._provider_names(policy)
                 attempts = [
@@ -513,7 +526,7 @@ class SearchGateway:
                     for name in names[:1]
                 ]
                 return self._response(results=[], attempts=attempts, selected_providers=[], fallback_used=False)
-            slot_seed = hashlib.sha256(f"{fingerprint}:{request.mission_id}".encode("utf-8")).hexdigest()
+            slot_seed = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
             selected_name = routable[int(slot_seed[:8], 16) % len(routable)]
             execution = await self._execute_provider(
                 selected_name,
@@ -581,6 +594,7 @@ class SearchGateway:
                 request,
                 policy,
                 fingerprint,
+                all_secondary=True,
             )
             attempts.extend(execution.attempt for execution in shadow_executions)
             state = (
@@ -680,7 +694,7 @@ class SearchGateway:
             maximum = policy.max_cost_by_currency.get(provider.cost_currency)
             policy_blocked = policy.allowed_providers is not None and name not in policy.allowed_providers
             if policy_blocked:
-                state = ProviderReadiness.BUDGET_BLOCKED
+                state = ProviderReadiness.POLICY_BLOCKED
             elif not provider.configured:
                 state = ProviderReadiness.NOT_CONFIGURED
             elif circuit_state == "open":
