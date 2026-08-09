@@ -8,6 +8,7 @@ from uuid import uuid4
 import httpx
 
 from app.heuristics import heuristic_analysis
+from app.hunter_forensic_trace import HunterForensicTrace
 from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries
 from app.hunter_query_intelligence import generate_hunter_query_plan
 from app.models import HuntCandidate, HuntRequest, HuntResult
@@ -18,6 +19,7 @@ from app.search_gateway import (
     get_search_gateway,
     search_policy_from_env,
 )
+from app.trace_ledger import TraceState
 
 
 EXCLUDED_HOSTS = {
@@ -185,7 +187,23 @@ def _shallow_candidate(
     )
 
 
+def _score_metadata(result: PreScoreResult) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "pre_score_status": result.status,
+        "pre_score_reasons": result.reasons,
+    }
+    if result.score is not None:
+        metadata["pre_score"] = result.score
+    for factor, value in result.factors.items():
+        metadata[f"factor_{factor}"] = value
+    return metadata
+
+
 async def run_hunt(req: HuntRequest) -> HuntResult:
+    mission_id = f"hunt-{uuid4()}"
+    correlation_id = f"corr-{uuid4()}"
+    trace = HunterForensicTrace(mission_id, correlation_id)
+
     query_plan = await generate_hunter_query_plan(
         region=req.region,
         industries=req.industries,
@@ -206,14 +224,40 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             "Query Intelligence: LLM-нормализация применена; "
             f"вариантов поиска: {len(queries)}."
         )
+        plan_source = "llm"
     else:
         queries = _build_queries(req)
         query_intelligence_note = "Query Intelligence: fallback на детерминированный план поиска."
+        plan_source = "deterministic_fallback"
+
+    trace.append(
+        "hunt_plan",
+        state=TraceState.SUCCEEDED,
+        reason_code="hunter_query_plan_built",
+        summary="Hunter search plan and effective thresholds prepared",
+        counters={
+            "query_count": len(queries),
+            "results_per_query": req.results_per_query,
+            "max_candidates": req.max_candidates,
+            "output_limit": req.output_limit,
+        },
+        metadata={
+            "plan_source": plan_source,
+            "input_region": req.region,
+            "effective_region": effective_req.region,
+            "input_industries": req.industries,
+            "effective_industries": effective_req.industries,
+            "input_focus": req.focus,
+            "effective_focus": effective_req.focus,
+            "queries": queries,
+            "minimum_pre_score": req.minimum_pre_score,
+            "deep_audit_score": req.deep_audit_score,
+            "concurrency": req.concurrency,
+        },
+    )
 
     raw_results: list[dict] = []
     search_diagnostics: list[SearchDiagnostics] = []
-    mission_id = f"hunt-{uuid4()}"
-    correlation_id = f"corr-{uuid4()}"
     gateway = get_search_gateway()
     policy = search_policy_from_env()
     for query in queries:
@@ -230,6 +274,13 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         raw_results.extend(item.as_legacy_dict() for item in response.results)
     aggregate = SearchDiagnostics.aggregate(search_diagnostics)
     if not raw_results:
+        trace.append(
+            "hunt_funnel_complete",
+            state=TraceState.SUCCEEDED,
+            reason_code="hunter_no_raw_results",
+            summary="Hunter completed with no raw search results",
+            counters={"raw_results": 0, "unique_candidates": 0, "returned_candidates": 0},
+        )
         return HuntResult(
             region=effective_req.region,
             search_zone=req.search_zone,
@@ -241,23 +292,110 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         )
 
     unique: dict[str, dict] = {}
-    for item in raw_results:
+    excluded_count = 0
+    duplicate_count = 0
+    pool_omitted_count = 0
+    for raw_rank, item in enumerate(raw_results, start=1):
         url = str(item.get("url") or "")
+        title = str(item.get("title") or "")
         host = _domain(url)
-        if not host or host in EXCLUDED_HOSTS or any(host.endswith(f".{excluded}") for excluded in EXCLUDED_HOSTS):
+        identity = host or f"raw-{raw_rank}"
+        if not host:
+            excluded_count += 1
+            trace.append(
+                "candidate_excluded",
+                state=TraceState.SKIPPED,
+                reason_code="missing_candidate_host",
+                summary="Search result excluded because no usable host was present",
+                identity=identity,
+                url=url,
+                title=title,
+                counters={"raw_rank": raw_rank},
+            )
             continue
-        unique.setdefault(host, item)
+        if host in EXCLUDED_HOSTS or any(host.endswith(f".{excluded}") for excluded in EXCLUDED_HOSTS):
+            excluded_count += 1
+            trace.append(
+                "candidate_excluded",
+                state=TraceState.SKIPPED,
+                reason_code="excluded_host",
+                summary="Search result excluded by Hunter host policy",
+                identity=host,
+                url=url,
+                title=title,
+                counters={"raw_rank": raw_rank},
+                metadata={"candidate_host": host},
+            )
+            continue
+        if host in unique:
+            duplicate_count += 1
+            trace.append(
+                "candidate_deduplicated",
+                state=TraceState.SKIPPED,
+                reason_code="duplicate_domain",
+                summary="Duplicate domain removed from Hunter candidate pool",
+                identity=host,
+                url=url,
+                title=title,
+                counters={"raw_rank": raw_rank},
+                metadata={"candidate_host": host},
+            )
+            continue
         if len(unique) >= req.max_candidates:
-            break
+            pool_omitted_count += 1
+            trace.append(
+                "candidate_pool_omitted",
+                state=TraceState.SKIPPED,
+                reason_code="max_candidates_reached",
+                summary="Unique result omitted because Hunter candidate pool is full",
+                identity=host,
+                url=url,
+                title=title,
+                counters={"raw_rank": raw_rank, "max_candidates": req.max_candidates},
+                metadata={"candidate_host": host},
+            )
+            continue
+        unique[host] = item
+        trace.append(
+            "candidate_dedupe_retained",
+            state=TraceState.SUCCEEDED,
+            reason_code="unique_domain_retained",
+            summary="Unique domain retained for Hunter qualification",
+            identity=host,
+            url=url,
+            title=title,
+            counters={"raw_rank": raw_rank, "unique_rank": len(unique)},
+            metadata={"candidate_host": host},
+        )
 
     async def inspect(item: dict) -> HuntCandidate | None:
         url = str(item.get("url") or "")
         raw_title = str(item.get("title") or "")
         display_title = raw_title or _domain(url)
         snippet = str(item.get("content") or item.get("snippet") or "")
+        host = _domain(url) or "unknown"
         result = _pre_score(effective_req, raw_title, snippet, url)
+        trace.append(
+            "candidate_pre_scored",
+            state=TraceState.SUCCEEDED if result.status == "calculated" else TraceState.DEGRADED,
+            reason_code="pre_score_calculated" if result.status == "calculated" else "pre_score_insufficient_data",
+            summary="Hunter candidate pre-score evaluated",
+            identity=host,
+            url=url,
+            title=display_title,
+            metadata=_score_metadata(result),
+        )
 
         if result.status == "insufficient_data":
+            trace.append(
+                "candidate_observation",
+                state=TraceState.DEGRADED,
+                reason_code="insufficient_data_retained",
+                summary="Candidate retained as observation because pre-score data is insufficient",
+                identity=host,
+                url=url,
+                title=display_title,
+            )
             return _shallow_candidate(
                 display_title,
                 snippet,
@@ -270,9 +408,31 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
 
         assert result.score is not None
         if result.score < req.minimum_pre_score:
+            trace.append(
+                "candidate_rejected",
+                state=TraceState.SKIPPED,
+                reason_code="below_minimum_pre_score",
+                summary="Candidate rejected below Hunter minimum pre-score",
+                identity=host,
+                url=url,
+                title=display_title,
+                counters={"pre_score": result.score, "minimum_pre_score": req.minimum_pre_score},
+                metadata=_score_metadata(result),
+            )
             return None
 
         if result.score < req.deep_audit_score:
+            trace.append(
+                "candidate_observation",
+                state=TraceState.SUCCEEDED,
+                reason_code="below_deep_audit_score",
+                summary="Candidate retained as observation below deep-audit threshold",
+                identity=host,
+                url=url,
+                title=display_title,
+                counters={"pre_score": result.score, "deep_audit_score": req.deep_audit_score},
+                metadata=_score_metadata(result),
+            )
             return _shallow_candidate(
                 display_title,
                 snippet,
@@ -283,6 +443,16 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 recommendation="Сохранить в наблюдении и усилить признаки до запуска глубокой обработки.",
             )
 
+        trace.append(
+            "candidate_deep_audit_started",
+            state=TraceState.STARTED,
+            reason_code="deep_audit_threshold_met",
+            summary="Candidate crossed deep-audit threshold and site processing started",
+            identity=host,
+            url=url,
+            title=display_title,
+            counters={"pre_score": result.score, "deep_audit_score": req.deep_audit_score},
+        )
         try:
             page = await fetch_site(url)
             analysis = heuristic_analysis(page["final_url"], page["title"], page["text"])
@@ -294,6 +464,25 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             if not region_confirmed:
                 final_score = max(0, final_score - 20)
                 reasons.append("региональная принадлежность требует проверки")
+            trace.append(
+                "candidate_deep_audit_completed",
+                state=TraceState.SUCCEEDED,
+                reason_code="deep_audit_completed",
+                summary="Candidate site processed and final Hunter score produced",
+                identity=host,
+                url=str(analysis.url),
+                title=analysis.company_name,
+                counters={
+                    "pre_score": result.score,
+                    "analysis_score": analysis.commercial_opportunity.score,
+                    "final_score": final_score,
+                },
+                metadata={
+                    "region_confirmed": region_confirmed,
+                    "qualification": analysis.commercial_opportunity.qualification,
+                    "source_host": host,
+                },
+            )
             return HuntCandidate(
                 company_name=analysis.company_name,
                 url=analysis.url,
@@ -312,6 +501,17 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 analysis=analysis,
             )
         except (FetchError, httpx.HTTPError, ValueError) as exc:
+            trace.append(
+                "candidate_deep_audit_failed",
+                state=TraceState.DEGRADED,
+                reason_code="deep_audit_fetch_or_analysis_failed",
+                summary="Candidate crossed deep-audit threshold but site processing failed",
+                identity=host,
+                url=url,
+                title=display_title,
+                counters={"pre_score": result.score},
+                metadata={"error_type": type(exc).__name__},
+            )
             fallback = _shallow_candidate(
                 display_title,
                 snippet,
@@ -340,12 +540,61 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         ),
         reverse=True,
     )
+    returned = candidates[: req.output_limit]
+    for rank, candidate in enumerate(candidates, start=1):
+        url = str(candidate.url)
+        host = _domain(url) or f"candidate-{rank}"
+        if rank <= req.output_limit:
+            trace.append(
+                "candidate_returned",
+                state=TraceState.SUCCEEDED,
+                reason_code="within_output_limit",
+                summary="Qualified candidate returned in Hunter response",
+                identity=host,
+                url=url,
+                title=candidate.company_name,
+                counters={"output_rank": rank, "final_score": candidate.final_score or 0},
+                metadata={
+                    "qualification": candidate.qualification,
+                    "deep_analysis_performed": candidate.deep_analysis_performed,
+                },
+            )
+        else:
+            trace.append(
+                "candidate_output_omitted",
+                state=TraceState.SKIPPED,
+                reason_code="output_limit_reached",
+                summary="Qualified candidate omitted from response by Hunter output limit",
+                identity=host,
+                url=url,
+                title=candidate.company_name,
+                counters={"qualified_rank": rank, "output_limit": req.output_limit},
+                metadata={"qualification": candidate.qualification},
+            )
+
+    trace.append(
+        "hunt_funnel_complete",
+        state=TraceState.SUCCEEDED,
+        reason_code="hunter_candidate_funnel_completed",
+        summary="Hunter candidate funnel completed with bounded forensic counters",
+        counters={
+            "raw_results": len(raw_results),
+            "excluded_results": excluded_count,
+            "duplicate_results": duplicate_count,
+            "pool_omitted_results": pool_omitted_count,
+            "unique_candidates": len(unique),
+            "inspected_candidates": len(inspected),
+            "qualified_candidates": len(candidates),
+            "returned_candidates": len(returned),
+            "output_omitted_candidates": max(0, len(candidates) - len(returned)),
+        },
+    )
     return HuntResult(
         region=effective_req.region,
         search_zone=req.search_zone,
         queries=queries,
         discovered=len(unique),
-        candidates=candidates[: req.output_limit],
+        candidates=returned,
         notes=[
             query_intelligence_note,
             "План охоты сформирован по Справочнику охотника.",
