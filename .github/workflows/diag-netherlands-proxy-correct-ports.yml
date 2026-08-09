@@ -1,0 +1,51 @@
+name: Diagnose Netherlands Proxy Correct Ports
+
+on:
+  push:
+    branches:
+      - diag/stage-search-egress
+    paths:
+      - .github/workflows/diag-netherlands-proxy-correct-ports.yml
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-preflight:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    timeout-minutes: 10
+    steps:
+      - name: Probe supplied proxy ports without credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          PROXY_IP='51.241.23.14'
+          found=0
+
+          echo 'HTTP/HTTPS proxy port 50100'
+          out="$(curl -sS --connect-timeout 5 --max-time 15 -x "http://${PROXY_IP}:50100" https://api.ipify.org 2>/dev/null || true)"
+          if [[ "$out" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "PROXY_HTTP_OK port=50100 egress_ip=$out"
+            found=1
+          else
+            echo 'PROXY_HTTP_FAIL port=50100'
+          fi
+
+          echo 'SOCKS5 proxy port 50101'
+          out="$(curl -sS --connect-timeout 5 --max-time 15 --socks5-hostname "${PROXY_IP}:50101" https://api.ipify.org 2>/dev/null || true)"
+          if [[ "$out" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "PROXY_SOCKS5_OK port=50101 egress_ip=$out"
+            found=1
+          else
+            echo 'PROXY_SOCKS5_FAIL port=50101'
+          fi
+
+          if [[ "$found" -eq 0 ]]; then
+            echo 'PROXY_PREFLIGHT_NEEDS_AUTH_OR_ALLOWLIST_FIX'
+            exit 2
+          fi
