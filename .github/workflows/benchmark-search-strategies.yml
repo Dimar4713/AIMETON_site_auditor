@@ -45,25 +45,42 @@ jobs:
           docker cp scripts/benchmark_search_strategies.py aimeton-auditor:/tmp/benchmark_search_strategies.py
           docker exec aimeton-auditor rm -rf /tmp/search-strategy-benchmark
 
-      - name: Require all providers to return live results
+      - name: Require current Stage secrets to return live provider results
         shell: bash
+        env:
+          TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
+          YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
+          YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
         run: |
           set -Eeuo pipefail
+          test -n "$TAVILY_TOKEN"
+          test -n "$YANDEX_SEARCH_API_KEY"
+          test -n "$YANDEX_CLOUD_FOLDER_ID"
           mkdir -p benchmark-output
           docker exec \
             -w /app \
             -e PYTHONPATH=/app \
+            -e TAVILY_TOKEN="$TAVILY_TOKEN" \
+            -e YANDEX_SEARCH_API_KEY="$YANDEX_SEARCH_API_KEY" \
+            -e YANDEX_CLOUD_FOLDER_ID="$YANDEX_CLOUD_FOLDER_ID" \
             aimeton-auditor \
             python /tmp/probe_search_providers.py \
             2>&1 | tee benchmark-output/provider-probe.log
 
       - name: Run all ten real Search Gateway strategies
         shell: bash
+        env:
+          TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
+          YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
+          YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
         run: |
           set -Eeuo pipefail
           docker exec \
             -w /app \
             -e PYTHONPATH=/app \
+            -e TAVILY_TOKEN="$TAVILY_TOKEN" \
+            -e YANDEX_SEARCH_API_KEY="$YANDEX_SEARCH_API_KEY" \
+            -e YANDEX_CLOUD_FOLDER_ID="$YANDEX_CLOUD_FOLDER_ID" \
             -e BENCHMARK_OUT=/tmp/search-strategy-benchmark \
             aimeton-auditor \
             python /tmp/benchmark_search_strategies.py \
