@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app import discovery
-from app.models import HuntRequest
+from app.models import HuntRequest, SiteAnalysis
 from app.search_gateway.models import GatewayState, SearchDiagnostics, SearchItem, SearchResponse
 
 
@@ -86,7 +86,7 @@ async def test_deep_audit_without_region_confirmation_cannot_remain_priority(mon
     monkeypatch.setattr(
         discovery,
         "heuristic_analysis",
-        lambda url, title, text: SimpleNamespace(
+        lambda url, title, text: SiteAnalysis.model_construct(
             url=url,
             company_name=title,
             business_summary="test",
