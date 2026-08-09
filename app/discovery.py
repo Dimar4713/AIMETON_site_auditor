@@ -11,6 +11,7 @@ from app.heuristics import heuristic_analysis
 from app.hunter_forensic_trace import HunterForensicTrace
 from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries
 from app.hunter_query_intelligence import generate_hunter_query_plan
+from app.hunter_source_role import classify_source_role, role_rank
 from app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
 from app.search_gateway import (
@@ -36,7 +37,7 @@ EXCLUDED_HOSTS = {
     "hh.ru",
 }
 
-COMMERCIAL_MARKERS = ("каталог", "товар", "оборудован", "услуг", "подбор", "расчет", "заказать")
+COMMERCIAL_MARKERS = ("товар", "оборудован", "услуг", "подбор", "расчет", "заказать")
 COMPLEXITY_MARKERS = ("опт", "производ", "монтаж", "проект", "комплектац", "прайс")
 STRONG_INDUSTRY_MARKERS_BY_REQUEST = {
     "стоматология": (
@@ -176,6 +177,13 @@ def _pre_score(req: HuntRequest, title: str, snippet: str, url: str) -> PreScore
         reasons.append("используется домен российской зоны")
 
     score = 20 + sum(value for value in factors.values() if value is not None)
+    source_role = classify_source_role(title, snippet, url)
+    if source_role in {"supporting_source", "blocked_source"}:
+        score = min(score, 45)
+        reasons.append("результат является источником для проверки, а не прямым сайтом компании")
+    elif factors.get("industry_match") == 0 and factors.get("region_match") == 0:
+        score = min(score, 30)
+        reasons.append("не обнаружено ни отрасли, ни региона из задания охоты")
     return PreScoreResult(min(score, 100), "calculated", factors, reasons)
 
 
@@ -206,6 +214,21 @@ def _shallow_candidate(
         reasons=result.reasons,
         analysis=None,
     )
+
+
+def _candidate_rank_role(candidate: HuntCandidate) -> str:
+    role = classify_source_role(candidate.source_title, candidate.source_snippet, str(candidate.url))
+    if role != "direct_candidate":
+        return role
+    industry_match = candidate.pre_score_factors.get("industry_match")
+    region_match = candidate.pre_score_factors.get("region_match")
+    if candidate.region_confirmed is False:
+        return "possible_candidate"
+    if industry_match == 0 and region_match == 0:
+        return "noise"
+    if industry_match and region_match == 0 and not candidate.deep_analysis_performed:
+        return "possible_candidate"
+    return "direct_candidate"
 
 
 def _score_metadata(result: PreScoreResult) -> dict[str, object]:
@@ -484,9 +507,11 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             region_confirmed = any(token in regional_text for token in region_tokens)
             final_score = round((result.score + analysis.commercial_opportunity.score) / 2)
             reasons = list(result.reasons)
+            qualification = analysis.commercial_opportunity.qualification
             if not region_confirmed:
-                final_score = max(0, final_score - 20)
-                reasons.append("региональная принадлежность требует проверки")
+                final_score = min(49, max(0, final_score - 20))
+                qualification = "Наблюдение"
+                reasons.append("региональная принадлежность не подтверждена; прямой лид понижен до наблюдения")
             trace.append(
                 "candidate_deep_audit_completed",
                 state=TraceState.SUCCEEDED,
@@ -502,8 +527,9 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 },
                 metadata={
                     "region_confirmed": region_confirmed,
-                    "qualification": analysis.commercial_opportunity.qualification,
+                    "qualification": qualification,
                     "source_host": host,
+                    "source_role": classify_source_role(display_title, snippet, url),
                 },
             )
             return HuntCandidate(
@@ -517,7 +543,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 pre_score_factors=result.factors,
                 deep_analysis_performed=True,
                 final_score=final_score,
-                qualification=analysis.commercial_opportunity.qualification,
+                qualification=qualification,
                 business_summary=analysis.business_summary,
                 recommended_solution=analysis.commercial_opportunity.recommended_solution,
                 reasons=reasons,
@@ -557,6 +583,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
     candidates = [candidate for candidate in inspected if candidate is not None]
     candidates.sort(
         key=lambda candidate: (
+            role_rank(_candidate_rank_role(candidate)),
             candidate.pre_score_status == "calculated",
             candidate.final_score if candidate.final_score is not None else -1,
             candidate.preliminary_score if candidate.preliminary_score is not None else -1,
@@ -580,6 +607,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 metadata={
                     "qualification": candidate.qualification,
                     "deep_analysis_performed": candidate.deep_analysis_performed,
+                    "source_role": _candidate_rank_role(candidate),
                 },
             )
         else:
@@ -592,7 +620,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 url=url,
                 title=candidate.company_name,
                 counters={"qualified_rank": rank, "output_limit": req.output_limit},
-                metadata={"qualification": candidate.qualification},
+                metadata={"qualification": candidate.qualification, "source_role": _candidate_rank_role(candidate)},
             )
 
     funnel = HuntFunnel(
@@ -626,6 +654,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             "Каждый кандидат получает объяснимый pre-score либо явный статус insufficient_data.",
             f"Глубокая обработка запускается только при pre-score >= {req.deep_audit_score}.",
             "Количество найденных ссылок не входит в формулу pre-score.",
+            "Каталоги, рейтинги и редакционные источники сохраняются для проверки, но не конкурируют с прямыми компаниями в lead-ranking.",
         ],
         search=aggregate,
     )
