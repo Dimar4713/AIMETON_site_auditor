@@ -18,7 +18,8 @@ def redact(value: str, secrets: list[str]) -> str:
     return output[:700]
 
 
-async def raw_error_detail(provider_name: str, provider, request: SearchRequest) -> dict:
+async def raw_error_detail(provider_name: str, scheduled_provider, request: SearchRequest) -> dict:
+    provider = getattr(scheduled_provider, "_provider", scheduled_provider)
     if provider_name == "tavily":
         url = "https://api.tavily.com/search"
         headers = {"Authorization": f"Bearer {provider._api_key}"}
@@ -62,7 +63,6 @@ async def raw_error_detail(provider_name: str, provider, request: SearchRequest)
         for key, value in response.headers.items()
         if key.lower() in {"content-type", "server", "x-request-id", "x-envoy-upstream-service-time", "cf-ray"}
     }
-    detail = ""
     try:
         payload = response.json()
         if isinstance(payload, dict):
