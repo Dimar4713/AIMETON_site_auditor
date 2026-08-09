@@ -87,6 +87,7 @@ async def test_hunter_forensic_trace_explains_candidate_losses(tmp_path: Path, m
     )
 
     assert len(result.candidates) == 1
+    assert result.funnel.returned_candidates == 1
 
     with SQLiteTraceLedger(trace_path)._connect() as db:
         row = db.execute(
@@ -132,6 +133,7 @@ async def test_hunter_forensic_trace_explains_candidate_losses(tmp_path: Path, m
         "returned_candidates": 1,
         "output_omitted_candidates": 1,
     }
+    assert result.funnel.model_dump() == final.counters
 
 
 def test_hunter_forensic_trace_is_bounded_and_sanitized(tmp_path: Path, monkeypatch):
