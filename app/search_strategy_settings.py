@@ -38,14 +38,7 @@ class PaidPolicy(StrEnum):
     ALLOW_WITH_BUDGET = "allow_with_budget"
 
 
-IMPLEMENTED_STRATEGIES = frozenset(
-    {
-        SearchStrategyId.PRIMARY_ONLY,
-        SearchStrategyId.FALLBACK_FIRST_NONEMPTY,
-        SearchStrategyId.CASCADE_UNTIL_TARGET,
-        SearchStrategyId.SEQUENTIAL_UNION,
-    }
-)
+IMPLEMENTED_STRATEGIES = frozenset(SearchStrategyId)
 
 
 class StrategyDescriptor(BaseModel):
@@ -63,12 +56,12 @@ STRATEGY_CATALOG = (
     StrategyDescriptor(id=SearchStrategyId.FALLBACK_FIRST_NONEMPTY, label="Резервирование", description="Идти по providers последовательно и остановиться на первом непустом ответе.", coverage="средний", cost_profile="низкий", implemented=True),
     StrategyDescriptor(id=SearchStrategyId.CASCADE_UNTIL_TARGET, label="Каскад до цели", description="Последовательно объединять выдачи, пока не набрано целевое число уникальных результатов или не исчерпаны разрешённые providers.", coverage="высокий", cost_profile="управляемый", implemented=True),
     StrategyDescriptor(id=SearchStrategyId.SEQUENTIAL_UNION, label="Последовательное объединение", description="Вызвать все разрешённые providers по очереди и объединить/дедуплицировать их результаты.", coverage="высокий", cost_profile="средний/высокий", implemented=True),
-    StrategyDescriptor(id=SearchStrategyId.PARALLEL_UNION, label="Параллельное объединение", description="Параллельно вызвать разрешённые providers и объединить результаты для меньшей задержки.", coverage="высокий", cost_profile="средний/высокий", implemented=False),
-    StrategyDescriptor(id=SearchStrategyId.CONSENSUS_UNION, label="Консенсус providers", description="Объединить выдачи и усиливать кандидатов, подтверждённых несколькими независимыми providers.", coverage="высокий + подтверждение", cost_profile="высокий", implemented=False),
-    StrategyDescriptor(id=SearchStrategyId.SPLIT_QUERY_ROUTING, label="Разделение query-вариантов", description="Распределять разные LLM query-варианты между providers, увеличивая разнообразие без полного fan-out каждого запроса.", coverage="высокий/экономный", cost_profile="управляемый", implemented=False),
-    StrategyDescriptor(id=SearchStrategyId.ADAPTIVE_COST_QUALITY, label="Адаптивный качество/стоимость", description="Выбирать provider и глубину fan-out по health, фактическому yield, latency и оставшемуся бюджету.", coverage="адаптивный", cost_profile="оптимизируемый", implemented=False),
-    StrategyDescriptor(id=SearchStrategyId.EXHAUSTIVE_COVERAGE, label="Максимальный охват", description="Все разрешённые providers для всех query-вариантов в пределах жёсткого бюджета и квот.", coverage="максимальный", cost_profile="максимальный", implemented=False),
-    StrategyDescriptor(id=SearchStrategyId.SHADOW_COMPARE, label="Shadow-сравнение", description="Возвращать основной результат, а вторичные providers запускать только для диагностики и benchmark без влияния на пользовательскую выдачу.", coverage="диагностический", cost_profile="дополнительный", implemented=False, tariff_safe=False),
+    StrategyDescriptor(id=SearchStrategyId.PARALLEL_UNION, label="Параллельное объединение", description="Параллельно вызвать разрешённые providers и объединить результаты для меньшей задержки.", coverage="высокий", cost_profile="средний/высокий", implemented=True),
+    StrategyDescriptor(id=SearchStrategyId.CONSENSUS_UNION, label="Консенсус providers", description="Объединить выдачи и поднять домены, подтверждённые несколькими независимыми providers.", coverage="высокий + подтверждение", cost_profile="высокий", implemented=True),
+    StrategyDescriptor(id=SearchStrategyId.SPLIT_QUERY_ROUTING, label="Разделение query-вариантов", description="Детерминированно распределять разные LLM query-варианты между готовыми providers вместо полного fan-out каждого запроса.", coverage="высокий/экономный", cost_profile="управляемый", implemented=True),
+    StrategyDescriptor(id=SearchStrategyId.ADAPTIVE_COST_QUALITY, label="Адаптивный качество/стоимость", description="Переупорядочивать providers по фактической успешности, yield, latency и cost-приоритету; каскадировать до целевого результата.", coverage="адаптивный", cost_profile="оптимизируемый", implemented=True),
+    StrategyDescriptor(id=SearchStrategyId.EXHAUSTIVE_COVERAGE, label="Максимальный охват", description="Использовать все разрешённые providers в пределах max_providers, hard budget, quota и circuit guards.", coverage="максимальный", cost_profile="максимальный", implemented=True),
+    StrategyDescriptor(id=SearchStrategyId.SHADOW_COMPARE, label="Shadow-сравнение", description="Вернуть ответ primary provider, а вторичные providers выполнить только для диагностического benchmark без влияния на выдачу.", coverage="диагностический", cost_profile="дополнительный", implemented=True, tariff_safe=False),
 )
 
 
@@ -76,7 +69,7 @@ class TariffSearchProfile(BaseModel):
     id: str = Field(min_length=1, max_length=40)
     label: str = Field(min_length=1, max_length=80)
     enabled: bool = True
-    strategy: SearchStrategyId = SearchStrategyId.FALLBACK_FIRST_NONEMPTY
+    strategy: SearchStrategyId | None = None
     provider_order: list[str] = Field(default_factory=lambda: list(KNOWN_PROVIDERS), min_length=1, max_length=3)
     paid_policy: PaidPolicy = PaidPolicy.INHERIT
     paid_fanout_policy: PaidPolicy = PaidPolicy.INHERIT
@@ -93,8 +86,10 @@ class TariffSearchProfile(BaseModel):
     concurrency: int = Field(default=4, ge=1, le=12)
 
     def validate_relationships(self) -> None:
-        if self.strategy not in IMPLEMENTED_STRATEGIES:
+        if self.strategy is not None and self.strategy not in IMPLEMENTED_STRATEGIES:
             raise ValueError(f"strategy_not_implemented:{self.strategy}")
+        if self.strategy is SearchStrategyId.SHADOW_COMPARE:
+            raise ValueError("shadow_compare_is_owner_debug_only")
         if len(set(self.provider_order)) != len(self.provider_order):
             raise ValueError("provider_order_contains_duplicates")
         if any(provider not in KNOWN_PROVIDERS for provider in self.provider_order):
@@ -154,6 +149,8 @@ class GlobalSearchSettings(BaseModel):
     def validate_relationships(self, tariffs: dict[str, TariffSearchProfile]) -> None:
         if self.active_tariff not in tariffs:
             raise ValueError("active_tariff_not_found")
+        if not tariffs[self.active_tariff].enabled:
+            raise ValueError("active_tariff_disabled")
         if self.default_strategy not in IMPLEMENTED_STRATEGIES:
             raise ValueError("default_strategy_not_implemented")
         if self.emergency_strategy_override is not None and self.emergency_strategy_override not in IMPLEMENTED_STRATEGIES:
