@@ -506,7 +506,10 @@ class SearchGateway:
                     ),
                 )
 
-        final_limit = min(100, max(request.limit, policy.target_results))
+        if strategy is SearchStrategy.EXHAUSTIVE_COVERAGE:
+            final_limit = min(100, request.limit * policy.max_providers_per_query)
+        else:
+            final_limit = min(100, max(request.limit, policy.target_results))
 
         if strategy is SearchStrategy.SPLIT_QUERY_ROUTING:
             routable = self._routable_names(request, policy)
