@@ -76,7 +76,7 @@ def test_paid_fanout_requires_explicit_budget() -> None:
         profile.validate_relationships()
 
 
-def test_planned_strategy_cannot_be_activated_in_tariff() -> None:
+def test_advanced_tariff_safe_strategy_can_be_activated() -> None:
     from app.search_strategy_settings import TariffSearchProfile
 
     profile = TariffSearchProfile(
@@ -85,5 +85,41 @@ def test_planned_strategy_cannot_be_activated_in_tariff() -> None:
         strategy=SearchStrategyId.PARALLEL_UNION,
         provider_order=["searxng", "yandex"],
     )
-    with pytest.raises(ValueError, match="strategy_not_implemented"):
+    profile.validate_relationships()
+
+
+def test_shadow_compare_is_owner_debug_only_not_tariff_strategy() -> None:
+    from app.search_strategy_settings import TariffSearchProfile
+
+    profile = TariffSearchProfile(
+        id="debug",
+        label="Debug",
+        strategy=SearchStrategyId.SHADOW_COMPARE,
+        provider_order=["searxng", "yandex"],
+    )
+    with pytest.raises(ValueError, match="owner_debug_only"):
         profile.validate_relationships()
+
+
+def test_tariff_can_inherit_global_strategy(tmp_path: Path) -> None:
+    settings = SearchStrategySettingsRepository(tmp_path / "runtime.sqlite3").get().settings
+    settings.global_settings.default_strategy = SearchStrategyId.CONSENSUS_UNION
+    settings.tariffs["start"].strategy = None
+
+    policy = settings.apply_search_policy(
+        SearchPolicy(
+            provider_order=("searxng", "yandex", "tavily"),
+            allowed_providers=frozenset({"searxng", "yandex", "tavily"}),
+        )
+    )
+
+    assert policy.strategy is SearchStrategy.CONSENSUS_UNION
+
+
+def test_disabled_tariff_cannot_become_active(tmp_path: Path) -> None:
+    settings = SearchStrategySettingsRepository(tmp_path / "runtime.sqlite3").get().settings
+    settings.tariffs["pro"].enabled = False
+    settings.global_settings.active_tariff = "pro"
+
+    with pytest.raises(ValueError, match="active_tariff_disabled"):
+        settings.validate_relationships()
