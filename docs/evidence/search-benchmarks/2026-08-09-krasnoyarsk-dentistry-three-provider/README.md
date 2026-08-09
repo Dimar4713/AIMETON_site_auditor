@@ -61,7 +61,7 @@ Reference union benchmark: 75 probable direct-company domains; regional subset: 
 
 ## Артефакты
 
-В этом каталоге должны находиться:
+В этом каталоге находятся:
 
 - `yandex-snapshot.zip` — точный Actions artifact Yandex;
 - `tavily-snapshot.zip` — точный Actions artifact Tavily;
@@ -71,5 +71,7 @@ Reference union benchmark: 75 probable direct-company domains; regional subset: 
 - `summary.md` — автоматически сформированная таблица и top domains;
 - `replay.log` — полный replay log;
 - `SHA256SUMS.txt` — контрольные суммы durable evidence.
+
+Evidence merged to `main` via PR #495, merge SHA `9c7c7b0c1d67d111c31fa71c3ad0b5077e9777b4`.
 
 Provider-access follow-up: Issue #493.
