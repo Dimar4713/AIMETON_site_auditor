@@ -6,6 +6,7 @@ on:
       - bench/krasnoyarsk-dentistry-search-strategies
     paths:
       - scripts/benchmark_search_strategies.py
+      - scripts/probe_search_providers.py
       - .github/workflows/benchmark-search-strategies.yml
 
 permissions:
@@ -40,14 +41,26 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          docker cp scripts/probe_search_providers.py aimeton-auditor:/tmp/probe_search_providers.py
           docker cp scripts/benchmark_search_strategies.py aimeton-auditor:/tmp/benchmark_search_strategies.py
           docker exec aimeton-auditor rm -rf /tmp/search-strategy-benchmark
+
+      - name: Require all providers to return live results
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p benchmark-output
+          docker exec \
+            -w /app \
+            -e PYTHONPATH=/app \
+            aimeton-auditor \
+            python /tmp/probe_search_providers.py \
+            2>&1 | tee benchmark-output/provider-probe.log
 
       - name: Run all ten real Search Gateway strategies
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p benchmark-output
           docker exec \
             -w /app \
             -e PYTHONPATH=/app \
@@ -80,4 +93,4 @@ jobs:
         shell: bash
         run: |
           set +e
-          docker exec aimeton-auditor rm -rf /tmp/benchmark_search_strategies.py /tmp/search-strategy-benchmark
+          docker exec aimeton-auditor rm -rf /tmp/probe_search_providers.py /tmp/benchmark_search_strategies.py /tmp/search-strategy-benchmark
