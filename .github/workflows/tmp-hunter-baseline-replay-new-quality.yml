@@ -1,0 +1,199 @@
+name: Temporary Hunter Baseline Replay With New Quality
+
+on:
+  push:
+    branches:
+      - chore/hunter-real-e2e-router
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  replay:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: d8f2eb2faf8e8f9119acef293cbd8e799ad45122
+      BASELINE_MISSION_ID: hunt-39b88c7b-0a1c-4bee-a7f4-af9791560c60
+      BASELINE_ATTEMPT_ID: corr-4b3fbbee-b990-4627-bbc6-373e0582f862
+      REPORT: /tmp/hunter-baseline-replay-${{ github.run_id }}.md
+
+    steps:
+      - name: Verify exact deployed SHA and replay saved search results only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$status" == healthy ]]
+
+          result="$(docker exec \
+            -e BASELINE_MISSION_ID="$BASELINE_MISSION_ID" \
+            -e BASELINE_ATTEMPT_ID="$BASELINE_ATTEMPT_ID" \
+            -i "$CONTAINER" python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from collections import Counter
+
+          from app.discovery import _domain, _pre_score
+          from app.hunter_source_role import classify_source_role
+          from app.models import HuntRequest
+          from app.search_strategy_settings import get_search_strategy_settings_repository
+
+          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          db = sqlite3.connect(db_path, timeout=30)
+          db.row_factory = sqlite3.Row
+          try:
+              rows = db.execute(
+                  '''
+                  SELECT metadata_json
+                  FROM mission_trace_events
+                  WHERE mission_id=? AND attempt_id=?
+                    AND component='search_gateway' AND operation='result_item'
+                  ORDER BY sequence
+                  ''',
+                  (os.environ['BASELINE_MISSION_ID'], os.environ['BASELINE_ATTEMPT_ID']),
+              ).fetchall()
+          finally:
+              db.close()
+          assert rows, 'saved SearchGateway result_item trace is missing'
+
+          raw = []
+          for row in rows:
+              metadata = json.loads(row['metadata_json'] or '{}')
+              url = str(metadata.get('result_url') or '')
+              if not url:
+                  continue
+              raw.append({
+                  'url': url,
+                  'title': str(metadata.get('result_title') or ''),
+                  'snippet': str(metadata.get('result_snippet') or ''),
+              })
+
+          unique = {}
+          for item in raw:
+              host = _domain(item['url'])
+              if host and host not in unique:
+                  unique[host] = item
+
+          settings = get_search_strategy_settings_repository().get().settings
+          req = settings.apply_hunt_request(HuntRequest(region='Красноярск', industries=['Стоматология']))
+
+          role_counts = Counter()
+          qualified_roles = Counter()
+          deep_roles = Counter()
+          rejected_roles = Counter()
+          qualified = []
+          deep = []
+          rejected = []
+          direct_examples = []
+          supporting_examples = []
+          noise_examples = []
+
+          for host, item in unique.items():
+              score = _pre_score(req, item['title'], item['snippet'], item['url'])
+              role = classify_source_role(item['title'], item['snippet'], item['url'])
+              role_counts[role] += 1
+              numeric = score.score
+              record = {
+                  'host': host,
+                  'score': numeric,
+                  'role': role,
+                  'title': item['title'],
+                  'url': item['url'],
+                  'industry_match': score.factors.get('industry_match'),
+                  'region_match': score.factors.get('region_match'),
+              }
+              if numeric is None or numeric < req.minimum_pre_score:
+                  rejected.append(record)
+                  rejected_roles[role] += 1
+                  if len(noise_examples) < 20:
+                      noise_examples.append(record)
+                  continue
+              qualified.append(record)
+              qualified_roles[role] += 1
+              if role == 'direct_candidate' and len(direct_examples) < 30:
+                  direct_examples.append(record)
+              if role in {'supporting_source', 'blocked_source'} and len(supporting_examples) < 30:
+                  supporting_examples.append(record)
+              if numeric >= req.deep_audit_score:
+                  deep.append(record)
+                  deep_roles[role] += 1
+
+          supporting_crossed_deep = [x for x in deep if x['role'] != 'direct_candidate']
+          assert not supporting_crossed_deep, supporting_crossed_deep[:10]
+
+          must_keep = {'sapfircs.ru', 'aleksdent24.ru', 'allure-dent.ru', 'san-dent-clinic.ru', 'medident.ru', 'artdental24.ru'}
+          qualified_hosts = {item['host'] for item in qualified}
+          missing_keep = sorted(must_keep - qualified_hosts)
+          assert not missing_keep, {'good_clinics_lost': missing_keep}
+
+          safe = {
+              'provider_calls': 0,
+              'baseline_trace_result_items': len(raw),
+              'baseline_unique_hosts_reconstructed': len(unique),
+              'current_thresholds': {
+                  'minimum_pre_score': req.minimum_pre_score,
+                  'deep_audit_score': req.deep_audit_score,
+                  'output_limit': req.output_limit,
+              },
+              'role_counts_unique': dict(role_counts),
+              'qualified_count_new_pre_score': len(qualified),
+              'qualified_role_counts': dict(qualified_roles),
+              'deep_eligible_count_new_pre_score': len(deep),
+              'deep_eligible_role_counts': dict(deep_roles),
+              'rejected_count_new_pre_score': len(rejected),
+              'rejected_role_counts': dict(rejected_roles),
+              'supporting_sources_crossing_deep_threshold': len(supporting_crossed_deep),
+              'must_keep_good_clinics_missing': missing_keep,
+              'direct_examples': direct_examples,
+              'supporting_examples': supporting_examples,
+              'rejected_examples': noise_examples,
+          }
+          print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          PY
+          )"
+
+          {
+            echo '## Hunter baseline replay through deployed quality gates'
+            echo
+            echo "- exact deployed SHA: \`$deployed\`"
+            echo "- baseline mission: \`$BASELINE_MISSION_ID\`"
+            echo '- provider calls: `0`'
+            echo
+            echo '```json'
+            echo "$result"
+            echo '```'
+            echo
+            echo '- verdict: ✅ saved first-E2E results replayed through current deployed pre-score/source-role logic without provider calls.'
+          } | tee "$REPORT" "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload replay evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: hunter-baseline-replay-${{ github.run_id }}
+          path: ${{ env.REPORT }}
+          retention-days: 30
+
+      - name: Publish replay evidence to P1-501
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ env.REPORT }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 501,
+              body: body.slice(0, 60000),
+            });
