@@ -20,17 +20,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: bench/krasnoyarsk-dentistry-search-strategies
-      - name: Run identical Yandex collector from Stage
+      - name: Run identical Yandex collector inside Stage app container
         shell: bash
         env:
           YANDEX_SEARCH_API_KEY: ${{ secrets.YANDEX_SEARCH_API_KEY }}
           YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
-          SNAPSHOT_PROVIDER: yandex
-          SNAPSHOT_LIMIT: '20'
-          SNAPSHOT_OUT: /tmp/stage-yandex-identical.json
         run: |
           set -Eeuo pipefail
-          python scripts/collect_search_snapshot.py
+          docker cp scripts/collect_search_snapshot.py aimeton-auditor:/tmp/collect_search_snapshot.py
+          docker exec \
+            -w /app \
+            -e YANDEX_SEARCH_API_KEY="$YANDEX_SEARCH_API_KEY" \
+            -e YANDEX_CLOUD_FOLDER_ID="$YANDEX_CLOUD_FOLDER_ID" \
+            -e SNAPSHOT_PROVIDER=yandex \
+            -e SNAPSHOT_LIMIT=20 \
+            -e SNAPSHOT_OUT=/tmp/stage-yandex-identical.json \
+            aimeton-auditor python /tmp/collect_search_snapshot.py
+          docker exec aimeton-auditor rm -f /tmp/collect_search_snapshot.py /tmp/stage-yandex-identical.json
 
   tavily-stage-identical-collector:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
@@ -41,13 +47,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: bench/krasnoyarsk-dentistry-search-strategies
-      - name: Run identical Tavily collector from Stage
+      - name: Run identical Tavily collector inside Stage app container
         shell: bash
         env:
           TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
-          SNAPSHOT_PROVIDER: tavily
-          SNAPSHOT_LIMIT: '20'
-          SNAPSHOT_OUT: /tmp/stage-tavily-identical.json
         run: |
           set -Eeuo pipefail
-          python scripts/collect_search_snapshot.py
+          docker cp scripts/collect_search_snapshot.py aimeton-auditor:/tmp/collect_search_snapshot.py
+          docker exec \
+            -w /app \
+            -e TAVILY_TOKEN="$TAVILY_TOKEN" \
+            -e SNAPSHOT_PROVIDER=tavily \
+            -e SNAPSHOT_LIMIT=20 \
+            -e SNAPSHOT_OUT=/tmp/stage-tavily-identical.json \
+            aimeton-auditor python /tmp/collect_search_snapshot.py
+          docker exec aimeton-auditor rm -f /tmp/collect_search_snapshot.py /tmp/stage-tavily-identical.json
