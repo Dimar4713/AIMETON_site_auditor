@@ -1,0 +1,86 @@
+name: Temporary Hunter Deep Eligible List
+
+on:
+  push:
+    branches:
+      - chore/hunter-real-e2e-router
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: d8f2eb2faf8e8f9119acef293cbd8e799ad45122
+      MISSION_ID: hunt-39b88c7b-0a1c-4bee-a7f4-af9791560c60
+      ATTEMPT_ID: corr-4b3fbbee-b990-4627-bbc6-373e0582f862
+      REPORT: /tmp/hunter-deep-eligible-${{ github.run_id }}.md
+
+    steps:
+      - name: List all deep-eligible hosts from saved baseline results
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$status" == healthy ]]
+          result="$(docker exec -e MISSION_ID="$MISSION_ID" -e ATTEMPT_ID="$ATTEMPT_ID" -i "$CONTAINER" python - <<'PY'
+          import json, os, sqlite3
+          from app.discovery import _domain, _pre_score
+          from app.hunter_source_role import classify_source_role
+          from app.models import HuntRequest
+          from app.search_strategy_settings import get_search_strategy_settings_repository
+
+          db_path=os.getenv('AIMETON_RUNTIME_DB','data/runtime-core.sqlite3')
+          db=sqlite3.connect(db_path,timeout=30); db.row_factory=sqlite3.Row
+          rows=db.execute("""SELECT metadata_json FROM mission_trace_events WHERE mission_id=? AND attempt_id=? AND component='search_gateway' AND operation='result_item' ORDER BY sequence""",(os.environ['MISSION_ID'],os.environ['ATTEMPT_ID'])).fetchall(); db.close()
+          unique={}
+          for row in rows:
+              m=json.loads(row['metadata_json'] or '{}'); url=str(m.get('result_url') or ''); host=_domain(url) if url else ''
+              if host and host not in unique:
+                  unique[host]={'url':url,'title':str(m.get('result_title') or ''),'snippet':str(m.get('result_snippet') or '')}
+          req=get_search_strategy_settings_repository().get().settings.apply_hunt_request(HuntRequest(region='Красноярск',industries=['Стоматология']))
+          items=[]
+          for host,item in unique.items():
+              score=_pre_score(req,item['title'],item['snippet'],item['url']); numeric=score.score or 0
+              if numeric >= req.deep_audit_score:
+                  items.append({'host':host,'score':numeric,'role':classify_source_role(item['title'],item['snippet'],item['url']),'industry_match':score.factors.get('industry_match'),'region_match':score.factors.get('region_match'),'title':item['title'],'url':item['url']})
+          items.sort(key=lambda x:(-x['score'],x['host']))
+          print(json.dumps({'provider_calls':0,'count':len(items),'items':items},ensure_ascii=False,sort_keys=True))
+          PY
+          )"
+          {
+            echo '## Hunter deep-eligible baseline list under current deployed gates'
+            echo
+            echo "- exact deployed SHA: \`$deployed\`"
+            echo '- provider calls: `0`'
+            echo
+            echo '```json'
+            echo "$result"
+            echo '```'
+          } | tee "$REPORT" "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: hunter-deep-eligible-${{ github.run_id }}
+          path: ${{ env.REPORT }}
+          retention-days: 30
+
+      - name: Publish to P1-501
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ env.REPORT }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs=require('fs'); const body=fs.readFileSync(process.env.REPORT_PATH,'utf8');
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:501,body:body.slice(0,60000)});
