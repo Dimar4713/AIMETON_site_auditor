@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.search_gateway.gateway import SearchGateway
-from app.search_gateway.models import AttemptState, FallbackReason, SearchPolicy, SearchRequest
+from app.search_gateway.models import AttemptState, FallbackReason, ProviderReadiness, SearchPolicy, SearchRequest
 from app.search_gateway.providers import ProviderError, TavilyProvider
 
 
@@ -74,7 +74,19 @@ async def test_tavily_contract_gate_blocks_before_network_and_paid_accounting() 
 
     assert provider.technical_configured is True
     assert provider.contract_allowed is False
-    assert provider.configured is False
+    assert provider.configured is True
+    assert provider.execution_allowed is False
+
+    health = gateway.health(
+        SearchPolicy(
+            provider_order=("tavily",),
+            allowed_providers=frozenset({"tavily"}),
+            max_cost_by_currency={"USD": Decimal("100")},
+        )
+    )
+    assert health[0].state == ProviderReadiness.CONTRACT_BLOCKED
+    assert health[0].configured is True
+    assert health[0].ready is False
 
     response = await gateway.search(
         _request("contract gate"),
@@ -89,11 +101,11 @@ async def test_tavily_contract_gate_blocks_before_network_and_paid_accounting() 
     assert response.results == []
     assert response.diagnostics.total_cost_by_currency == {}
     assert response.diagnostics.attempts[0].state == AttemptState.SKIPPED
-    assert response.diagnostics.attempts[0].reason == FallbackReason.NOT_CONFIGURED
+    assert response.diagnostics.attempts[0].reason == FallbackReason.CONTRACT_BLOCKED
 
     with pytest.raises(ProviderError) as exc_info:
         await provider.search(_request("direct blocked"), timeout_seconds=1)
-    assert exc_info.value.reason == FallbackReason.POLICY_BLOCKED
+    assert exc_info.value.reason == FallbackReason.CONTRACT_BLOCKED
     assert "51.241.23.14" not in str(exc_info.value)
 
 
