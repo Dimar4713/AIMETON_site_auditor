@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          expected='fbd2d5d7b17ba43fc20a3441e7d5e6341d1555b6'
+          expected='1bcc6cee231b02d00fd53815e97243d83e2764bf'
           health="$(curl -fsS https://stage-auditor.aimeton.ru/api/health)"
           printf '%s' "$health" | grep -Fq "$expected"
           docker inspect -f '{{.State.Health.Status}}' aimeton-auditor | grep -qx healthy
@@ -58,8 +58,8 @@ jobs:
                   SearchRequest(
                       query='Красноярск стоматология gate acceptance',
                       limit=3,
-                      mission_id='accept-tavily-contract-gate-v2',
-                      correlation_id='accept-tavily-contract-gate-v2',
+                      mission_id='accept-tavily-contract-gate-v3',
+                      correlation_id='accept-tavily-contract-gate-v3',
                   ),
                   policy,
               )
