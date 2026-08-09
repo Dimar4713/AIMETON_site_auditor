@@ -1,0 +1,3329 @@
+{
+  "benchmark": {
+    "logical_query": "Красноярск ; Стоматология",
+    "mode": "live-snapshot-replay",
+    "providers": [
+      "tavily",
+      "searxng"
+    ],
+    "query_variants": [
+      "Стоматология Красноярск официальный сайт компания",
+      "Стоматологическая клиника Красноярск официальный сайт компания",
+      "Стоматологический центр Красноярск официальный сайт компания",
+      "Стоматология Красноярск клиника адрес телефон",
+      "Стоматология Красноярск имплантация клиника",
+      "Стоматология Красноярск ортодонтия клиника",
+      "Стоматология Красноярск детская клиника",
+      "Стоматология Красноярск лечение зубов официальный сайт"
+    ],
+    "reference_direct_domain_count": 77,
+    "reference_regional_direct_domain_count": 50,
+    "score_formula": "50% recall + 35% precision + 10% corroboration + 5% time/cost efficiency"
+  },
+  "strategies": [
+    {
+      "strategy": "consensus_union",
+      "elapsed_seconds": 17.386,
+      "unique_domains": 121,
+      "direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "antara24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "bookwidgets.com",
+        "cfd24.ru",
+        "citydent24.ru",
+        "company.medelement.com",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "ekaterinburg.regtorg.ru",
+        "esculapstom.ru",
+        "focus.kontur.ru",
+        "gdestomatklinika.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "mari-dent.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "moskva.regtorg.ru",
+        "moskva.tradedir.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "okean-stom.ru",
+        "otzywy.com",
+        "pngegg.com",
+        "profnik.ru",
+        "rifel-ru.orgs.biz",
+        "ru.wikipedia.org",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "sm-stomatology.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "spark-interfax.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomatology.sovamed.ru",
+        "stomferos.ru",
+        "tver.regtorg.ru",
+        "universitetskiy-tsentr.orgs.biz",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zub.ru",
+        "zub54.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "gdestomatklinika.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "martstom.ru",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "profnik.ru",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomferos.ru",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "alldantist.ru",
+        "dentistfind.ru",
+        "doctu.ru",
+        "kleos.ru",
+        "kp.ru",
+        "krasnoyarsk.jsprav.ru",
+        "krsk.infodoctor.ru",
+        "magicofsmile.ru",
+        "napopravku.ru",
+        "prodoctorov.ru",
+        "rusprofile.ru",
+        "stom-parkovaya.ru",
+        "stomatolog-centr.yell.ru",
+        "stomatologiya-info.ru",
+        "tuzlist.ru",
+        "vc.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [
+        "aldenta.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "i-total.ru",
+        "medident.ru",
+        "nita-stom.ru",
+        "zyboff.ru"
+      ],
+      "provider_calls": {
+        "tavily": 8,
+        "searxng": 8
+      },
+      "costs": {
+        "USD": "0.064"
+      },
+      "top_direct": [
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 5,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске Mira — Лечение зубов"
+        },
+        {
+          "host": "aldenta.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Частная стоматология в Красноярске Al'denta (Альдента)"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника ЗУБОFF | Стоматология Красноярск"
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология Апекс в Красноярске"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов ..."
+        },
+        {
+          "host": "medident.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — МедиДент"
+        },
+        {
+          "host": "nita-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Нита - эстетическая, антивозрастная и функциональная стоматология"
+        },
+        {
+          "host": "crystal-dent.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология в Красноярске | CRYSTAL-DENT"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии"
+        },
+        {
+          "host": "kgsp1krsk.gosuslugi.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная (без ФАП)"
+        },
+        {
+          "host": "korona24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона»"
+        },
+        {
+          "host": "sapfircs.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — Центр стоматологии Сапфир"
+        },
+        {
+          "host": "stomalux.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Стоматологическая клиника Стомалюкс, Красноярск"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "voka-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология ВОКА в Красноярске - стоматологическая …"
+        },
+        {
+          "host": "24implant.ru",
+          "query_hits": 1,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Имплантация зубов в Красноярске — стоматологическая клиника …"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        }
+      ],
+      "metrics": {
+        "precision": 0.6364,
+        "benchmark_recall": 1.0,
+        "regional_recall": 1.0,
+        "corroboration": 0.0909,
+        "efficiency": 0.0469,
+        "score": 73.42
+      },
+      "rank": 1
+    },
+    {
+      "strategy": "parallel_union",
+      "elapsed_seconds": 17.386,
+      "unique_domains": 121,
+      "direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "antara24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "bookwidgets.com",
+        "cfd24.ru",
+        "citydent24.ru",
+        "company.medelement.com",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "ekaterinburg.regtorg.ru",
+        "esculapstom.ru",
+        "focus.kontur.ru",
+        "gdestomatklinika.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "mari-dent.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "moskva.regtorg.ru",
+        "moskva.tradedir.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "okean-stom.ru",
+        "otzywy.com",
+        "pngegg.com",
+        "profnik.ru",
+        "rifel-ru.orgs.biz",
+        "ru.wikipedia.org",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "sm-stomatology.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "spark-interfax.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomatology.sovamed.ru",
+        "stomferos.ru",
+        "tver.regtorg.ru",
+        "universitetskiy-tsentr.orgs.biz",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zub.ru",
+        "zub54.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "gdestomatklinika.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "martstom.ru",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "profnik.ru",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomferos.ru",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "alldantist.ru",
+        "dentistfind.ru",
+        "doctu.ru",
+        "kleos.ru",
+        "kp.ru",
+        "krasnoyarsk.jsprav.ru",
+        "krsk.infodoctor.ru",
+        "magicofsmile.ru",
+        "napopravku.ru",
+        "prodoctorov.ru",
+        "rusprofile.ru",
+        "stom-parkovaya.ru",
+        "stomatolog-centr.yell.ru",
+        "stomatologiya-info.ru",
+        "tuzlist.ru",
+        "vc.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [
+        "aldenta.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "medident.ru",
+        "nita-stom.ru",
+        "zyboff.ru"
+      ],
+      "provider_calls": {
+        "tavily": 8,
+        "searxng": 8
+      },
+      "costs": {
+        "USD": "0.064"
+      },
+      "top_direct": [
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 5,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске Mira — Лечение зубов"
+        },
+        {
+          "host": "aldenta.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Частная стоматология в Красноярске Al'denta (Альдента)"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника ЗУБОFF | Стоматология Красноярск"
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология Апекс в Красноярске"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов ..."
+        },
+        {
+          "host": "medident.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — МедиДент"
+        },
+        {
+          "host": "nita-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Нита - эстетическая, антивозрастная и функциональная стоматология"
+        },
+        {
+          "host": "crystal-dent.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология в Красноярске | CRYSTAL-DENT"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии"
+        },
+        {
+          "host": "kgsp1krsk.gosuslugi.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная (без ФАП)"
+        },
+        {
+          "host": "korona24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона»"
+        },
+        {
+          "host": "sapfircs.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — Центр стоматологии Сапфир"
+        },
+        {
+          "host": "stomalux.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Стоматологическая клиника Стомалюкс, Красноярск"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "voka-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология ВОКА в Красноярске - стоматологическая …"
+        },
+        {
+          "host": "24implant.ru",
+          "query_hits": 1,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Имплантация зубов в Красноярске — стоматологическая клиника …"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        }
+      ],
+      "metrics": {
+        "precision": 0.6364,
+        "benchmark_recall": 1.0,
+        "regional_recall": 1.0,
+        "corroboration": 0.0779,
+        "efficiency": 0.0469,
+        "score": 73.29
+      },
+      "rank": 2
+    },
+    {
+      "strategy": "exhaustive_coverage",
+      "elapsed_seconds": 19.183,
+      "unique_domains": 121,
+      "direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "antara24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "bookwidgets.com",
+        "cfd24.ru",
+        "citydent24.ru",
+        "company.medelement.com",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "ekaterinburg.regtorg.ru",
+        "esculapstom.ru",
+        "focus.kontur.ru",
+        "gdestomatklinika.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "mari-dent.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "moskva.regtorg.ru",
+        "moskva.tradedir.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "okean-stom.ru",
+        "otzywy.com",
+        "pngegg.com",
+        "profnik.ru",
+        "rifel-ru.orgs.biz",
+        "ru.wikipedia.org",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "sm-stomatology.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "spark-interfax.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomatology.sovamed.ru",
+        "stomferos.ru",
+        "tver.regtorg.ru",
+        "universitetskiy-tsentr.orgs.biz",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zub.ru",
+        "zub54.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "gdestomatklinika.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "martstom.ru",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "profnik.ru",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomferos.ru",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "alldantist.ru",
+        "dentistfind.ru",
+        "doctu.ru",
+        "kleos.ru",
+        "kp.ru",
+        "krasnoyarsk.jsprav.ru",
+        "krsk.infodoctor.ru",
+        "magicofsmile.ru",
+        "napopravku.ru",
+        "prodoctorov.ru",
+        "rusprofile.ru",
+        "stom-parkovaya.ru",
+        "stomatolog-centr.yell.ru",
+        "stomatologiya-info.ru",
+        "tuzlist.ru",
+        "vc.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [
+        "aldenta.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "medident.ru",
+        "nita-stom.ru",
+        "zyboff.ru"
+      ],
+      "provider_calls": {
+        "tavily": 8,
+        "searxng": 8
+      },
+      "costs": {
+        "USD": "0.064"
+      },
+      "top_direct": [
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 5,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске Mira — Лечение зубов"
+        },
+        {
+          "host": "aldenta.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Частная стоматология в Красноярске Al'denta (Альдента)"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника ЗУБОFF | Стоматология Красноярск"
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология Апекс в Красноярске"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов ..."
+        },
+        {
+          "host": "medident.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — МедиДент"
+        },
+        {
+          "host": "nita-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Нита - эстетическая, антивозрастная и функциональная стоматология"
+        },
+        {
+          "host": "crystal-dent.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология в Красноярске | CRYSTAL-DENT"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии"
+        },
+        {
+          "host": "kgsp1krsk.gosuslugi.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная (без ФАП)"
+        },
+        {
+          "host": "korona24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона»"
+        },
+        {
+          "host": "sapfircs.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — Центр стоматологии Сапфир"
+        },
+        {
+          "host": "stomalux.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Стоматологическая клиника Стомалюкс, Красноярск"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "voka-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология ВОКА в Красноярске - стоматологическая …"
+        },
+        {
+          "host": "24implant.ru",
+          "query_hits": 1,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Имплантация зубов в Красноярске — стоматологическая клиника …"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        }
+      ],
+      "metrics": {
+        "precision": 0.6364,
+        "benchmark_recall": 1.0,
+        "regional_recall": 1.0,
+        "corroboration": 0.0779,
+        "efficiency": 0.0,
+        "score": 73.05
+      },
+      "rank": 3
+    },
+    {
+      "strategy": "adaptive_cost_quality",
+      "elapsed_seconds": 19.184,
+      "unique_domains": 121,
+      "direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "antara24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "bookwidgets.com",
+        "cfd24.ru",
+        "citydent24.ru",
+        "company.medelement.com",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "ekaterinburg.regtorg.ru",
+        "esculapstom.ru",
+        "focus.kontur.ru",
+        "gdestomatklinika.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "mari-dent.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "moskva.regtorg.ru",
+        "moskva.tradedir.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "okean-stom.ru",
+        "otzywy.com",
+        "pngegg.com",
+        "profnik.ru",
+        "rifel-ru.orgs.biz",
+        "ru.wikipedia.org",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "sm-stomatology.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "spark-interfax.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomatology.sovamed.ru",
+        "stomferos.ru",
+        "tver.regtorg.ru",
+        "universitetskiy-tsentr.orgs.biz",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zub.ru",
+        "zub54.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "gdestomatklinika.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "martstom.ru",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "profnik.ru",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomferos.ru",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "alldantist.ru",
+        "dentistfind.ru",
+        "doctu.ru",
+        "kleos.ru",
+        "kp.ru",
+        "krasnoyarsk.jsprav.ru",
+        "krsk.infodoctor.ru",
+        "magicofsmile.ru",
+        "napopravku.ru",
+        "prodoctorov.ru",
+        "rusprofile.ru",
+        "stom-parkovaya.ru",
+        "stomatolog-centr.yell.ru",
+        "stomatologiya-info.ru",
+        "tuzlist.ru",
+        "vc.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [
+        "aldenta.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "medident.ru",
+        "nita-stom.ru",
+        "zyboff.ru"
+      ],
+      "provider_calls": {
+        "searxng": 8,
+        "tavily": 8
+      },
+      "costs": {
+        "USD": "0.064"
+      },
+      "top_direct": [
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 5,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске Mira — Лечение зубов"
+        },
+        {
+          "host": "aldenta.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Частная стоматология в Красноярске Al'denta (Альдента)"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника ЗУБОFF | Стоматология Красноярск"
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология Апекс в Красноярске"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов ..."
+        },
+        {
+          "host": "medident.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — МедиДент"
+        },
+        {
+          "host": "nita-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Нита - эстетическая, антивозрастная и функциональная стоматология"
+        },
+        {
+          "host": "crystal-dent.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология в Красноярске | CRYSTAL-DENT"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии"
+        },
+        {
+          "host": "kgsp1krsk.gosuslugi.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная (без ФАП)"
+        },
+        {
+          "host": "korona24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона»"
+        },
+        {
+          "host": "sapfircs.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — Центр стоматологии Сапфир"
+        },
+        {
+          "host": "stomalux.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Стоматологическая клиника Стомалюкс, Красноярск"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "voka-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология ВОКА в Красноярске - стоматологическая …"
+        },
+        {
+          "host": "24implant.ru",
+          "query_hits": 1,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Имплантация зубов в Красноярске — стоматологическая клиника …"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        }
+      ],
+      "metrics": {
+        "precision": 0.6364,
+        "benchmark_recall": 1.0,
+        "regional_recall": 1.0,
+        "corroboration": 0.0779,
+        "efficiency": 0.0,
+        "score": 73.05
+      },
+      "rank": 4
+    },
+    {
+      "strategy": "cascade_until_target",
+      "elapsed_seconds": 19.184,
+      "unique_domains": 121,
+      "direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "antara24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "bookwidgets.com",
+        "cfd24.ru",
+        "citydent24.ru",
+        "company.medelement.com",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "ekaterinburg.regtorg.ru",
+        "esculapstom.ru",
+        "focus.kontur.ru",
+        "gdestomatklinika.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "mari-dent.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "moskva.regtorg.ru",
+        "moskva.tradedir.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "okean-stom.ru",
+        "otzywy.com",
+        "pngegg.com",
+        "profnik.ru",
+        "rifel-ru.orgs.biz",
+        "ru.wikipedia.org",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "sm-stomatology.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "spark-interfax.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomatology.sovamed.ru",
+        "stomferos.ru",
+        "tver.regtorg.ru",
+        "universitetskiy-tsentr.orgs.biz",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zub.ru",
+        "zub54.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "gdestomatklinika.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "martstom.ru",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "profnik.ru",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomferos.ru",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "alldantist.ru",
+        "dentistfind.ru",
+        "doctu.ru",
+        "kleos.ru",
+        "kp.ru",
+        "krasnoyarsk.jsprav.ru",
+        "krsk.infodoctor.ru",
+        "magicofsmile.ru",
+        "napopravku.ru",
+        "prodoctorov.ru",
+        "rusprofile.ru",
+        "stom-parkovaya.ru",
+        "stomatolog-centr.yell.ru",
+        "stomatologiya-info.ru",
+        "tuzlist.ru",
+        "vc.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [
+        "aldenta.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "medident.ru",
+        "nita-stom.ru",
+        "zyboff.ru"
+      ],
+      "provider_calls": {
+        "tavily": 8,
+        "searxng": 8
+      },
+      "costs": {
+        "USD": "0.064"
+      },
+      "top_direct": [
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 5,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске Mira — Лечение зубов"
+        },
+        {
+          "host": "aldenta.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Частная стоматология в Красноярске Al'denta (Альдента)"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника ЗУБОFF | Стоматология Красноярск"
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология Апекс в Красноярске"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов ..."
+        },
+        {
+          "host": "medident.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — МедиДент"
+        },
+        {
+          "host": "nita-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Нита - эстетическая, антивозрастная и функциональная стоматология"
+        },
+        {
+          "host": "crystal-dent.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология в Красноярске | CRYSTAL-DENT"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии"
+        },
+        {
+          "host": "kgsp1krsk.gosuslugi.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная (без ФАП)"
+        },
+        {
+          "host": "korona24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона»"
+        },
+        {
+          "host": "sapfircs.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — Центр стоматологии Сапфир"
+        },
+        {
+          "host": "stomalux.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Стоматологическая клиника Стомалюкс, Красноярск"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "voka-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология ВОКА в Красноярске - стоматологическая …"
+        },
+        {
+          "host": "24implant.ru",
+          "query_hits": 1,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Имплантация зубов в Красноярске — стоматологическая клиника …"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        }
+      ],
+      "metrics": {
+        "precision": 0.6364,
+        "benchmark_recall": 1.0,
+        "regional_recall": 1.0,
+        "corroboration": 0.0779,
+        "efficiency": 0.0,
+        "score": 73.05
+      },
+      "rank": 5
+    },
+    {
+      "strategy": "sequential_union",
+      "elapsed_seconds": 19.184,
+      "unique_domains": 121,
+      "direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "antara24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "bookwidgets.com",
+        "cfd24.ru",
+        "citydent24.ru",
+        "company.medelement.com",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "ekaterinburg.regtorg.ru",
+        "esculapstom.ru",
+        "focus.kontur.ru",
+        "gdestomatklinika.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "mari-dent.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "moskva.regtorg.ru",
+        "moskva.tradedir.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "okean-stom.ru",
+        "otzywy.com",
+        "pngegg.com",
+        "profnik.ru",
+        "rifel-ru.orgs.biz",
+        "ru.wikipedia.org",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "sm-stomatology.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "spark-interfax.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomatology.sovamed.ru",
+        "stomferos.ru",
+        "tver.regtorg.ru",
+        "universitetskiy-tsentr.orgs.biz",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zub.ru",
+        "zub54.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "24implant.ru",
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "contact-kr.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "gdestomatklinika.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "liderdent24.ru",
+        "martstom.ru",
+        "mediasphera.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "odus.info",
+        "profnik.ru",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatologiivse.ru",
+        "stomferos.ru",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zachestnyibiznes.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "alldantist.ru",
+        "dentistfind.ru",
+        "doctu.ru",
+        "kleos.ru",
+        "kp.ru",
+        "krasnoyarsk.jsprav.ru",
+        "krsk.infodoctor.ru",
+        "magicofsmile.ru",
+        "napopravku.ru",
+        "prodoctorov.ru",
+        "rusprofile.ru",
+        "stom-parkovaya.ru",
+        "stomatolog-centr.yell.ru",
+        "stomatologiya-info.ru",
+        "tuzlist.ru",
+        "vc.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [
+        "aldenta.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "medident.ru",
+        "nita-stom.ru",
+        "zyboff.ru"
+      ],
+      "provider_calls": {
+        "tavily": 8,
+        "searxng": 8
+      },
+      "costs": {
+        "USD": "0.064"
+      },
+      "top_direct": [
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 5,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске Mira — Лечение зубов"
+        },
+        {
+          "host": "aldenta.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Частная стоматология в Красноярске Al'denta (Альдента)"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 4,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника ЗУБОFF | Стоматология Красноярск"
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология Апекс в Красноярске"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов ..."
+        },
+        {
+          "host": "medident.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — МедиДент"
+        },
+        {
+          "host": "nita-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Нита - эстетическая, антивозрастная и функциональная стоматология"
+        },
+        {
+          "host": "crystal-dent.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология в Красноярске | CRYSTAL-DENT"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии"
+        },
+        {
+          "host": "kgsp1krsk.gosuslugi.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная (без ФАП)"
+        },
+        {
+          "host": "korona24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона»"
+        },
+        {
+          "host": "sapfircs.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — Центр стоматологии Сапфир"
+        },
+        {
+          "host": "stomalux.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Стоматологическая клиника Стомалюкс, Красноярск"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "voka-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология ВОКА в Красноярске - стоматологическая …"
+        },
+        {
+          "host": "24implant.ru",
+          "query_hits": 1,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Имплантация зубов в Красноярске — стоматологическая клиника …"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        }
+      ],
+      "metrics": {
+        "precision": 0.6364,
+        "benchmark_recall": 1.0,
+        "regional_recall": 1.0,
+        "corroboration": 0.0779,
+        "efficiency": 0.0,
+        "score": 73.05
+      },
+      "rank": 6
+    },
+    {
+      "strategy": "fallback_first_nonempty",
+      "elapsed_seconds": 17.381,
+      "unique_domains": 83,
+      "direct_domains": [
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "antara24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "company.medelement.com",
+        "contact-kr.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "ekaterinburg.regtorg.ru",
+        "esculapstom.ru",
+        "focus.kontur.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "mari-dent.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "mediasphera.ru",
+        "medident.ru",
+        "mira-stom.ru",
+        "moskva.regtorg.ru",
+        "moskva.tradedir.ru",
+        "nita-stom.ru",
+        "okean-stom.ru",
+        "otzywy.com",
+        "pngegg.com",
+        "profnik.ru",
+        "rifel-ru.orgs.biz",
+        "ru.wikipedia.org",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "sm-stomatology.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "spark-interfax.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatology.sovamed.ru",
+        "stomferos.ru",
+        "tver.regtorg.ru",
+        "universitetskiy-tsentr.orgs.biz",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "zachestnyibiznes.ru",
+        "zub.ru",
+        "zub54.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "contact-kr.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "martstom.ru",
+        "mediasphera.ru",
+        "medident.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "profnik.ru",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomferos.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "zachestnyibiznes.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "kp.ru",
+        "magicofsmile.ru",
+        "prodoctorov.ru",
+        "rusprofile.ru",
+        "stom-parkovaya.ru",
+        "stomatolog-centr.yell.ru",
+        "tuzlist.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [],
+      "provider_calls": {
+        "tavily": 8
+      },
+      "costs": {
+        "USD": "0.064"
+      },
+      "top_direct": [
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 5,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске Mira — Лечение зубов"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов ..."
+        },
+        {
+          "host": "aldenta.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Контакты стоматологии \"Альдента\" в Красноярске"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии"
+        },
+        {
+          "host": "kgsp1krsk.gosuslugi.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная (без ФАП)"
+        },
+        {
+          "host": "korona24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона»"
+        },
+        {
+          "host": "sapfircs.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — Центр стоматологии Сапфир"
+        },
+        {
+          "host": "stomalux.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Стоматологическая клиника Стомалюкс, Красноярск"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детский стоматолог в Красноярске — Запись на прием"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        },
+        {
+          "host": "alfadent24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Альфа-Дент"
+        },
+        {
+          "host": "antara24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Центр стоматологии \"АнТаРа\""
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Хорошая детская стоматология в Красноярске"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске - записаться на прием"
+        },
+        {
+          "host": "cfd24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматологические услуги для всей семьи в Красноярске"
+        },
+        {
+          "host": "citydent24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Центр стоматологии Зубная Формула в Красноярске"
+        },
+        {
+          "host": "company.medelement.com",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника \"ОРТОДОНТИЯ\" на Победы, Россия, Краснодар, ул. им. 40-летия Победы, д. 184, корп. 3"
+        }
+      ],
+      "metrics": {
+        "precision": 0.7952,
+        "benchmark_recall": 0.8571,
+        "regional_recall": 0.8,
+        "corroboration": 0.0,
+        "efficiency": 0.047,
+        "score": 70.92
+      },
+      "rank": 7
+    },
+    {
+      "strategy": "primary_only",
+      "elapsed_seconds": 17.384,
+      "unique_domains": 83,
+      "direct_domains": [
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "antara24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "company.medelement.com",
+        "contact-kr.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "ekaterinburg.regtorg.ru",
+        "esculapstom.ru",
+        "focus.kontur.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "mari-dent.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "mediasphera.ru",
+        "medident.ru",
+        "mira-stom.ru",
+        "moskva.regtorg.ru",
+        "moskva.tradedir.ru",
+        "nita-stom.ru",
+        "okean-stom.ru",
+        "otzywy.com",
+        "pngegg.com",
+        "profnik.ru",
+        "rifel-ru.orgs.biz",
+        "ru.wikipedia.org",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "sm-stomatology.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "spark-interfax.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatology.sovamed.ru",
+        "stomferos.ru",
+        "tver.regtorg.ru",
+        "universitetskiy-tsentr.orgs.biz",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "zachestnyibiznes.ru",
+        "zub.ru",
+        "zub54.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "contact-kr.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "martstom.ru",
+        "mediasphera.ru",
+        "medident.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "profnik.ru",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomferos.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "zachestnyibiznes.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "kp.ru",
+        "magicofsmile.ru",
+        "prodoctorov.ru",
+        "rusprofile.ru",
+        "stom-parkovaya.ru",
+        "stomatolog-centr.yell.ru",
+        "tuzlist.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [],
+      "provider_calls": {
+        "tavily": 8
+      },
+      "costs": {
+        "USD": "0.064"
+      },
+      "top_direct": [
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 5,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске Mira — Лечение зубов"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов ..."
+        },
+        {
+          "host": "aldenta.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Контакты стоматологии \"Альдента\" в Красноярске"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии"
+        },
+        {
+          "host": "kgsp1krsk.gosuslugi.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная (без ФАП)"
+        },
+        {
+          "host": "korona24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона»"
+        },
+        {
+          "host": "sapfircs.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — Центр стоматологии Сапфир"
+        },
+        {
+          "host": "stomalux.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Стоматологическая клиника Стомалюкс, Красноярск"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детский стоматолог в Красноярске — Запись на прием"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        },
+        {
+          "host": "alfadent24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Альфа-Дент"
+        },
+        {
+          "host": "antara24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Центр стоматологии \"АнТаРа\""
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Хорошая детская стоматология в Красноярске"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске - записаться на прием"
+        },
+        {
+          "host": "cfd24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматологические услуги для всей семьи в Красноярске"
+        },
+        {
+          "host": "citydent24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Центр стоматологии Зубная Формула в Красноярске"
+        },
+        {
+          "host": "company.medelement.com",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника \"ОРТОДОНТИЯ\" на Победы, Россия, Краснодар, ул. им. 40-летия Победы, д. 184, корп. 3"
+        }
+      ],
+      "metrics": {
+        "precision": 0.7952,
+        "benchmark_recall": 0.8571,
+        "regional_recall": 0.8,
+        "corroboration": 0.0,
+        "efficiency": 0.0469,
+        "score": 70.92
+      },
+      "rank": 8
+    },
+    {
+      "strategy": "shadow_compare",
+      "elapsed_seconds": 19.18,
+      "unique_domains": 83,
+      "direct_domains": [
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "antara24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "company.medelement.com",
+        "contact-kr.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "ekaterinburg.regtorg.ru",
+        "esculapstom.ru",
+        "focus.kontur.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "mari-dent.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "mediasphera.ru",
+        "medident.ru",
+        "mira-stom.ru",
+        "moskva.regtorg.ru",
+        "moskva.tradedir.ru",
+        "nita-stom.ru",
+        "okean-stom.ru",
+        "otzywy.com",
+        "pngegg.com",
+        "profnik.ru",
+        "rifel-ru.orgs.biz",
+        "ru.wikipedia.org",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "sm-stomatology.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "spark-interfax.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomatology.sovamed.ru",
+        "stomferos.ru",
+        "tver.regtorg.ru",
+        "universitetskiy-tsentr.orgs.biz",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "zachestnyibiznes.ru",
+        "zub.ru",
+        "zub54.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "cfd24.ru",
+        "citydent24.ru",
+        "contact-kr.ru",
+        "dentalclinickrsk.ru",
+        "dentist-stom.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "kgsp3-r24.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "martstom.ru",
+        "mediasphera.ru",
+        "medident.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "profnik.ru",
+        "sapfircs.ru",
+        "sibdentalclinic.ru",
+        "sibstom24.info",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomferos.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "xn--80aibc4bzabe.xn--p1ai",
+        "zachestnyibiznes.ru",
+        "zubok124.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "kp.ru",
+        "magicofsmile.ru",
+        "prodoctorov.ru",
+        "rusprofile.ru",
+        "stom-parkovaya.ru",
+        "stomatolog-centr.yell.ru",
+        "tuzlist.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [],
+      "provider_calls": {
+        "tavily": 8,
+        "searxng": 8
+      },
+      "costs": {
+        "USD": "0.064"
+      },
+      "top_direct": [
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 5,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске Mira — Лечение зубов"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов ..."
+        },
+        {
+          "host": "aldenta.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Контакты стоматологии \"Альдента\" в Красноярске"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии"
+        },
+        {
+          "host": "kgsp1krsk.gosuslugi.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная (без ФАП)"
+        },
+        {
+          "host": "korona24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона»"
+        },
+        {
+          "host": "sapfircs.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске — Центр стоматологии Сапфир"
+        },
+        {
+          "host": "stomalux.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Стоматологическая клиника Стомалюкс, Красноярск"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детский стоматолог в Красноярске — Запись на прием"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        },
+        {
+          "host": "alfadent24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Альфа-Дент"
+        },
+        {
+          "host": "antara24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Центр стоматологии \"АнТаРа\""
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Хорошая детская стоматология в Красноярске"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске - записаться на прием"
+        },
+        {
+          "host": "cfd24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматологические услуги для всей семьи в Красноярске"
+        },
+        {
+          "host": "citydent24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Центр стоматологии Зубная Формула в Красноярске"
+        },
+        {
+          "host": "company.medelement.com",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника \"ОРТОДОНТИЯ\" на Победы, Россия, Краснодар, ул. им. 40-летия Победы, д. 184, корп. 3"
+        }
+      ],
+      "metrics": {
+        "precision": 0.7952,
+        "benchmark_recall": 0.8571,
+        "regional_recall": 0.8,
+        "corroboration": 0.0,
+        "efficiency": 0.0001,
+        "score": 70.69
+      },
+      "rank": 9
+    },
+    {
+      "strategy": "split_query_routing",
+      "elapsed_seconds": 10.584,
+      "unique_domains": 73,
+      "direct_domains": [
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "bookwidgets.com",
+        "company.medelement.com",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "gdestomatklinika.ru",
+        "health.krasgmu.ru",
+        "i-total.ru",
+        "idealcrimea.at.ua",
+        "kaskad-med.103.by",
+        "kcdi24.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "klinikaps.ru",
+        "klipartz.com",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "martstom.ru",
+        "medadvisor.ru",
+        "medcentre.com.ua",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "nita-stom.ru",
+        "pngegg.com",
+        "rifel-ru.orgs.biz",
+        "sapfircs.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomferos.ru",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zub54.ru",
+        "zyboff.ru"
+      ],
+      "regional_direct_domains": [
+        "abilis-med.ru",
+        "albus24.ru",
+        "aldenta.ru",
+        "alfadent24.ru",
+        "apex24.ru",
+        "astreyastom.ru",
+        "crystal-dent.ru",
+        "dentalclinickrsk.ru",
+        "dentosha.ru",
+        "dostupstom24.ru",
+        "esculapstom.ru",
+        "gdestomatklinika.ru",
+        "i-total.ru",
+        "kgsp1krsk.gosuslugi.ru",
+        "klinikaps.ru",
+        "korona24.ru",
+        "krsk.docdoc.ru",
+        "krsk.krasotaimedicina.ru",
+        "martstom.ru",
+        "medident.ru",
+        "megadent24.ru",
+        "mira-stom.ru",
+        "sapfircs.ru",
+        "smile-krsk.ru",
+        "smiledent24.ru",
+        "stomadv.ru",
+        "stomalux.ru",
+        "stomferos.ru",
+        "voka-stom.ru",
+        "witar24.ru",
+        "xn--80aeeykbhdbdbsyh.xn--p1ai",
+        "yakovlev-stom.ru",
+        "zyboff.ru"
+      ],
+      "supporting_domains": [
+        "2gis.ru",
+        "32top.ru",
+        "doctu.ru",
+        "kp.ru",
+        "magicofsmile.ru",
+        "prodoctorov.ru",
+        "vk.com",
+        "yandex.ru"
+      ],
+      "corroborated_domains": [
+        "aldenta.ru",
+        "astreyastom.ru",
+        "zyboff.ru"
+      ],
+      "provider_calls": {
+        "searxng": 4,
+        "tavily": 4
+      },
+      "costs": {
+        "USD": "0.032"
+      },
+      "top_direct": [
+        {
+          "host": "aldenta.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Частная стоматология в Красноярске Al'denta (Альдента)"
+        },
+        {
+          "host": "astreyastom.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматология АСТРЕЯ - лечение зубов в Красноярске"
+        },
+        {
+          "host": "zyboff.ru",
+          "query_hits": 3,
+          "providers": [
+            "searxng",
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника ЗУБОFF | Стоматология Красноярск"
+        },
+        {
+          "host": "mira-stom.ru",
+          "query_hits": 3,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Контакты - Стоматологическая клиника Mira"
+        },
+        {
+          "host": "apex24.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология Апекс в Красноярске"
+        },
+        {
+          "host": "crystal-dent.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология в Красноярске | CRYSTAL-DENT"
+        },
+        {
+          "host": "dostupstom24.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Доступная стоматология в Красноярске | Лечение зубов без ..."
+        },
+        {
+          "host": "medident.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология в Красноярске — МедиДент"
+        },
+        {
+          "host": "stomferos.ru",
+          "query_hits": 2,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос»"
+        },
+        {
+          "host": "voka-stom.ru",
+          "query_hits": 2,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Стоматология ВОКА в Красноярске - стоматологическая …"
+        },
+        {
+          "host": "abilis-med.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Октябрьском районе Красноярска - клиника «Абилис»"
+        },
+        {
+          "host": "albus24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске | клиника Альбус"
+        },
+        {
+          "host": "alfadent24.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Главная - Альфа-Дент"
+        },
+        {
+          "host": "bookwidgets.com",
+          "query_hits": 1,
+          "providers": [
+            "searxng"
+          ],
+          "title": "The Quiz Widget - BookWidgets"
+        },
+        {
+          "host": "company.medelement.com",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматологическая клиника \"ОРТОДОНТИЯ\" на Победы, Россия, Краснодар, ул. им. 40-летия Победы, д. 184, корп. 3"
+        },
+        {
+          "host": "dentalclinickrsk.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Контакты стоматологии Dental Clinic в Красноярске"
+        },
+        {
+          "host": "dentosha.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Детская стоматология Дентоша в Красноярске"
+        },
+        {
+          "host": "esculapstom.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Стоматология в Красноярске \"Эскулап\" - Лечение зубов в Красноярске"
+        },
+        {
+          "host": "gdestomatklinika.ru",
+          "query_hits": 1,
+          "providers": [
+            "searxng"
+          ],
+          "title": "Центр стоматологии в Красноярске: официальный сайт, адрес …"
+        },
+        {
+          "host": "health.krasgmu.ru",
+          "query_hits": 1,
+          "providers": [
+            "tavily"
+          ],
+          "title": "Университетский центр стоматологии - КрасГМУ.Здоровье"
+        }
+      ],
+      "metrics": {
+        "precision": 0.6301,
+        "benchmark_recall": 0.5974,
+        "regional_recall": 0.66,
+        "corroboration": 0.0652,
+        "efficiency": 0.4741,
+        "score": 54.95
+      },
+      "rank": 10
+    }
+  ]
+}
