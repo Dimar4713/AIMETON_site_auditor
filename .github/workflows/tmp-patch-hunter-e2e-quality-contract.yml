@@ -1,0 +1,68 @@
+name: Temporary Patch Hunter E2E Quality Contract
+
+on:
+  push:
+    branches:
+      - chore/hunter-e2e-quality-contract
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[e2e-quality-patched]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/hunter-e2e-quality-contract
+          fetch-depth: 1
+
+      - name: Apply guarded permanent real-E2E quality assertions
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/accept-hunter-real-e2e-stage.yml')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  '''      minimum_returned:\n        description: Minimum returned candidates required for acceptance\n        required: true\n        default: "10"\n        type: string\n      allow_paid_calls:\n''',
+                  '''      minimum_returned:\n        description: Minimum returned candidates required for acceptance\n        required: true\n        default: "10"\n        type: string\n      minimum_direct_returned:\n        description: Minimum direct company candidates required in the returned set\n        required: true\n        default: "10"\n        type: string\n      allow_paid_calls:\n''',
+              ),
+              (
+                  '''            -e E2E_EXPECTED_PROVIDERS='${{ inputs.expected_providers }}' \\\n            -e E2E_MIN_RETURNED='${{ inputs.minimum_returned }}' \\\n            -i "$CONTAINER" python - <<'PY'\n''',
+                  '''            -e E2E_EXPECTED_PROVIDERS='${{ inputs.expected_providers }}' \\\n            -e E2E_MIN_RETURNED='${{ inputs.minimum_returned }}' \\\n            -e E2E_MIN_DIRECT_RETURNED='${{ inputs.minimum_direct_returned }}' \\\n            -i "$CONTAINER" python - <<'PY'\n''',
+              ),
+              (
+                  '''          import httpx\n\n          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')\n''',
+                  '''          import httpx\n          from collections import Counter\n\n          from app.discovery import _candidate_rank_role\n          from app.models import HuntCandidate\n\n          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')\n''',
+              ),
+              (
+                  '''          candidates = data.get('candidates') or []\n          search = data.get('search') or {}\n''',
+                  '''          candidates = data.get('candidates') or []\n          validated_candidates = [HuntCandidate.model_validate(item) for item in candidates]\n          candidate_roles = [_candidate_rank_role(candidate) for candidate in validated_candidates]\n          role_counts = Counter(candidate_roles)\n          minimum_direct_returned = int(os.environ['E2E_MIN_DIRECT_RETURNED'])\n          direct_count = int(role_counts.get('direct_candidate', 0))\n          supporting_deep = [\n              str(candidate.url)\n              for candidate, role in zip(validated_candidates, candidate_roles)\n              if role in {'supporting_source', 'blocked_source'} and candidate.deep_analysis_performed\n          ]\n          top_direct_window_size = min(20, direct_count, len(candidate_roles))\n          top_direct_window = candidate_roles[:top_direct_window_size]\n\n          assert direct_count >= minimum_direct_returned, {\n              'minimum_direct_returned': minimum_direct_returned,\n              'direct_returned': direct_count,\n              'role_counts': dict(role_counts),\n          }\n          assert not supporting_deep, {'supporting_sources_with_deep_analysis': supporting_deep}\n          assert all(role == 'direct_candidate' for role in top_direct_window), {\n              'top_direct_window': top_direct_window,\n              'role_counts': dict(role_counts),\n          }\n\n          search = data.get('search') or {}\n''',
+              ),
+              (
+                  '''              'candidate_count_in_api': len(candidates),\n              'participating_providers': participating,\n''',
+                  '''              'candidate_count_in_api': len(candidates),\n              'candidate_role_counts': dict(role_counts),\n              'minimum_direct_returned': minimum_direct_returned,\n              'top_direct_window': top_direct_window,\n              'supporting_sources_with_deep_analysis': len(supporting_deep),\n              'participating_providers': participating,\n''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one workflow replacement, found {count}: {old[:120]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          rm .github/workflows/tmp-patch-hunter-e2e-quality-contract.yml
+          git config user.name 'AIMETON Acceptance Contract'
+          git config user.email '127470701+Dimar4713@users.noreply.github.com'
+          git add .github/workflows/accept-hunter-real-e2e-stage.yml tests/test_hunter_real_e2e_workflow_quality.py .github/workflows/tmp-patch-hunter-e2e-quality-contract.yml
+          git commit -m 'Make Hunter real E2E enforce lead quality [e2e-quality-patched]'
+          git push origin HEAD:chore/hunter-e2e-quality-contract
