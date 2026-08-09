@@ -1,0 +1,72 @@
+name: Temporary Patch Stage Runtime Persistence
+
+on:
+  push:
+    branches:
+      - fix/stage-runtime-persistence-in-deploy
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[runtime-persistence-patched]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/stage-runtime-persistence-in-deploy
+          fetch-depth: 1
+
+      - name: Apply guarded deploy persistence patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/deploy_stage.sh')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  'COMPOSE_OVERRIDE_FILE="$STACK_DIR/docker-compose.runtime-secrets.yml"\nPREVIOUS_SHA="unknown"\n',
+                  'COMPOSE_OVERRIDE_FILE="$STACK_DIR/docker-compose.runtime-secrets.yml"\nDATA_DIR="${DATA_DIR:-$STACK_DIR/data/runtime-core}"\nPREVIOUS_SHA="unknown"\n',
+              ),
+              (
+                  '''  chmod 600 "$secret_tmp"\n  {\n''',
+                  '''  chmod 600 "$secret_tmp"\n  mkdir -p "$DATA_DIR"\n  chmod 700 "$DATA_DIR"\n  {\n''',
+              ),
+              (
+                  '''      IDENTITY_SEARCH_ALLOW_PAID_FALLBACK: "$IDENTITY_SEARCH_ALLOW_PAID_FALLBACK"\n      IDENTITY_AUTHORITY_HOSTS: "$IDENTITY_AUTHORITY_HOSTS"\nEOF\n''',
+                  '''      IDENTITY_SEARCH_ALLOW_PAID_FALLBACK: "$IDENTITY_SEARCH_ALLOW_PAID_FALLBACK"\n      IDENTITY_AUTHORITY_HOSTS: "$IDENTITY_AUTHORITY_HOSTS"\n    volumes:\n      - ./data/runtime-core:/app/data\nEOF\n''',
+              ),
+              (
+                  '''  mv "$secret_tmp" "$RUNTIME_SECRETS_FILE"\n  mv "$override_tmp" "$COMPOSE_OVERRIDE_FILE"\n  log "Runtime provider configuration installed without exposing credentials"\n}\n\ncompose_stack() {\n''',
+                  '''  mv "$secret_tmp" "$RUNTIME_SECRETS_FILE"\n  mv "$override_tmp" "$COMPOSE_OVERRIDE_FILE"\n  log "Runtime provider configuration and persistent /app/data mount installed without exposing credentials"\n}\n\nverify_runtime_persistence_mount() {\n  local mount\n  mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}' 2>/dev/null || true)"\n  [[ -n "$mount" ]] || { log "runtime persistence mount missing from deployed container"; return 1; }\n  [[ "${mount##*|}" == "/app/data" ]] || { log "unexpected runtime persistence destination: $mount"; return 1; }\n  log "Runtime persistence mount verified: $mount"\n}\n\ncompose_stack() {\n''',
+              ),
+              (
+                  '''configure_runtime_secrets\n\nlog "Switching bundle atomically; previous SHA: $PREVIOUS_SHA"\n''',
+                  '''configure_runtime_secrets\ncompose_stack config --quiet\n\nlog "Switching bundle atomically; previous SHA: $PREVIOUS_SHA"\n''',
+              ),
+              (
+                  '''wait_healthy || rollback "container failed health check"\nsmoke_test || rollback "stage smoke test failed"\n\ntrap - ERR\n''',
+                  '''wait_healthy || rollback "container failed health check"\nverify_runtime_persistence_mount || rollback "runtime persistence mount missing from deployed container"\nsmoke_test || rollback "stage smoke test failed"\n\ntrap - ERR\n''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one deploy replacement, found {count}: {old[:140]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          bash -n scripts/deploy_stage.sh
+          git config user.name 'AIMETON Stage Persistence Fix'
+          git config user.email '127470701+Dimar4713@users.noreply.github.com'
+          git add scripts/deploy_stage.sh
+          git commit -m 'Mount persistent runtime DB in transactional deploy [runtime-persistence-patched]'
+          git push origin HEAD:fix/stage-runtime-persistence-in-deploy
