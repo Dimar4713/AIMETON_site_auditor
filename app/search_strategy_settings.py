@@ -10,9 +10,13 @@ from threading import RLock
 
 from pydantic import BaseModel, Field
 
+from app.models import HuntRequest
+from app.search_gateway.models import SearchPolicy, SearchStrategy
+
 
 SETTINGS_KEY = "search.strategy.settings.v1"
 KNOWN_PROVIDERS = ("searxng", "yandex", "tavily")
+PAID_PROVIDERS = frozenset({"yandex", "tavily"})
 
 
 class SearchStrategyId(StrEnum):
@@ -26,6 +30,12 @@ class SearchStrategyId(StrEnum):
     ADAPTIVE_COST_QUALITY = "adaptive_cost_quality"
     EXHAUSTIVE_COVERAGE = "exhaustive_coverage"
     SHADOW_COMPARE = "shadow_compare"
+
+
+class PaidPolicy(StrEnum):
+    INHERIT = "inherit"
+    DENY = "deny"
+    ALLOW_WITH_BUDGET = "allow_with_budget"
 
 
 IMPLEMENTED_STRATEGIES = frozenset(
@@ -49,7 +59,7 @@ class StrategyDescriptor(BaseModel):
 
 
 STRATEGY_CATALOG = (
-    StrategyDescriptor(id=SearchStrategyId.PRIMARY_ONLY, label="Один движок", description="Использовать только первый разрешённый provider.", coverage="низкий/предсказуемый", cost_profile="минимальный", implemented=True),
+    StrategyDescriptor(id=SearchStrategyId.PRIMARY_ONLY, label="Один движок", description="Использовать только первый доступный разрешённый provider.", coverage="низкий/предсказуемый", cost_profile="минимальный", implemented=True),
     StrategyDescriptor(id=SearchStrategyId.FALLBACK_FIRST_NONEMPTY, label="Резервирование", description="Идти по providers последовательно и остановиться на первом непустом ответе.", coverage="средний", cost_profile="низкий", implemented=True),
     StrategyDescriptor(id=SearchStrategyId.CASCADE_UNTIL_TARGET, label="Каскад до цели", description="Последовательно объединять выдачи, пока не набрано целевое число уникальных результатов или не исчерпаны разрешённые providers.", coverage="высокий", cost_profile="управляемый", implemented=True),
     StrategyDescriptor(id=SearchStrategyId.SEQUENTIAL_UNION, label="Последовательное объединение", description="Вызвать все разрешённые providers по очереди и объединить/дедуплицировать их результаты.", coverage="высокий", cost_profile="средний/высокий", implemented=True),
@@ -68,8 +78,8 @@ class TariffSearchProfile(BaseModel):
     enabled: bool = True
     strategy: SearchStrategyId = SearchStrategyId.FALLBACK_FIRST_NONEMPTY
     provider_order: list[str] = Field(default_factory=lambda: list(KNOWN_PROVIDERS), min_length=1, max_length=3)
-    allow_paid_providers: bool = False
-    allow_paid_fanout: bool = False
+    paid_policy: PaidPolicy = PaidPolicy.INHERIT
+    paid_fanout_policy: PaidPolicy = PaidPolicy.INHERIT
     max_cost_rub: Decimal = Field(default=Decimal("0"), ge=0)
     max_cost_usd: Decimal = Field(default=Decimal("0"), ge=0)
     target_results: int = Field(default=25, ge=1, le=100)
@@ -95,73 +105,37 @@ class TariffSearchProfile(BaseModel):
             raise ValueError("output_limit must be <= max_candidates")
         if self.max_providers_per_query > len(self.provider_order):
             raise ValueError("max_providers_per_query exceeds provider_order")
-        if self.allow_paid_fanout and not self.allow_paid_providers:
-            raise ValueError("paid_fanout_requires_paid_providers")
-        if self.allow_paid_providers and self.max_cost_rub <= 0 and self.max_cost_usd <= 0:
+        if self.paid_policy is PaidPolicy.ALLOW_WITH_BUDGET and self.max_cost_rub <= 0 and self.max_cost_usd <= 0:
             raise ValueError("paid_providers_require_nonzero_budget")
+        if self.paid_fanout_policy is PaidPolicy.ALLOW_WITH_BUDGET and self.max_cost_rub <= 0 and self.max_cost_usd <= 0:
+            raise ValueError("paid_fanout_requires_nonzero_budget")
 
 
 def default_tariff_profiles() -> dict[str, TariffSearchProfile]:
     return {
         "free": TariffSearchProfile(
-            id="free",
-            label="Free",
-            strategy=SearchStrategyId.PRIMARY_ONLY,
-            provider_order=["searxng"],
-            target_results=15,
-            max_providers_per_query=1,
-            max_queries=8,
-            results_per_query=5,
-            max_candidates=40,
-            output_limit=15,
-            minimum_pre_score=35,
-            deep_audit_score=65,
-            concurrency=2,
+            id="free", label="Free", strategy=SearchStrategyId.PRIMARY_ONLY,
+            provider_order=["searxng"], paid_policy=PaidPolicy.DENY, paid_fanout_policy=PaidPolicy.DENY,
+            target_results=15, max_providers_per_query=1, max_queries=8, results_per_query=5,
+            max_candidates=40, output_limit=15, minimum_pre_score=35, deep_audit_score=65, concurrency=2,
         ),
         "start": TariffSearchProfile(
-            id="start",
-            label="Start",
-            strategy=SearchStrategyId.FALLBACK_FIRST_NONEMPTY,
-            provider_order=["searxng", "yandex", "tavily"],
-            target_results=25,
-            max_providers_per_query=3,
-            max_queries=20,
-            results_per_query=10,
-            max_candidates=100,
-            output_limit=25,
-            minimum_pre_score=35,
-            deep_audit_score=60,
-            concurrency=4,
+            id="start", label="Start", strategy=SearchStrategyId.FALLBACK_FIRST_NONEMPTY,
+            provider_order=["searxng", "yandex", "tavily"], target_results=25, max_providers_per_query=3,
+            max_queries=20, results_per_query=10, max_candidates=100, output_limit=25,
+            minimum_pre_score=35, deep_audit_score=60, concurrency=4,
         ),
         "pro": TariffSearchProfile(
-            id="pro",
-            label="Pro",
-            strategy=SearchStrategyId.CASCADE_UNTIL_TARGET,
-            provider_order=["searxng", "yandex", "tavily"],
-            target_results=40,
-            max_providers_per_query=3,
-            max_queries=30,
-            results_per_query=15,
-            max_candidates=200,
-            output_limit=50,
-            minimum_pre_score=30,
-            deep_audit_score=55,
-            concurrency=6,
+            id="pro", label="Pro", strategy=SearchStrategyId.CASCADE_UNTIL_TARGET,
+            provider_order=["searxng", "yandex", "tavily"], target_results=40, max_providers_per_query=3,
+            max_queries=30, results_per_query=15, max_candidates=200, output_limit=50,
+            minimum_pre_score=30, deep_audit_score=55, concurrency=6,
         ),
         "max": TariffSearchProfile(
-            id="max",
-            label="Max",
-            strategy=SearchStrategyId.SEQUENTIAL_UNION,
-            provider_order=["searxng", "yandex", "tavily"],
-            target_results=75,
-            max_providers_per_query=3,
-            max_queries=50,
-            results_per_query=20,
-            max_candidates=400,
-            output_limit=100,
-            minimum_pre_score=25,
-            deep_audit_score=50,
-            concurrency=8,
+            id="max", label="Max", strategy=SearchStrategyId.SEQUENTIAL_UNION,
+            provider_order=["searxng", "yandex", "tavily"], target_results=75, max_providers_per_query=3,
+            max_queries=50, results_per_query=20, max_candidates=400, output_limit=100,
+            minimum_pre_score=25, deep_audit_score=50, concurrency=8,
         ),
     }
 
@@ -171,8 +145,8 @@ class GlobalSearchSettings(BaseModel):
     default_strategy: SearchStrategyId = SearchStrategyId.FALLBACK_FIRST_NONEMPTY
     enabled_providers: list[str] = Field(default_factory=lambda: list(KNOWN_PROVIDERS), min_length=1, max_length=3)
     canonical_provider_order: list[str] = Field(default_factory=lambda: ["searxng", "yandex", "tavily"], min_length=1, max_length=3)
-    allow_paid_search_globally: bool = False
-    allow_paid_fanout_globally: bool = False
+    paid_policy: PaidPolicy = PaidPolicy.INHERIT
+    paid_fanout_policy: PaidPolicy = PaidPolicy.INHERIT
     hard_max_cost_rub: Decimal = Field(default=Decimal("0"), ge=0)
     hard_max_cost_usd: Decimal = Field(default=Decimal("0"), ge=0)
     emergency_strategy_override: SearchStrategyId | None = None
@@ -190,10 +164,10 @@ class GlobalSearchSettings(BaseModel):
             raise ValueError("canonical_provider_order_contains_duplicates")
         if any(provider not in KNOWN_PROVIDERS for provider in self.enabled_providers + self.canonical_provider_order):
             raise ValueError("unknown_provider")
-        if self.allow_paid_fanout_globally and not self.allow_paid_search_globally:
-            raise ValueError("global_paid_fanout_requires_paid_search")
-        if self.allow_paid_search_globally and self.hard_max_cost_rub <= 0 and self.hard_max_cost_usd <= 0:
+        if self.paid_policy is PaidPolicy.ALLOW_WITH_BUDGET and self.hard_max_cost_rub <= 0 and self.hard_max_cost_usd <= 0:
             raise ValueError("global_paid_search_requires_nonzero_budget")
+        if self.paid_fanout_policy is PaidPolicy.ALLOW_WITH_BUDGET and self.hard_max_cost_rub <= 0 and self.hard_max_cost_usd <= 0:
+            raise ValueError("global_paid_fanout_requires_nonzero_budget")
 
 
 class SearchStrategySettings(BaseModel):
@@ -211,6 +185,64 @@ class SearchStrategySettings(BaseModel):
 
     def active_profile(self) -> TariffSearchProfile:
         return self.tariffs[self.global_settings.active_tariff]
+
+    def apply_hunt_request(self, request: HuntRequest) -> HuntRequest:
+        profile = self.active_profile()
+        return request.model_copy(update={
+            "max_queries": profile.max_queries,
+            "results_per_query": profile.results_per_query,
+            "max_candidates": profile.max_candidates,
+            "minimum_pre_score": profile.minimum_pre_score,
+            "deep_audit_score": profile.deep_audit_score,
+            "output_limit": profile.output_limit,
+            "concurrency": profile.concurrency,
+        })
+
+    @staticmethod
+    def _paid_value(policy: PaidPolicy, inherited: bool) -> bool:
+        if policy is PaidPolicy.INHERIT:
+            return inherited
+        return policy is PaidPolicy.ALLOW_WITH_BUDGET
+
+    @staticmethod
+    def _cap_budget(base: dict[str, Decimal], profile: TariffSearchProfile, global_settings: GlobalSearchSettings) -> dict[str, Decimal]:
+        result = dict(base)
+        requested = {"RUB": profile.max_cost_rub, "USD": profile.max_cost_usd}
+        hard = {"RUB": global_settings.hard_max_cost_rub, "USD": global_settings.hard_max_cost_usd}
+        for currency in ("RUB", "USD"):
+            values = [value for value in (result.get(currency), requested[currency], hard[currency]) if value is not None and value > 0]
+            if values:
+                result[currency] = min(values)
+        return result
+
+    def apply_search_policy(self, base: SearchPolicy) -> SearchPolicy:
+        global_settings = self.global_settings
+        profile = self.active_profile()
+        order = tuple(
+            provider for provider in profile.provider_order
+            if provider in global_settings.enabled_providers
+        )
+        if not order:
+            order = tuple(provider for provider in global_settings.canonical_provider_order if provider in global_settings.enabled_providers)
+        strategy_id = global_settings.emergency_strategy_override or profile.strategy or global_settings.default_strategy
+        allow_paid = self._paid_value(global_settings.paid_policy, base.allow_paid_fallback)
+        allow_paid = self._paid_value(profile.paid_policy, allow_paid)
+        allow_fanout = self._paid_value(global_settings.paid_fanout_policy, base.allow_paid_fanout)
+        allow_fanout = self._paid_value(profile.paid_fanout_policy, allow_fanout)
+        if not allow_paid:
+            allowed = frozenset(provider for provider in order if provider not in PAID_PROVIDERS)
+        else:
+            allowed = frozenset(order)
+        return base.model_copy(update={
+            "provider_order": order,
+            "allowed_providers": allowed,
+            "strategy": SearchStrategy(str(strategy_id)),
+            "target_results": profile.target_results,
+            "max_providers_per_query": profile.max_providers_per_query,
+            "allow_paid_fallback": allow_paid,
+            "allow_paid_fanout": allow_paid and allow_fanout,
+            "max_cost_by_currency": self._cap_budget(base.max_cost_by_currency, profile, global_settings),
+        })
 
 
 class SearchStrategySettingsRecord(BaseModel):
@@ -262,10 +294,7 @@ class SearchStrategySettingsRepository:
             reason=normalized_reason[:500],
         )
         with self._lock, self._connect() as db:
-            db.execute(
-                "INSERT OR REPLACE INTO runtime_meta(key, value) VALUES(?, ?)",
-                (SETTINGS_KEY, record.model_dump_json()),
-            )
+            db.execute("INSERT OR REPLACE INTO runtime_meta(key, value) VALUES(?, ?)", (SETTINGS_KEY, record.model_dump_json()))
         return record
 
 
