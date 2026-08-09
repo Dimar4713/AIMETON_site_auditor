@@ -1,0 +1,189 @@
+name: Accept Hunter Runtime Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to inspect
+        required: true
+        type: string
+      expected_tariff:
+        description: Expected active Hunter tariff
+        required: false
+        default: max
+        type: string
+      expected_strategy:
+        description: Expected effective search strategy
+        required: false
+        default: exhaustive_coverage
+        type: string
+      expected_provider_order:
+        description: Expected effective provider order, comma separated
+        required: false
+        default: searxng,yandex
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: aimeton-accept-hunter-runtime-stage
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      REPORT: /tmp/hunter-runtime-stage-${{ github.run_id }}.md
+
+    steps:
+      - name: Verify exact deployed SHA and healthy auditor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$expected" ]]
+          [[ "$status" == healthy ]]
+          {
+            echo '## Hunter runtime Stage acceptance'
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '%s\n' "- deployed source SHA: \`$deployed\`"
+            printf '%s\n' "- stage auditor status: \`$status\`"
+          } > "$REPORT"
+
+      - name: Inspect effective Hunter runtime without provider calls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          result="$(docker exec \
+            -e EXPECTED_TARIFF='${{ inputs.expected_tariff }}' \
+            -e EXPECTED_STRATEGY='${{ inputs.expected_strategy }}' \
+            -e EXPECTED_PROVIDER_ORDER='${{ inputs.expected_provider_order }}' \
+            -i "$CONTAINER" python - <<'PY'
+          import json
+          import os
+
+          from app.models import HuntRequest
+          from app.search_gateway import search_policy_from_env
+          from app.search_strategy_settings import get_search_strategy_settings_repository
+
+          record = get_search_strategy_settings_repository().get()
+          settings = record.settings
+          global_settings = settings.global_settings
+          profile = settings.active_profile()
+          effective_policy = settings.apply_search_policy(search_policy_from_env())
+          effective_hunt = settings.apply_hunt_request(
+              HuntRequest(region='runtime-inspection', industries=['runtime-inspection'])
+          )
+
+          expected_tariff = os.environ['EXPECTED_TARIFF'].strip()
+          expected_strategy = os.environ['EXPECTED_STRATEGY'].strip()
+          expected_order = [
+              item.strip()
+              for item in os.environ['EXPECTED_PROVIDER_ORDER'].split(',')
+              if item.strip()
+          ]
+
+          actual_strategy = str(effective_policy.strategy)
+          actual_order = list(effective_policy.provider_order)
+
+          assert global_settings.active_tariff == expected_tariff, {
+              'expected_tariff': expected_tariff,
+              'actual_tariff': global_settings.active_tariff,
+          }
+          assert actual_strategy == expected_strategy, {
+              'expected_strategy': expected_strategy,
+              'actual_strategy': actual_strategy,
+          }
+          assert actual_order == expected_order, {
+              'expected_provider_order': expected_order,
+              'actual_provider_order': actual_order,
+          }
+
+          safe = {
+              'active_tariff': global_settings.active_tariff,
+              'profile_strategy': str(profile.strategy) if profile.strategy is not None else None,
+              'emergency_strategy_override': (
+                  str(global_settings.emergency_strategy_override)
+                  if global_settings.emergency_strategy_override is not None
+                  else None
+              ),
+              'effective_strategy': actual_strategy,
+              'effective_provider_order': actual_order,
+              'allowed_providers': (
+                  sorted(effective_policy.allowed_providers)
+                  if effective_policy.allowed_providers is not None
+                  else None
+              ),
+              'allow_paid_fallback': effective_policy.allow_paid_fallback,
+              'allow_paid_fanout': effective_policy.allow_paid_fanout,
+              'target_results': effective_policy.target_results,
+              'max_providers_per_query': effective_policy.max_providers_per_query,
+              'hunter_limits': {
+                  'max_queries': effective_hunt.max_queries,
+                  'results_per_query': effective_hunt.results_per_query,
+                  'max_candidates': effective_hunt.max_candidates,
+                  'output_limit': effective_hunt.output_limit,
+                  'minimum_pre_score': effective_hunt.minimum_pre_score,
+                  'deep_audit_score': effective_hunt.deep_audit_score,
+                  'concurrency': effective_hunt.concurrency,
+              },
+              'settings_updated_at': record.updated_at,
+              'settings_reason': record.reason,
+          }
+          print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          PY
+          )"
+          {
+            echo
+            echo '### Effective Hunter runtime'
+            echo
+            echo '```json'
+            echo "$result"
+            echo '```'
+            echo
+            echo '- provider calls: `0`'
+            echo '- verdict: ✅ active tariff, effective strategy and provider order match the expected Stage runtime.'
+          } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hunter-runtime-stage-${{ github.run_id }}
+          path: ${{ env.REPORT }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish evidence to P1-501
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ env.REPORT }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = process.env.REPORT_PATH;
+            const body = path && fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `## Hunter runtime Stage acceptance\n\nWorkflow ${context.runId} failed before sanitized evidence was produced.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 501,
+              body: body.slice(0, 60000),
+            });
