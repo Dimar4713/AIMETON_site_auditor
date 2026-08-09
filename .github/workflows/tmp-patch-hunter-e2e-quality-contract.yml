@@ -34,10 +34,6 @@ jobs:
                   '''      minimum_returned:\n        description: Minimum returned candidates required for acceptance\n        required: true\n        default: "10"\n        type: string\n      minimum_direct_returned:\n        description: Minimum direct company candidates required in the returned set\n        required: true\n        default: "10"\n        type: string\n      allow_paid_calls:\n''',
               ),
               (
-                  '''            -e E2E_EXPECTED_PROVIDERS='${{ inputs.expected_providers }}' \\\n            -e E2E_MIN_RETURNED='${{ inputs.minimum_returned }}' \\\n            -i "$CONTAINER" python - <<'PY'\n''',
-                  '''            -e E2E_EXPECTED_PROVIDERS='${{ inputs.expected_providers }}' \\\n            -e E2E_MIN_RETURNED='${{ inputs.minimum_returned }}' \\\n            -e E2E_MIN_DIRECT_RETURNED='${{ inputs.minimum_direct_returned }}' \\\n            -i "$CONTAINER" python - <<'PY'\n''',
-              ),
-              (
                   '''          import httpx\n\n          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')\n''',
                   '''          import httpx\n          from collections import Counter\n\n          from app.discovery import _candidate_rank_role\n          from app.models import HuntCandidate\n\n          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')\n''',
               ),
@@ -56,6 +52,16 @@ jobs:
               if count != 1:
                   raise SystemExit(f'expected one workflow replacement, found {count}: {old[:120]!r}')
               text = text.replace(old, new, 1)
+
+          marker = "            -e E2E_MIN_RETURNED="
+          lines = text.splitlines()
+          matches = [i for i, line in enumerate(lines) if line.startswith(marker)]
+          if len(matches) != 1:
+              raise SystemExit(f'expected one E2E_MIN_RETURNED env line, found {len(matches)}')
+          idx = matches[0]
+          expression = '$' + '{{ inputs.minimum_direct_returned }}'
+          lines.insert(idx + 1, f"            -e E2E_MIN_DIRECT_RETURNED='{expression}' \\")
+          text = '\n'.join(lines) + '\n'
 
           path.write_text(text, encoding='utf-8')
           PY
