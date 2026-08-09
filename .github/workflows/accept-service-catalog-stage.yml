@@ -71,8 +71,9 @@ jobs:
           root = Path('/app/static')
           index = (root / 'index.html').read_text(encoding='utf-8')
           catalog = (root / 'service-catalog.js').read_text(encoding='utf-8')
+          live_analysis = (root / 'live-analysis.js').read_text(encoding='utf-8')
           app = (root / 'app.js').read_text(encoding='utf-8')
-          combined = '\n'.join((index, catalog, app))
+          combined = '\n'.join((index, catalog, live_analysis, app))
 
           for service in ('site-audit', 'company-intelligence', 'hunter', 'interface-audit'):
               assert f'data-service-card="{service}"' in index, f'missing service card: {service}'
@@ -80,7 +81,7 @@ jobs:
           for panel in ('site-audit', 'company-intelligence', 'hunter'):
               assert f'data-service-panel="{panel}"' in index, f'missing service panel: {panel}'
 
-          assert '/api/analyze/start' in app, 'audit launcher is not bound to live analysis start'
+          assert '/api/analyze/start' in live_analysis, 'audit launcher is not bound to live analysis start'
           assert '/api/company-intelligence' in catalog, 'company intelligence endpoint binding missing'
           assert '/api/hunt' in catalog, 'hunter endpoint binding missing'
           assert 'companyIntelligenceForm' in catalog, 'company form submit handler missing'
@@ -88,6 +89,19 @@ jobs:
           assert 'event.preventDefault()' in catalog, 'explicit submit boundary missing'
           assert 'clearSelection();' in catalog, 'catalog-first initial state missing'
           assert 'data-service-card="interface-audit"' in index and 'disabled' in index and 'Beta' in index, 'interface audit beta guard missing'
+
+          hunter_visibility_tokens = (
+              'const funnel = data.funnel || {};',
+              'funnel.raw_results',
+              'funnel.unique_candidates',
+              'funnel.qualified_candidates',
+              'funnel.returned_candidates',
+              'Raw: ${rawResults} → уникальные: ${uniqueCandidates} → прошли фильтр: ${qualifiedCandidates} → возвращено API: ${returnedCandidates}',
+              'отображено ${candidates.length} результатов',
+          )
+          for token in hunter_visibility_tokens:
+              assert token in catalog, f'hunter visible-funnel contract missing: {token}'
+          assert catalog.count('details.open = true;') >= 2, 'returned Hunter groups are hidden by default'
 
           auto_call_tokens = ('postJson(\'/api/company-intelligence\'', 'postJson(\'/api/hunt\'')
           for token in auto_call_tokens:
@@ -105,6 +119,8 @@ jobs:
             echo '- four service cards: ✅'
             echo '- three real service forms: ✅'
             echo '- audit/company/hunter endpoint bindings: ✅'
+            echo '- Hunter raw → unique → qualified → returned visibility: ✅'
+            echo '- all returned Hunter groups open by default: ✅'
             echo '- explicit submit-only provider boundary: ✅'
             echo '- catalog-first mobile entry state: ✅'
             echo '- interface audit beta guard: ✅'
