@@ -28,6 +28,7 @@ class AttemptState(StrEnum):
 class ProviderReadiness(StrEnum):
     ACTIVE = "active"
     NOT_CONFIGURED = "not_configured"
+    POLICY_BLOCKED = "policy_blocked"
     PRICING_UNKNOWN = "pricing_unknown"
     BUDGET_BLOCKED = "budget_blocked"
     QUOTA_BLOCKED = "quota_blocked"
