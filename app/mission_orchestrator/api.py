@@ -3,6 +3,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.admin_hunter_settings_api import router as admin_hunter_settings_router
 from app.admin_mission_retry_api import router as admin_mission_retry_router
+from app.admin_search_strategy_api import router as admin_search_strategy_router
 from app.admin_trace_api import router as admin_trace_router
 from app.admin_trace_waterfall_api import router as admin_trace_waterfall_router
 from app.admin_workspace_api import router as admin_workspace_router
@@ -97,6 +98,7 @@ router.include_router(ownership_router)
 router.include_router(workspace_router)
 router.include_router(admin_workspace_router)
 router.include_router(admin_hunter_settings_router)
+router.include_router(admin_search_strategy_router)
 router.include_router(admin_mission_retry_router)
 router.include_router(admin_trace_router)
 router.include_router(admin_trace_waterfall_router)
