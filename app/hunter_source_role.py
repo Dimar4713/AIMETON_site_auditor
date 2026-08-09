@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 SUPPORTING_SOURCE_HOSTS = frozenset(
     {
         "1dentist.ru",
+        "2gis.ru",
         "32top.ru",
         "alldantist.ru",
         "audit-it.ru",
@@ -45,8 +46,11 @@ SUPPORTING_SOURCE_HOSTS = frozenset(
         "totadres.ru",
         "vc.ru",
         "vedomosti.ru",
+        "vk.com",
+        "vk.ru",
         "wikipedia.org",
         "yandex.com",
+        "yandex.ru",
         "yp.ru",
         "zdravzdrav.ru",
         "zoon.ru",
