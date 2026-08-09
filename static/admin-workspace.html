@@ -49,9 +49,37 @@
       <div id="temporary-access-list" class="mission-list" aria-live="polite"></div>
     </section>
 
+    <section class="panel" aria-labelledby="search-strategy-title">
+      <div class="panel-title"><h2 id="search-strategy-title">Стратегии поисковых движков</h2><button id="refresh-search-strategies" class="secondary" type="button">Обновить</button></div>
+      <p class="message">Три движка уже существуют: self-hosted SearXNG, Yandex Search и Tavily. Здесь задаётся не наличие движков, а способ их совместного использования, глобальные cost guards и профили тарифов.</p>
+      <form id="search-strategy-form" class="auth-form">
+        <h3>Глобальная политика</h3>
+        <label>Активный тариф до появления billing<select id="search-active-tariff"></select></label>
+        <label>Глобальная стратегия по умолчанию<select id="search-default-strategy"></select></label>
+        <label>Аварийное принудительное переключение<select id="search-emergency-strategy"><option value="">Нет</option></select></label>
+        <label>Разрешённые движки<select id="search-enabled-providers" multiple size="3"><option value="searxng">SearXNG (self-hosted)</option><option value="yandex">Yandex Search</option><option value="tavily">Tavily</option></select></label>
+        <label>Платные provider-вызовы<select id="search-paid-policy"><option value="inherit">Наследовать env-policy</option><option value="deny">Запретить глобально</option><option value="allow_with_budget">Разрешить только с budget cap</option></select></label>
+        <label>Платный fan-out<select id="search-paid-fanout-policy"><option value="inherit">Наследовать env-policy</option><option value="deny">Запретить глобально</option><option value="allow_with_budget">Разрешить только с budget cap</option></select></label>
+        <label>Жёсткий потолок RUB на миссию<input id="search-hard-rub" type="number" min="0" step="0.01"></label>
+        <label>Жёсткий потолок USD на миссию<input id="search-hard-usd" type="number" min="0" step="0.0001"></label>
+
+        <h3>Тарифные search-профили</h3>
+        <p class="message">Free / Start / Pro / Max — технические профили без ценового обязательства. До появления account→tariff binding выбранный профиль применяется глобально.</p>
+        <div id="search-tariff-profiles" class="mission-list"></div>
+
+        <h3>Каталог стратегий</h3>
+        <div id="search-strategy-catalog" class="mission-list"></div>
+
+        <label>Причина изменения<input id="search-strategy-reason" minlength="1" maxlength="500" value="Настройка стратегии поисковых движков и тарифных профилей" required></label>
+        <button type="submit">Сохранить стратегии и тарифы</button>
+        <p id="search-strategy-message" class="message" aria-live="polite"></p>
+        <p id="search-strategy-updated" class="message"></p>
+      </form>
+    </section>
+
     <section class="panel" aria-labelledby="hunter-settings-title">
-      <div class="panel-title"><h2 id="hunter-settings-title">Настройки Hunter</h2><button id="refresh-hunter-settings" class="secondary" type="button">Обновить</button></div>
-      <p class="message">Технический профиль новых поисков. Пользовательская форма задаёт бизнес-запрос; ширина поиска, размеры пула и пороги задаются здесь.</p>
+      <div class="panel-title"><h2 id="hunter-settings-title">Параметры активного Hunter-профиля</h2><button id="refresh-hunter-settings" class="secondary" type="button">Обновить</button></div>
+      <p class="message">Совместимый быстрый редактор числовых лимитов активного тарифного профиля. Стратегия и providers редактируются в разделе выше.</p>
       <form id="hunter-settings-form" class="auth-form">
         <label>Максимум поисковых запросов<input id="hunter-setting-max-queries" type="number" min="1" max="100" required></label>
         <label>Результатов на один запрос<input id="hunter-setting-results-per-query" type="number" min="1" max="30" required></label>
@@ -60,10 +88,8 @@
         <label>Минимальный pre-score<input id="hunter-setting-minimum-pre-score" type="number" min="0" max="100" required></label>
         <label>Глубокое исследование от<input id="hunter-setting-deep-audit-score" type="number" min="0" max="100" required></label>
         <label>Параллельность обработки<input id="hunter-setting-concurrency" type="number" min="1" max="12" required></label>
-        <label>Стратегия providers<select id="hunter-setting-provider-strategy" disabled><option value="fallback_first_nonempty">Fallback: первый непустой provider</option></select></label>
-        <p class="message">Объединение выдач нескольких providers пока не реализовано и поэтому здесь не выдаётся за рабочую настройку.</p>
-        <label>Причина изменения<input id="hunter-setting-reason" minlength="1" maxlength="500" value="Настройка качества и глубины Hunter" required></label>
-        <button type="submit">Сохранить профиль Hunter</button>
+        <label>Причина изменения<input id="hunter-setting-reason" minlength="1" maxlength="500" value="Настройка числовых лимитов активного тарифа" required></label>
+        <button type="submit">Сохранить лимиты активного тарифа</button>
         <p id="hunter-settings-message" class="message" aria-live="polite"></p>
         <p id="hunter-settings-updated" class="message"></p>
       </form>
@@ -92,7 +118,8 @@
   </main>
   <script src="/static/admin-workspace.js" defer></script>
   <script src="/static/admin-temporary-access.js" defer></script>
-  <script src="/static/admin-hunter-settings.js?v=20260809a" defer></script>
+  <script src="/static/admin-search-strategies.js?v=20260809a" defer></script>
+  <script src="/static/admin-hunter-settings.js?v=20260809b" defer></script>
   <script src="/static/admin-hunter-trace.js?v=20260809c" defer></script>
 </body>
 </html>
