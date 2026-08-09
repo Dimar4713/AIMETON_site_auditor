@@ -28,6 +28,6 @@ def test_hunter_runtime_command_is_authorized_only_on_p1_501() -> None:
 
     assert "accept-hunter-runtime-stage" in text
     assert "workflow_id: 'accept-hunter-runtime-stage.yml'" in text
-    route = text.split("'accept-hunter-runtime-stage': {", 1)[1].split("},", 1)[0]
+    route = text.split("'accept-hunter-runtime-stage': {", 1)[1].split("'accept-logging-pressure-stage': {", 1)[0]
     assert "issue_number: 501" in route
     assert "inputs: {expected_sha: sha}" in route
