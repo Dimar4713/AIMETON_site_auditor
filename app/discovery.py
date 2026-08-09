@@ -78,12 +78,39 @@ def _build_queries(req: HuntRequest) -> list[str]:
     return queries
 
 
+def _industry_markers(req: HuntRequest) -> list[str]:
+    """Return bounded lexical markers from the normalized user-requested industry.
+
+    We intentionally derive these from the actual requested values rather than every
+    broad handbook alias. For example a dentistry hunt should not receive an
+    industry-match merely because a result contains the generic word `клиника`.
+    """
+    markers: list[str] = []
+    seen: set[str] = set()
+    for industry in req.industries:
+        normalized = " ".join(industry.casefold().replace("ё", "е").split())
+        if not normalized:
+            continue
+        candidates = [normalized]
+        for token in normalized.replace(",", " ").split():
+            clean = token.strip("-—–()[]{}.,:;!?")
+            if len(clean) >= 5:
+                stem_length = max(5, len(clean) - 3)
+                candidates.append(clean[:stem_length])
+        for candidate in candidates:
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                markers.append(candidate)
+    return markers[:20]
+
+
 def _pre_score(req: HuntRequest, title: str, snippet: str, url: str) -> PreScoreResult:
     host = _domain(url)
     title = title.strip()
     snippet = snippet.strip()
     factors: dict[str, int | None] = {
         "region_match": None,
+        "industry_match": None,
         "commercial_choice": None,
         "commercial_complexity": None,
         "focus_match": None,
@@ -95,12 +122,18 @@ def _pre_score(req: HuntRequest, title: str, snippet: str, url: str) -> PreScore
         reasons.append("недостаточно данных: отсутствует домен либо текст поискового результата")
         return PreScoreResult(None, "insufficient_data", factors, reasons)
 
-    haystack = f"{title} {snippet} {url}".lower()
-    region_tokens = [token for token in req.region.replace(",", " ").lower().split() if len(token) > 3]
+    haystack = f"{title} {snippet} {url}".casefold().replace("ё", "е")
+    region_tokens = [token for token in req.region.replace(",", " ").casefold().split() if len(token) > 3]
     if region_tokens:
         factors["region_match"] = 25 if any(token in haystack for token in region_tokens) else 0
         if factors["region_match"]:
             reasons.append("обнаружено соответствие территории охоты")
+
+    industry_markers = _industry_markers(req)
+    if industry_markers:
+        factors["industry_match"] = 25 if any(marker in haystack for marker in industry_markers) else 0
+        if factors["industry_match"]:
+            reasons.append("обнаружено прямое соответствие заданной отрасли")
 
     factors["commercial_choice"] = 20 if any(marker in haystack for marker in COMMERCIAL_MARKERS) else 0
     if factors["commercial_choice"]:
@@ -111,7 +144,7 @@ def _pre_score(req: HuntRequest, title: str, snippet: str, url: str) -> PreScore
         reasons.append("есть признаки содержательной коммерческой задачи")
 
     if req.focus:
-        factors["focus_match"] = 10 if any(focus.lower() in haystack for focus in req.focus) else 0
+        factors["focus_match"] = 10 if any(focus.casefold() in haystack for focus in req.focus) else 0
         if factors["focus_match"]:
             reasons.append("обнаружено соответствие заданному фокусу охоты")
 
