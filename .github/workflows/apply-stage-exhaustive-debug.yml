@@ -1,0 +1,144 @@
+name: Apply Stage Exhaustive Hunter Debug Profile
+
+on:
+  push:
+    branches:
+      - bench/krasnoyarsk-dentistry-search-strategies
+    paths:
+      - .github/workflows/apply-stage-exhaustive-debug.yml
+
+permissions:
+  contents: read
+
+jobs:
+  apply-and-verify:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    timeout-minutes: 45
+    steps:
+      - name: Verify exact Stage and save reversible runtime profile
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          health="$(curl -fsS https://stage-auditor.aimeton.ru/api/health)"
+          printf '%s' "$health" | grep -Fq '1bcc6cee231b02d00fd53815e97243d83e2764bf'
+          docker inspect -f '{{.State.Health.Status}}' aimeton-auditor | grep -qx healthy
+          docker exec -i -w /app aimeton-auditor python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from datetime import UTC, datetime
+          from app.search_strategy_settings import (
+              SearchStrategyId,
+              get_search_strategy_settings_repository,
+          )
+
+          repo = get_search_strategy_settings_repository()
+          old = repo.get()
+          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          backup_key = 'search.strategy.settings.v1.backup.20260809-exhaustive-debug'
+          with sqlite3.connect(db_path) as db:
+              db.execute('CREATE TABLE IF NOT EXISTS runtime_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+              db.execute('INSERT OR REPLACE INTO runtime_meta(key,value) VALUES(?,?)', (backup_key, old.model_dump_json()))
+
+          settings = old.settings.model_copy(deep=True)
+          gs = settings.global_settings
+          settings.global_settings = gs.model_copy(update={
+              'active_tariff': 'max',
+              'enabled_providers': ['searxng', 'yandex'],
+              'emergency_strategy_override': None,
+          })
+          profile = settings.tariffs['max']
+          settings.tariffs['max'] = profile.model_copy(update={
+              'strategy': SearchStrategyId.EXHAUSTIVE_COVERAGE,
+              'provider_order': ['searxng', 'yandex', 'tavily'],
+              'target_results': 75,
+              'max_providers_per_query': 3,
+              'max_queries': 20,
+              'results_per_query': 20,
+              'max_candidates': 200,
+              'output_limit': 100,
+              'minimum_pre_score': 35,
+              'deep_audit_score': 60,
+              'concurrency': 6,
+          })
+          saved = repo.save(
+              settings,
+              actor_id=1,
+              reason='Temporary Stage debug: validate benchmark-to-Hunter E2E with exhaustive SearXNG+Yandex; Tavily excluded; rollback snapshot retained',
+          )
+          p = saved.settings.active_profile()
+          print('PREVIOUS_STAGE_PROFILE=' + json.dumps({
+              'active_tariff': old.settings.global_settings.active_tariff,
+              'enabled_providers': old.settings.global_settings.enabled_providers,
+              'strategy': str(old.settings.active_profile().strategy),
+              'profile': old.settings.active_profile().model_dump(mode='json'),
+          }, ensure_ascii=False, sort_keys=True, default=str))
+          print('NEW_STAGE_PROFILE=' + json.dumps({
+              'active_tariff': saved.settings.global_settings.active_tariff,
+              'enabled_providers': saved.settings.global_settings.enabled_providers,
+              'strategy': str(p.strategy),
+              'max_queries': p.max_queries,
+              'results_per_query': p.results_per_query,
+              'max_candidates': p.max_candidates,
+              'output_limit': p.output_limit,
+              'minimum_pre_score': p.minimum_pre_score,
+              'deep_audit_score': p.deep_audit_score,
+              'backup_key': backup_key,
+          }, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Run exact public Hunter payload through real Stage API
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i -w /app aimeton-auditor python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from datetime import UTC, datetime
+          import httpx
+
+          started = datetime.now(UTC).isoformat()
+          payload = {'region':'Красноярск','industries':['Стоматология'],'focus':[]}
+          with httpx.Client(timeout=1800.0) as client:
+              r = client.post('http://127.0.0.1:5000/api/hunt', json=payload)
+          print('HUNT_HTTP_STATUS=' + str(r.status_code))
+          r.raise_for_status()
+          data = r.json()
+          print('HUNT_RESPONSE_SUMMARY=' + json.dumps({
+              'query_count': len(data.get('queries') or []),
+              'discovered': data.get('discovered'),
+              'returned_candidates': len(data.get('candidates') or []),
+              'deep_candidates': sum(1 for c in (data.get('candidates') or []) if c.get('deep_analysis_performed') is True),
+              'shallow_candidates': sum(1 for c in (data.get('candidates') or []) if c.get('deep_analysis_performed') is not True),
+              'candidate_urls': [c.get('url') for c in (data.get('candidates') or [])],
+              'notes': data.get('notes') or [],
+          }, ensure_ascii=False, sort_keys=True))
+
+          db_path = os.getenv('AIMETON_TRACE_DB') or os.getenv('AIMETON_RUNTIME_DB','data/runtime-core.sqlite3')
+          db = sqlite3.connect(db_path); db.row_factory = sqlite3.Row
+          funnel = db.execute("""SELECT mission_id,counters_json,created_at FROM mission_trace_events
+                                 WHERE component='hunter' AND operation='hunt_funnel_complete' AND created_at>=?
+                                 ORDER BY created_at DESC LIMIT 1""", (started,)).fetchone()
+          if not funnel:
+              raise SystemExit('no Hunter funnel evidence')
+          mission = funnel['mission_id']
+          print('HUNT_FUNNEL=' + json.dumps({'mission_id':mission,'counters':json.loads(funnel['counters_json']),'created_at':funnel['created_at']}, ensure_ascii=False, sort_keys=True))
+          reasons = db.execute("""SELECT reason_code,COUNT(*) n FROM mission_trace_events
+                                  WHERE mission_id=? AND component='hunter' GROUP BY reason_code ORDER BY n DESC""", (mission,)).fetchall()
+          print('HUNTER_REASON_COUNTS=' + json.dumps({r['reason_code']:r['n'] for r in reasons}, ensure_ascii=False, sort_keys=True))
+          plans = db.execute("""SELECT metadata_json FROM mission_trace_events
+                                WHERE mission_id=? AND component='search_gateway' AND operation='query_planned'
+                                ORDER BY sequence""", (mission,)).fetchall()
+          policies = [json.loads(r['metadata_json']) for r in plans]
+          print('SEARCH_POLICY_SAMPLE=' + json.dumps(policies[0] if policies else {}, ensure_ascii=False, sort_keys=True))
+          attempts = db.execute("""SELECT provider,state,reason_code,COUNT(*) n FROM mission_trace_events
+                                   WHERE mission_id=? AND component='search_gateway' AND provider IS NOT NULL
+                                   GROUP BY provider,state,reason_code ORDER BY provider,state,reason_code""", (mission,)).fetchall()
+          print('SEARCH_PROVIDER_TRACE=' + json.dumps([dict(r) for r in attempts], ensure_ascii=False, sort_keys=True))
+          PY
