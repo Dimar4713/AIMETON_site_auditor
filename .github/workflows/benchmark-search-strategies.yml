@@ -17,6 +17,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tavily-egress-probe:
+    runs-on: ubuntu-latest
+    environment: stage
+    timeout-minutes: 10
+    steps:
+      - name: Probe Tavily from GitHub-hosted egress
+        shell: bash
+        env:
+          TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$TAVILY_TOKEN"
+          usage_status="$(curl --silent --show-error --output /tmp/tavily-usage.out --dump-header /tmp/tavily-usage.headers --write-out '%{http_code}' \
+            --header "Authorization: Bearer $TAVILY_TOKEN" \
+            --header 'Accept: application/json' \
+            --header 'User-Agent: AIMETON-Search-Benchmark/1.0' \
+            https://api.tavily.com/usage)"
+          search_status="$(curl --silent --show-error --output /tmp/tavily-search.out --dump-header /tmp/tavily-search.headers --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer $TAVILY_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json' \
+            --header 'User-Agent: AIMETON-Search-Benchmark/1.0' \
+            --data '{"query":"Стоматология Красноярск официальный сайт компания","search_depth":"basic","max_results":5,"include_answer":false,"include_raw_content":false}' \
+            https://api.tavily.com/search)"
+          usage_server="$(awk 'BEGIN{IGNORECASE=1} /^server:/ {gsub("\r", ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit}' /tmp/tavily-usage.headers)"
+          search_server="$(awk 'BEGIN{IGNORECASE=1} /^server:/ {gsub("\r", ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit}' /tmp/tavily-search.headers)"
+          echo "TAVILY_GITHUB_EGRESS usage_status=$usage_status usage_server=${usage_server:-unknown} search_status=$search_status search_server=${search_server:-unknown}"
+          [[ "$usage_status" == "200" && "$search_status" == "200" ]]
+
   benchmark:
     runs-on:
       - self-hosted
