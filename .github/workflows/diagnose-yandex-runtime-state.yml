@@ -23,12 +23,11 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          expected_key_sha="$(printf '%s' "$YANDEX_SEARCH_API_KEY" | sha256sum | awk '{print $1}')"
-          container_key_sha="$(docker exec aimeton-auditor sh -lc 'printf %s "$YANDEX_SEARCH_API_KEY" | sha256sum | awk '\''{print $1}'\'')"
-          expected_folder_sha="$(printf '%s' "$YANDEX_CLOUD_FOLDER_ID" | sha256sum | awk '{print $1}')"
-          container_folder_sha="$(docker exec aimeton-auditor sh -lc 'printf %s "$YANDEX_CLOUD_FOLDER_ID" | sha256sum | awk '\''{print $1}'\'')"
-          [[ "$expected_key_sha" == "$container_key_sha" ]] && echo 'container_api_key_matches_current=true' || echo 'container_api_key_matches_current=false'
-          [[ "$expected_folder_sha" == "$container_folder_sha" ]] && echo 'container_folder_id_matches_current=true' || echo 'container_folder_id_matches_current=false'
+          expected_key_sha="$(printf '%s' "$YANDEX_SEARCH_API_KEY" | sha256sum | cut -d' ' -f1)"
+          docker exec \
+            -e EXPECTED_KEY_SHA="$expected_key_sha" \
+            -e EXPECTED_FOLDER_ID="$YANDEX_CLOUD_FOLDER_ID" \
+            aimeton-auditor python -c "import hashlib, os; key=os.getenv('YANDEX_SEARCH_API_KEY',''); folder=os.getenv('YANDEX_CLOUD_FOLDER_ID',''); expected=os.environ['EXPECTED_KEY_SHA']; expected_folder=os.environ['EXPECTED_FOLDER_ID']; print('container_api_key_matches_current=' + str(hashlib.sha256(key.encode()).hexdigest() == expected).lower()); print('container_folder_id_matches_current=' + str(folder == expected_folder).lower())"
 
       - name: Call legacy endpoint internally and publicly
         shell: bash
