@@ -76,6 +76,7 @@ async def test_tavily_contract_gate_blocks_before_network_and_paid_accounting() 
     assert provider.contract_allowed is False
     assert provider.configured is True
     assert provider.execution_allowed is False
+    assert provider.execution_block_reason == FallbackReason.CONTRACT_BLOCKED
 
     health = gateway.health(
         SearchPolicy(
