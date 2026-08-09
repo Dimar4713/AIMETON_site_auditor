@@ -1,0 +1,80 @@
+name: Diagnose Stage Hunter Qualification Quality
+
+on:
+  push:
+    branches:
+      - bench/krasnoyarsk-dentistry-search-strategies
+    paths:
+      - .github/workflows/diag-stage-hunter-qualification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    timeout-minutes: 10
+    steps:
+      - name: Aggregate returned-candidate pre-score factors from forensic trace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i -w /app aimeton-auditor python - <<'PY'
+          import json, os, sqlite3
+          from urllib.parse import urlsplit
+
+          mission='hunt-89be7398-94d9-4779-80f4-a5e086a20de9'
+          db_path=os.getenv('AIMETON_TRACE_DB') or os.getenv('AIMETON_RUNTIME_DB','data/runtime-core.sqlite3')
+          db=sqlite3.connect(db_path); db.row_factory=sqlite3.Row
+          rows=db.execute("SELECT operation,reason_code,metadata_json,counters_json,event_key FROM mission_trace_events WHERE mission_id=? AND component='hunter' ORDER BY sequence",(mission,)).fetchall()
+          pre={}
+          returned=[]
+          deep_completed=set()
+          for row in rows:
+              meta=json.loads(row['metadata_json'])
+              url=str(meta.get('candidate_url') or '')
+              host=(urlsplit(url).hostname or '').lower().removeprefix('www.')
+              if row['operation']=='candidate_pre_scored' and host:
+                  pre[host]={
+                      'url':url,
+                      'industry_match':meta.get('factor_industry_match'),
+                      'region_match':meta.get('factor_region_match'),
+                      'commercial_choice':meta.get('factor_commercial_choice'),
+                      'commercial_complexity':meta.get('factor_commercial_complexity'),
+                      'local_domain':meta.get('factor_local_domain'),
+                      'pre_score':meta.get('pre_score'),
+                  }
+              elif row['operation']=='candidate_returned' and host:
+                  returned.append((host,url,json.loads(row['counters_json'])))
+              elif row['reason_code']=='deep_audit_completed' and host:
+                  deep_completed.add(host)
+          data=[]
+          for host,url,counters in returned:
+              x=dict(pre.get(host) or {})
+              x.update({'host':host,'url':url,'deep_completed':host in deep_completed,'final_score':counters.get('final_score')})
+              data.append(x)
+          def yes(field): return sum(1 for x in data if (x.get(field) or 0)>0)
+          def no(field): return sum(1 for x in data if x.get(field)==0)
+          summary={
+              'returned':len(data),
+              'industry_match_positive':yes('industry_match'),
+              'industry_match_zero':no('industry_match'),
+              'region_match_positive':yes('region_match'),
+              'region_match_zero':no('region_match'),
+              'both_industry_and_region':sum(1 for x in data if (x.get('industry_match') or 0)>0 and (x.get('region_match') or 0)>0),
+              'industry_positive_region_zero':sum(1 for x in data if (x.get('industry_match') or 0)>0 and x.get('region_match')==0),
+              'industry_zero_region_positive':sum(1 for x in data if x.get('industry_match')==0 and (x.get('region_match') or 0)>0),
+              'both_zero':sum(1 for x in data if x.get('industry_match')==0 and x.get('region_match')==0),
+              'deep_completed':sum(1 for x in data if x.get('deep_completed')),
+          }
+          print('QUALIFICATION_SUMMARY='+json.dumps(summary,ensure_ascii=False,sort_keys=True))
+          noise=[x for x in data if x.get('industry_match')==0]
+          print('RETURNED_WITHOUT_INDUSTRY_MATCH='+json.dumps(noise,ensure_ascii=False,sort_keys=True))
+          relevant=[x for x in data if (x.get('industry_match') or 0)>0]
+          print('RETURNED_WITH_INDUSTRY_MATCH='+json.dumps(relevant,ensure_ascii=False,sort_keys=True))
+          PY
