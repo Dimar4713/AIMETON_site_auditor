@@ -1,0 +1,152 @@
+name: Temporary Post-509 Hunter Replay
+
+on:
+  push:
+    branches:
+      - diag/hunter-post509-replay
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  replay:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: 30b355293ec4aa02a5a2414bf9dfd2fe0954fe13
+      BASELINE_MISSION_ID: hunt-39b88c7b-0a1c-4bee-a7f4-af9791560c60
+      BASELINE_ATTEMPT_ID: corr-4b3fbbee-b990-4627-bbc6-373e0582f862
+      REPORT: /tmp/post509-replay-${{ github.run_id }}.md
+
+    steps:
+      - name: Replay saved provider results through deployed quality gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$status" == healthy ]]
+
+          result="$(docker exec \
+            -e BASELINE_MISSION_ID="$BASELINE_MISSION_ID" \
+            -e BASELINE_ATTEMPT_ID="$BASELINE_ATTEMPT_ID" \
+            -i "$CONTAINER" python - <<'PY'
+          import json, os, sqlite3
+          from collections import Counter
+          from app.discovery import _domain, _pre_score
+          from app.hunter_source_role import classify_source_role
+          from app.models import HuntRequest
+          from app.search_strategy_settings import get_search_strategy_settings_repository
+
+          db_path=os.getenv('AIMETON_RUNTIME_DB','data/runtime-core.sqlite3')
+          db=sqlite3.connect(db_path,timeout=30); db.row_factory=sqlite3.Row
+          rows=db.execute(
+              """SELECT metadata_json FROM mission_trace_events
+                 WHERE mission_id=? AND attempt_id=?
+                   AND component='search_gateway' AND operation='result_item'
+                 ORDER BY sequence""",
+              (os.environ['BASELINE_MISSION_ID'], os.environ['BASELINE_ATTEMPT_ID'])
+          ).fetchall(); db.close()
+          assert rows, 'saved baseline SearchGateway trace missing'
+
+          unique={}
+          for row in rows:
+              m=json.loads(row['metadata_json'] or '{}')
+              url=str(m.get('result_url') or '')
+              host=_domain(url) if url else ''
+              if host and host not in unique:
+                  unique[host]={
+                      'url':url,
+                      'title':str(m.get('result_title') or ''),
+                      'snippet':str(m.get('result_snippet') or ''),
+                  }
+
+          req=get_search_strategy_settings_repository().get().settings.apply_hunt_request(
+              HuntRequest(region='Красноярск',industries=['Стоматология'])
+          )
+          qualified=[]; deep=[]; rejected=[]
+          role_counts=Counter(); deep_roles=Counter()
+          for host,item in unique.items():
+              score=_pre_score(req,item['title'],item['snippet'],item['url'])
+              numeric=int(score.score or 0)
+              role=classify_source_role(item['title'],item['snippet'],item['url'])
+              role_counts[role]+=1
+              record={
+                  'host':host,'score':numeric,'role':role,
+                  'industry_match':score.factors.get('industry_match'),
+                  'region_match':score.factors.get('region_match'),
+                  'title':item['title'],'url':item['url'],
+              }
+              if numeric < req.minimum_pre_score:
+                  rejected.append(record); continue
+              qualified.append(record)
+              if numeric >= req.deep_audit_score:
+                  deep.append(record); deep_roles[role]+=1
+
+          deep_hosts={x['host'] for x in deep}
+          forbidden={'2gis.ru','yandex.ru','vk.ru','vk.com','dentistfind.ru','zoon.ru','kp.ru','krasnoyarsk.jsprav.ru','jsprav.ru','32top.ru','dent-list.ru','vc.ru'}
+          leaked=sorted(deep_hosts & forbidden)
+          assert not leaked, {'supporting_sources_still_deep_eligible': leaked}
+
+          must_keep={'sapfircs.ru','aleksdent24.ru','allure-dent.ru','san-dent-clinic.ru','medident.ru','artdental24.ru'}
+          qualified_hosts={x['host'] for x in qualified}
+          missing=sorted(must_keep-qualified_hosts)
+          assert not missing, {'good_clinics_lost': missing}
+
+          non_direct_deep=[x for x in deep if x['role']!='direct_candidate']
+          assert not non_direct_deep, {'non_direct_deep': non_direct_deep[:10]}
+
+          deep_sorted=sorted(deep,key=lambda x:(-x['score'],x['host']))
+          safe={
+              'provider_calls':0,
+              'baseline_result_items':len(rows),
+              'reconstructed_unique_hosts':len(unique),
+              'qualified_count':len(qualified),
+              'deep_eligible_count':len(deep),
+              'rejected_count':len(rejected),
+              'role_counts':dict(role_counts),
+              'deep_role_counts':dict(deep_roles),
+              'forbidden_platform_or_directory_deep_leaks':leaked,
+              'must_keep_good_clinics_missing':missing,
+              'deep_hosts':[x['host'] for x in deep_sorted],
+          }
+          print(json.dumps(safe,ensure_ascii=False,sort_keys=True))
+          PY
+          )"
+
+          {
+            echo '## Post-509 replay of first honest Hunter E2E'
+            echo
+            echo "- exact deployed SHA: \`$deployed\`"
+            echo '- provider calls: `0`'
+            echo
+            echo '```json'
+            echo "$result"
+            echo '```'
+            echo
+            echo '- verdict: ✅ final deployed quality gates preserve known clinics and keep known supporting/platform sources below deep-audit threshold.'
+          } | tee "$REPORT" "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload replay evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: post509-hunter-replay-${{ github.run_id }}
+          path: ${{ env.REPORT }}
+          retention-days: 30
+
+      - name: Publish replay evidence to P1-501
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ env.REPORT }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs=require('fs');
+            const body=fs.readFileSync(process.env.REPORT_PATH,'utf8');
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:501,body:body.slice(0,60000)});
