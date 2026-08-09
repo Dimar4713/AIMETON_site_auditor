@@ -30,11 +30,10 @@
     document.querySelector('#hunter-setting-minimum-pre-score').value = settings.minimum_pre_score ?? 35;
     document.querySelector('#hunter-setting-deep-audit-score').value = settings.deep_audit_score ?? 60;
     document.querySelector('#hunter-setting-concurrency').value = settings.concurrency ?? 4;
-    document.querySelector('#hunter-setting-provider-strategy').value = settings.provider_strategy || 'fallback_first_nonempty';
     if (record.updated_at) {
       updated.textContent = `Последнее изменение: ${record.updated_at} · admin user ${record.updated_by ?? '—'} · ${record.reason || 'без комментария'}`;
     } else {
-      updated.textContent = 'Используется базовый профиль: 20 запросов × 10 результатов, пул 100, выдача 25.';
+      updated.textContent = 'Используется числовая часть активного тарифного search-профиля.';
     }
   }
 
@@ -44,7 +43,7 @@
       const response = await fetch('/api/admin/hunter-settings', {credentials: 'same-origin'});
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       fill(await response.json());
-      setMessage('Настройки Hunter загружены.', 'success');
+      setMessage('Параметры активного тарифа загружены.', 'success');
     } catch (error) {
       setMessage(`Не удалось загрузить настройки: ${error.message}`, 'error');
     }
@@ -67,15 +66,12 @@
       },
       reason: document.querySelector('#hunter-setting-reason').value.trim(),
     };
-    setMessage('Сохраняем профиль Hunter…');
+    setMessage('Сохраняем параметры активного тарифа…');
     try {
       const response = await fetch('/api/admin/hunter-settings', {
         method: 'PUT',
         credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken(),
-        },
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken()},
         body: JSON.stringify(payload),
       });
       const data = await response.json().catch(() => ({}));
@@ -84,7 +80,8 @@
         throw new Error(reason || `HTTP ${response.status}`);
       }
       fill(data);
-      setMessage('Профиль Hunter сохранён и применяется к новым поискам.', 'success');
+      setMessage('Числовые параметры активного тарифного профиля сохранены.', 'success');
+      document.querySelector('#refresh-search-strategies')?.click();
     } catch (error) {
       setMessage(`Настройки не сохранены: ${error.message}`, 'error');
     } finally {
