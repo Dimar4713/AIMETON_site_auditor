@@ -274,15 +274,10 @@
       const payload = {
         region,
         industries: industry ? [industry] : [],
-        max_queries: 6,
-        results_per_query: 5,
-        max_candidates: 30,
-        output_limit: 10,
-        concurrency: 2,
       };
       const data = await postJson('/api/hunt', payload);
       appendItem(list, 'Результат поиска', `Обнаружено источников-кандидатов: ${data.discovered ?? 0}`, `Регион: ${data.region || region} · балл выше = ближе к профилю потенциального клиента`);
-      renderHunterCandidates(list, (data.candidates || []).slice(0, 10), data.region || region);
+      renderHunterCandidates(list, data.candidates || [], data.region || region);
       output.hidden = false;
       setStatus(status, 'Список кандидатов подготовлен.', 'success');
     } catch (error) {
