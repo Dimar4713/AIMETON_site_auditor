@@ -81,12 +81,24 @@ def test_hunter_results_are_grouped_for_commercial_scanability() -> None:
     assert "Источник для проверки" in script
     assert "Наблюдение" in script
     assert "Источники для дополнительной проверки" in script
-    assert "балл выше = ближе к профилю потенциального клиента" in script
     assert "candidate_kind" not in script
     assert "function appendCandidate(container, candidate, fallbackRegion)" in script
     assert ".service-summary__candidate-top" in styles
     assert ".hunter-supporting-details" in styles
     assert ".hunter-candidate-action" in styles
+
+
+def test_hunter_never_hides_returned_candidate_count_or_groups_by_default() -> None:
+    script = (STATIC / "service-catalog.js").read_text(encoding="utf-8")
+
+    assert "function candidateGroupCounts(candidates)" in script
+    assert "API вернуло: ${candidates.length}" in script
+    assert "Компании-кандидаты: ${counts.company}" in script
+    assert "источники для проверки: ${counts.supporting}" in script
+    assert "наблюдение: ${counts.observation}" in script
+    assert "все возвращённые результаты раскрыты ниже" in script
+    assert script.count("details.open = true;") == 2
+    assert "отображено ${candidates.length} результатов" in script
 
 
 def test_hunter_desktop_results_have_visible_scroll_without_trapping_mobile() -> None:
