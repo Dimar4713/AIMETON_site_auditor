@@ -1,0 +1,142 @@
+name: Current Stage Search Strategy Benchmark
+
+on:
+  push:
+    branches:
+      - bench/krasnoyarsk-dentistry-search-strategies
+    paths:
+      - .github/workflows/benchmark-stage-current-mixed.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: current-stage-search-strategy-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    timeout-minutes: 45
+    steps:
+      - name: Checkout benchmark harness
+        uses: actions/checkout@v4
+
+      - name: Verify current Stage deployment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='1bcc6cee231b02d00fd53815e97243d83e2764bf'
+          health="$(curl -fsS https://stage-auditor.aimeton.ru/api/health)"
+          printf '%s' "$health" | grep -Fq "$expected"
+          docker inspect -f '{{.State.Health.Status}}' aimeton-auditor | grep -qx healthy
+
+      - name: Collect fresh live Yandex and SearXNG snapshots on Stage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf stage-benchmark-input stage-benchmark-output
+          mkdir -p stage-benchmark-input stage-benchmark-output
+          docker cp scripts/collect_search_snapshot.py aimeton-auditor:/tmp/collect_search_snapshot.py
+
+          docker exec \
+            -w /app \
+            -e SNAPSHOT_PROVIDER=yandex \
+            -e SNAPSHOT_LIMIT=20 \
+            -e SNAPSHOT_OUT=/tmp/yandex-current.json \
+            aimeton-auditor python /tmp/collect_search_snapshot.py
+          docker cp aimeton-auditor:/tmp/yandex-current.json stage-benchmark-input/yandex.json
+
+          docker exec \
+            -w /app \
+            -e SNAPSHOT_PROVIDER=searxng \
+            -e SNAPSHOT_LIMIT=20 \
+            -e SNAPSHOT_OUT=/tmp/searxng-current.json \
+            aimeton-auditor python /tmp/collect_search_snapshot.py
+          docker cp aimeton-auditor:/tmp/searxng-current.json stage-benchmark-input/searxng.json
+
+      - name: Load durable Tavily live corpus without a new Tavily call
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch --no-tags origin main
+          evidence='docs/evidence/search-benchmarks/2026-08-09-krasnoyarsk-dentistry-three-provider/tavily-snapshot.zip'
+          git show "origin/main:${evidence}" > /tmp/tavily-snapshot.zip
+          member="$(unzip -Z1 /tmp/tavily-snapshot.zip | grep -E '\.json$' | head -n1)"
+          test -n "$member"
+          unzip -p /tmp/tavily-snapshot.zip "$member" > stage-benchmark-input/tavily.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          row=json.loads(Path('stage-benchmark-input/tavily.json').read_text(encoding='utf-8'))
+          assert row['provider'] == 'tavily'
+          assert len(row['queries']) == 8
+          print('TAVILY_DURABLE_CORPUS_OK queries=8 no_new_live_call=true')
+          PY
+
+      - name: Replay all ten strategies in current Stage container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker cp scripts/replay_search_strategies.py aimeton-auditor:/tmp/replay_search_strategies.py
+          docker cp stage-benchmark-input/yandex.json aimeton-auditor:/tmp/yandex-current.json
+          docker cp stage-benchmark-input/tavily.json aimeton-auditor:/tmp/tavily-durable.json
+          docker cp stage-benchmark-input/searxng.json aimeton-auditor:/tmp/searxng-current.json
+          docker exec \
+            -w /app \
+            -e PYTHONPATH=/app \
+            -e TAVILY_CONTRACT_ALLOWED=false \
+            -e SNAPSHOT_FILES=/tmp/yandex-current.json:/tmp/tavily-durable.json:/tmp/searxng-current.json \
+            -e REPLAY_LATENCY_SCALE=1 \
+            -e REPLAY_OUT=/tmp/current-stage-search-benchmark \
+            aimeton-auditor python /tmp/replay_search_strategies.py \
+            2>&1 | tee stage-benchmark-output/replay.log
+          docker cp aimeton-auditor:/tmp/current-stage-search-benchmark/. stage-benchmark-output/
+
+      - name: Record input provenance and incremental provider cost
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          out={}
+          for name in ('yandex','tavily','searxng'):
+              row=json.loads(Path(f'stage-benchmark-input/{name}.json').read_text(encoding='utf-8'))
+              out[name]={
+                  'queries': len(row['queries']),
+                  'raw_results': sum(len(q['results']) for q in row['queries'].values()),
+                  'cost_amount_per_call': row.get('cost_amount_per_call','0'),
+                  'cost_currency': row.get('cost_currency'),
+                  'source': 'durable-live-snapshot-no-new-call' if name == 'tavily' else 'fresh-live-stage',
+              }
+          out['incremental_cost_this_run']={'RUB':'0.08','USD':'0'}
+          out['historical_cost_of_reused_tavily_corpus']={'USD':'0.064'}
+          Path('stage-benchmark-output/input-provenance.json').write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(out,ensure_ascii=False,sort_keys=True))
+          PY
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-stage-krasnoyarsk-dentistry-strategy-benchmark-${{ github.run_id }}
+          path: |
+            stage-benchmark-output/
+            stage-benchmark-input/yandex.json
+            stage-benchmark-input/searxng.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Cleanup one-shot files
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          docker exec aimeton-auditor rm -rf /tmp/collect_search_snapshot.py /tmp/replay_search_strategies.py /tmp/yandex-current.json /tmp/tavily-durable.json /tmp/searxng-current.json /tmp/current-stage-search-benchmark
+          rm -f /tmp/tavily-snapshot.zip
