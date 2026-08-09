@@ -6,6 +6,7 @@ on:
       - diag/stage-search-egress
     paths:
       - .github/workflows/diagnose-yandex-request-delta.yml
+      - scripts/diagnose_yandex_request_delta.py
 
 permissions:
   contents: read
@@ -16,6 +17,8 @@ jobs:
     environment: YANDEX_SEARCH
     timeout-minutes: 10
     steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
       - name: Test Yandex payload variants from Stage container
         shell: bash
         env:
@@ -23,69 +26,9 @@ jobs:
           YANDEX_CLOUD_FOLDER_ID: ${{ vars.YANDEX_CLOUD_FOLDER_ID }}
         run: |
           set -Eeuo pipefail
+          docker cp scripts/diagnose_yandex_request_delta.py aimeton-auditor:/tmp/diagnose_yandex_request_delta.py
           docker exec \
             -e YANDEX_SEARCH_API_KEY="$YANDEX_SEARCH_API_KEY" \
             -e YANDEX_CLOUD_FOLDER_ID="$YANDEX_CLOUD_FOLDER_ID" \
-            aimeton-auditor python - <<'PY'
-          import json, os
-          import httpx
-
-          endpoint = 'https://searchapi.api.cloud.yandex.net/v2/web/search'
-          key = os.environ['YANDEX_SEARCH_API_KEY']
-          folder = os.environ['YANDEX_CLOUD_FOLDER_ID']
-          query = 'Стоматология Красноярск официальный сайт компания'
-
-          good = {
-              'query': {
-                  'searchType': 'SEARCH_TYPE_RU',
-                  'queryText': query,
-                  'familyMode': 'FAMILY_MODE_MODERATE',
-                  'page': '0',
-                  'fixTypoMode': 'FIX_TYPO_MODE_ON',
-              },
-              'groupSpec': {
-                  'groupMode': 'GROUP_MODE_FLAT',
-                  'groupsOnPage': '10',
-                  'docsInGroup': '1',
-              },
-              'maxPassages': '3',
-              'l10N': 'LOCALIZATION_RU',
-              'folderId': folder,
-              'responseFormat': 'FORMAT_XML',
-          }
-
-          variants = {}
-          variants['01_good_baseline'] = good
-          variants['02_good_plus_region_225'] = {**good, 'region': '225'}
-          variants['03_good_reduced_group_spec'] = {
-              **good,
-              'groupSpec': {'groupsOnPage': '10'},
-          }
-          no_passages = dict(good)
-          no_passages.pop('maxPassages')
-          variants['04_good_without_max_passages'] = no_passages
-          variants['05_runtime_exact'] = {
-              'query': dict(good['query']),
-              'groupSpec': {'groupsOnPage': '10'},
-              'region': '225',
-              'l10N': 'LOCALIZATION_RU',
-              'folderId': folder,
-              'responseFormat': 'FORMAT_XML',
-          }
-
-          with httpx.Client(timeout=20.0) as client:
-              for name, payload in variants.items():
-                  response = client.post(
-                      endpoint,
-                      headers={'Authorization': f'Api-Key {key}', 'Content-Type': 'application/json'},
-                      json=payload,
-                  )
-                  message = ''
-                  try:
-                      body = response.json()
-                      if isinstance(body, dict):
-                          message = str(body.get('message') or body.get('error') or '')[:120]
-                  except Exception:
-                      pass
-                  print(json.dumps({'variant': name, 'status': response.status_code, 'message': message}, ensure_ascii=False), flush=True)
-          PY
+            aimeton-auditor python /tmp/diagnose_yandex_request_delta.py
+          docker exec aimeton-auditor rm -f /tmp/diagnose_yandex_request_delta.py
