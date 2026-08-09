@@ -191,6 +191,14 @@
     container.append(item);
   }
 
+  function candidateGroupCounts(candidates) {
+    const counts = {company: 0, supporting: 0, observation: 0};
+    candidates.forEach(candidate => {
+      counts[classifyCandidate(candidate).kind] += 1;
+    });
+    return counts;
+  }
+
   function renderHunterCandidates(container, candidates, fallbackRegion) {
     const groups = {company: [], supporting: [], observation: []};
     candidates.forEach(candidate => {
@@ -205,6 +213,7 @@
     if (groups.supporting.length) {
       const details = document.createElement('details');
       details.className = 'hunter-supporting-details';
+      details.open = true;
       const summary = document.createElement('summary');
       summary.textContent = `Источники для дополнительной проверки (${groups.supporting.length})`;
       const list = document.createElement('div');
@@ -216,6 +225,7 @@
     if (groups.observation.length) {
       const details = document.createElement('details');
       details.className = 'hunter-supporting-details';
+      details.open = true;
       const summary = document.createElement('summary');
       summary.textContent = `Наблюдение (${groups.observation.length})`;
       const list = document.createElement('div');
@@ -276,10 +286,22 @@
         industries: industry ? [industry] : [],
       };
       const data = await postJson('/api/hunt', payload);
-      appendItem(list, 'Результат поиска', `Обнаружено источников-кандидатов: ${data.discovered ?? 0}`, `Регион: ${data.region || region} · балл выше = ближе к профилю потенциального клиента`);
-      renderHunterCandidates(list, data.candidates || [], data.region || region);
+      const candidates = data.candidates || [];
+      const counts = candidateGroupCounts(candidates);
+      const funnel = data.funnel || {};
+      const rawResults = funnel.raw_results ?? '—';
+      const uniqueCandidates = funnel.unique_candidates ?? data.discovered ?? 0;
+      const qualifiedCandidates = funnel.qualified_candidates ?? candidates.length;
+      const returnedCandidates = funnel.returned_candidates ?? candidates.length;
+      appendItem(
+        list,
+        'Поисковая воронка',
+        `Raw: ${rawResults} → уникальные: ${uniqueCandidates} → прошли фильтр: ${qualifiedCandidates} → возвращено API: ${returnedCandidates}`,
+        `Компании-кандидаты: ${counts.company} · источники для проверки: ${counts.supporting} · наблюдение: ${counts.observation} · все возвращённые результаты раскрыты ниже`,
+      );
+      renderHunterCandidates(list, candidates, data.region || region);
       output.hidden = false;
-      setStatus(status, 'Список кандидатов подготовлен.', 'success');
+      setStatus(status, `Список кандидатов подготовлен: отображено ${candidates.length} результатов.`, 'success');
     } catch (error) {
       setStatus(status, `Поиск не выполнен: ${error.message}`, 'error');
     } finally {
