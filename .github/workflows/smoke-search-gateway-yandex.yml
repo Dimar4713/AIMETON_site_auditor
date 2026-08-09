@@ -1,0 +1,27 @@
+name: Smoke SearchGateway Yandex Stage
+
+on:
+  push:
+    branches:
+      - diag/stage-search-egress
+    paths:
+      - scripts/smoke_search_gateway_yandex.py
+      - .github/workflows/smoke-search-gateway-yandex.yml
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+      - name: Run current SearchGateway against live Yandex from Stage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker cp scripts/smoke_search_gateway_yandex.py aimeton-auditor:/tmp/smoke_search_gateway_yandex.py
+          docker exec -w /app -e PYTHONPATH=/app aimeton-auditor python /tmp/smoke_search_gateway_yandex.py
+          docker exec aimeton-auditor rm -f /tmp/smoke_search_gateway_yandex.py
