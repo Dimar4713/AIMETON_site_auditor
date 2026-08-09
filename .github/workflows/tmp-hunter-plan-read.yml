@@ -1,0 +1,83 @@
+name: Temporary Hunter Query Plan Read
+
+on:
+  push:
+    branches:
+      - chore/hunter-real-e2e-router
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: 10ad34b8fc2b9d1957f5b467999e738946fb2d6a
+      MISSION_ID: hunt-39b88c7b-0a1c-4bee-a7f4-af9791560c60
+      ATTEMPT_ID: corr-4b3fbbee-b990-4627-bbc6-373e0582f862
+      REPORT: /tmp/hunter-plan-${{ github.run_id }}.md
+
+    steps:
+      - name: Read exact query plan from forensic trace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$status" == healthy ]]
+          result="$(docker exec -e MISSION_ID="$MISSION_ID" -e ATTEMPT_ID="$ATTEMPT_ID" -i "$CONTAINER" python - <<'PY'
+          import json, os, sqlite3
+          db_path=os.getenv('AIMETON_RUNTIME_DB','data/runtime-core.sqlite3')
+          db=sqlite3.connect(db_path,timeout=30); db.row_factory=sqlite3.Row
+          row=db.execute('''SELECT metadata_json,counters_json FROM mission_trace_events WHERE mission_id=? AND attempt_id=? AND component='hunter' AND operation='hunt_plan' ORDER BY sequence LIMIT 1''',(os.environ['MISSION_ID'],os.environ['ATTEMPT_ID'])).fetchone(); db.close()
+          assert row is not None
+          metadata=json.loads(row['metadata_json'] or '{}'); counters=json.loads(row['counters_json'] or '{}')
+          safe={
+            'plan_source': metadata.get('plan_source'),
+            'input_region': metadata.get('input_region'),
+            'effective_region': metadata.get('effective_region'),
+            'input_industries': metadata.get('input_industries'),
+            'effective_industries': metadata.get('effective_industries'),
+            'input_focus': metadata.get('input_focus'),
+            'effective_focus': metadata.get('effective_focus'),
+            'queries': metadata.get('queries'),
+            'thresholds': {k: metadata.get(k) for k in ('minimum_pre_score','deep_audit_score','concurrency')},
+            'counters': counters,
+          }
+          print(json.dumps(safe,ensure_ascii=False,sort_keys=True))
+          PY
+          )"
+          {
+            echo '## Hunter E2E exact query plan'
+            echo
+            echo "- exact deployed SHA: \`$deployed\`"
+            echo '- provider calls: `0`'
+            echo
+            echo '```json'
+            echo "$result"
+            echo '```'
+          } | tee "$REPORT" "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload query plan evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: hunter-query-plan-${{ github.run_id }}
+          path: ${{ env.REPORT }}
+          retention-days: 30
+
+      - name: Publish query plan evidence to P1-501
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: ${{ env.REPORT }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs=require('fs'); const body=fs.readFileSync(process.env.REPORT_PATH,'utf8');
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:501,body:body.slice(0,60000)});
