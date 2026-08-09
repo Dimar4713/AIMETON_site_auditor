@@ -1,0 +1,138 @@
+name: Search Strategy Snapshot Replay Benchmark
+
+on:
+  push:
+    branches:
+      - bench/krasnoyarsk-dentistry-search-strategies
+    paths:
+      - scripts/collect_search_snapshot.py
+      - scripts/replay_search_strategies.py
+      - .github/workflows/benchmark-search-snapshot-replay.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aimeton-search-snapshot-replay-benchmark
+  cancel-in-progress: false
+
+jobs:
+  snapshot-tavily:
+    runs-on: ubuntu-latest
+    environment: stage
+    timeout-minutes: 15
+    steps:
+      - name: Checkout benchmark harness
+        uses: actions/checkout@v4
+      - name: Collect Tavily live snapshot
+        shell: bash
+        env:
+          TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
+          SNAPSHOT_PROVIDER: tavily
+          SNAPSHOT_LIMIT: '20'
+          SNAPSHOT_OUT: snapshot/tavily.json
+        run: |
+          set -Eeuo pipefail
+          test -n "$TAVILY_TOKEN"
+          python scripts/collect_search_snapshot.py
+      - name: Upload Tavily snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-snapshot-tavily-${{ github.run_id }}
+          path: snapshot/tavily.json
+          if-no-files-found: error
+          retention-days: 30
+
+  snapshot-searxng:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    environment: stage
+    timeout-minutes: 15
+    steps:
+      - name: Checkout benchmark harness
+        uses: actions/checkout@v4
+      - name: Verify live Stage container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker inspect -f '{{.State.Health.Status}}' aimeton-auditor | grep -qx healthy
+      - name: Collect SearXNG live snapshot
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p snapshot
+          docker cp scripts/collect_search_snapshot.py aimeton-auditor:/tmp/collect_search_snapshot.py
+          docker exec \
+            -w /app \
+            -e SNAPSHOT_PROVIDER=searxng \
+            -e SNAPSHOT_LIMIT=20 \
+            -e SNAPSHOT_OUT=/tmp/searxng.json \
+            aimeton-auditor python /tmp/collect_search_snapshot.py
+          docker cp aimeton-auditor:/tmp/searxng.json snapshot/searxng.json
+          docker exec aimeton-auditor rm -f /tmp/collect_search_snapshot.py /tmp/searxng.json
+      - name: Upload SearXNG snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-snapshot-searxng-${{ github.run_id }}
+          path: snapshot/searxng.json
+          if-no-files-found: error
+          retention-days: 30
+
+  replay-two-provider:
+    needs: [snapshot-tavily, snapshot-searxng]
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    environment: stage
+    timeout-minutes: 30
+    steps:
+      - name: Checkout benchmark harness
+        uses: actions/checkout@v4
+      - name: Download Tavily snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-snapshot-tavily-${{ github.run_id }}
+          path: replay-input/tavily
+      - name: Download SearXNG snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-snapshot-searxng-${{ github.run_id }}
+          path: replay-input/searxng
+      - name: Replay all ten Search Gateway strategies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p replay-output
+          docker cp scripts/replay_search_strategies.py aimeton-auditor:/tmp/replay_search_strategies.py
+          docker cp replay-input/tavily/tavily.json aimeton-auditor:/tmp/tavily.json
+          docker cp replay-input/searxng/searxng.json aimeton-auditor:/tmp/searxng.json
+          docker exec \
+            -w /app \
+            -e PYTHONPATH=/app \
+            -e SNAPSHOT_FILES=/tmp/tavily.json:/tmp/searxng.json \
+            -e REPLAY_LATENCY_SCALE=1 \
+            -e REPLAY_OUT=/tmp/search-strategy-replay \
+            aimeton-auditor python /tmp/replay_search_strategies.py \
+            2>&1 | tee replay-output/replay.log
+          docker cp aimeton-auditor:/tmp/search-strategy-replay/. replay-output/
+      - name: Upload comparative evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: krasnoyarsk-dentistry-two-provider-replay-${{ github.run_id }}
+          path: replay-output/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Cleanup one-shot replay files
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          docker exec aimeton-auditor rm -rf /tmp/replay_search_strategies.py /tmp/tavily.json /tmp/searxng.json /tmp/search-strategy-replay
