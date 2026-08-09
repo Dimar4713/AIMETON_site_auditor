@@ -1,0 +1,45 @@
+name: Check Tavily Account Plan
+
+on:
+  push:
+    branches:
+      - diag/stage-search-egress
+    paths:
+      - .github/workflows/check-tavily-account-plan.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    environment: stage
+    timeout-minutes: 5
+    env:
+      TAVILY_TOKEN: ${{ secrets.TAVILY_TOKEN }}
+    steps:
+      - name: Read safe Tavily usage/account fields
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tmp="$(mktemp)"
+          code="$(curl -sS -H "Authorization: Bearer $TAVILY_TOKEN" -o "$tmp" -w '%{http_code}' https://api.tavily.com/usage)"
+          python3 - "$code" "$tmp" <<'PY'
+          import json, sys
+          code, path = sys.argv[1:]
+          payload = json.load(open(path, encoding='utf-8'))
+          account = payload.get('account') or {}
+          key = payload.get('key') or {}
+          safe = {
+              'http_status': int(code),
+              'plan': account.get('current_plan'),
+              'plan_usage': account.get('plan_usage'),
+              'plan_limit': account.get('plan_limit'),
+              'paygo_usage': account.get('paygo_usage'),
+              'paygo_limit': account.get('paygo_limit'),
+              'key_usage': key.get('usage'),
+              'key_limit': key.get('limit'),
+          }
+          print(json.dumps(safe, ensure_ascii=False))
+          PY
+          rm -f "$tmp"
