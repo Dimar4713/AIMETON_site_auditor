@@ -53,18 +53,19 @@ jobs:
                   cache_ttl_seconds=0,
                   retries=0,
               )
-              provider_health = gateway.health(policy)[0]
+              provider_health = next(item for item in gateway.health(policy) if item.provider == 'tavily')
               response = await gateway.search(
                   SearchRequest(
                       query='Красноярск стоматология gate acceptance',
                       limit=3,
-                      mission_id='accept-tavily-contract-gate-v3',
-                      correlation_id='accept-tavily-contract-gate-v3',
+                      mission_id='accept-tavily-contract-gate-v4',
+                      correlation_id='accept-tavily-contract-gate-v4',
                   ),
                   policy,
               )
               attempt = response.diagnostics.attempts[0]
               safe = {
+                  'provider': provider_health.provider,
                   'health_state': str(provider_health.state),
                   'configured': provider_health.configured,
                   'ready': provider_health.ready,
@@ -74,6 +75,7 @@ jobs:
                   'costs': {k: str(v) for k, v in response.diagnostics.total_cost_by_currency.items()},
               }
               print(json.dumps(safe, sort_keys=True))
+              assert provider_health.provider == 'tavily'
               assert provider_health.state == ProviderReadiness.CONTRACT_BLOCKED
               assert provider_health.configured is True
               assert provider_health.ready is False
