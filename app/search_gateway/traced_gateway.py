@@ -67,11 +67,7 @@ class TracedSearchGateway(SearchGateway):
                     state=TraceState.STARTED,
                     reason_code="query_planned",
                     summary="Bounded search query prepared for provider gateway",
-                    counters={
-                        "requested_limit": request.limit,
-                        "target_results": effective_policy.target_results,
-                        "max_providers_per_query": effective_policy.max_providers_per_query,
-                    },
+                    counters={"requested_limit": request.limit},
                     metadata={
                         "query_index": query_index,
                         "query_text": " ".join(request.query.split())[:500],
@@ -81,6 +77,8 @@ class TracedSearchGateway(SearchGateway):
                         "allowed_providers": sorted(effective_policy.allowed_providers) if effective_policy.allowed_providers is not None else None,
                         "allow_paid_fallback": effective_policy.allow_paid_fallback,
                         "allow_paid_fanout": effective_policy.allow_paid_fanout,
+                        "target_results": effective_policy.target_results,
+                        "max_providers_per_query": effective_policy.max_providers_per_query,
                     },
                     event_key=f"{mission_id}:{attempt_id}:query:{query_index}:planned",
                     runtime_version=runtime_version,
