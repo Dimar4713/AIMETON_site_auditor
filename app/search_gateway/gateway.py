@@ -247,6 +247,8 @@ class SearchGateway:
             provider = self._providers.get(name)
             if provider is None or not provider.configured:
                 continue
+            if not provider.execution_allowed:
+                continue
             if self._circuit_state(name) == "open":
                 continue
             quota = self._global_quotas.get(name)
@@ -294,8 +296,13 @@ class SearchGateway:
     ) -> _Execution:
         provider = self._providers.get(provider_name)
         policy_blocked = policy.allowed_providers is not None and provider_name not in policy.allowed_providers
-        if provider is None or policy_blocked or not provider.configured:
-            reason = FallbackReason.POLICY_BLOCKED if policy_blocked else FallbackReason.NOT_CONFIGURED
+        if provider is None or policy_blocked or not provider.configured or not provider.execution_allowed:
+            if policy_blocked:
+                reason = FallbackReason.POLICY_BLOCKED
+            elif provider is not None and provider.configured and not provider.execution_allowed:
+                reason = provider.execution_block_reason or FallbackReason.POLICY_BLOCKED
+            else:
+                reason = FallbackReason.NOT_CONFIGURED
             return _Execution(
                 provider=provider_name,
                 called=False,
@@ -700,6 +707,12 @@ class SearchGateway:
                 state = ProviderReadiness.POLICY_BLOCKED
             elif not provider.configured:
                 state = ProviderReadiness.NOT_CONFIGURED
+            elif not provider.execution_allowed:
+                state = (
+                    ProviderReadiness.CONTRACT_BLOCKED
+                    if provider.execution_block_reason == FallbackReason.CONTRACT_BLOCKED
+                    else ProviderReadiness.POLICY_BLOCKED
+                )
             elif circuit_state == "open":
                 state = ProviderReadiness.CIRCUIT_OPEN
             elif remaining == 0:
