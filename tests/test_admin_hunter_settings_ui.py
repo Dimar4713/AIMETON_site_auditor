@@ -49,4 +49,5 @@ def test_user_hunter_form_no_longer_hardcodes_operational_limits() -> None:
     assert "max_candidates:" not in hunter_block
     assert "output_limit:" not in hunter_block
     assert "concurrency:" not in hunter_block
-    assert "renderHunterCandidates(list, data.candidates || []" in hunter_block
+    assert "const candidates = data.candidates || [];" in hunter_block
+    assert "renderHunterCandidates(list, candidates," in hunter_block
