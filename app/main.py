@@ -29,6 +29,7 @@ from app.evidence_crawler.api import router as evidence_crawler_router
 from app.identity_evidence.api import router as identity_evidence_router
 from app.external_sources import run_enriched_site_analysis
 from app.hunter_handbook import handbook
+from app.hunter_settings import get_hunter_settings_repository
 from app.hunter_sources import get_hunter_sources
 from app.llm import chat_with_routerai
 from app.mcp_security import McpSecurityMiddleware
@@ -400,7 +401,8 @@ def preliminary_analysis_docx(req: SiteAnalysis):
 
 @app.post("/api/hunt")
 async def hunt(req: HuntRequest):
-    return await run_hunt(req)
+    effective = get_hunter_settings_repository().apply(req)
+    return await run_hunt(effective)
 
 
 @app.post("/api/chat")
