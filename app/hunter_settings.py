@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import os
 from pathlib import Path
 import sqlite3
@@ -40,12 +39,7 @@ class HunterSettingsRecord(BaseModel):
 
 
 class HunterSettingsRepository:
-    """Legacy compatibility facade.
-
-    Persistent v1 storage remains readable for rollback, but new Hunter runtime
-    limits are sourced from the active Search Strategy tariff profile so there is
-    only one effective configuration path.
-    """
+    """Compatibility facade over the active tariff Search Strategy profile."""
 
     def __init__(self, path: str | Path | None = None) -> None:
         configured = path or os.getenv("AIMETON_RUNTIME_DB", "data/runtime-core.sqlite3")
@@ -62,49 +56,59 @@ class HunterSettingsRepository:
 
     def _ensure_schema(self) -> None:
         with self._lock, self._connect() as db:
-            db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS runtime_meta (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                )
-                """
-            )
+            db.execute("CREATE TABLE IF NOT EXISTS runtime_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+
+    def _strategy_repository(self):
+        from app.search_strategy_settings import SearchStrategySettingsRepository
+
+        return SearchStrategySettingsRepository(self.path)
+
+    @staticmethod
+    def _project(record) -> HunterSettingsRecord:
+        profile = record.settings.active_profile()
+        return HunterSettingsRecord(
+            settings=HunterSettings(
+                max_queries=profile.max_queries,
+                results_per_query=profile.results_per_query,
+                max_candidates=profile.max_candidates,
+                minimum_pre_score=profile.minimum_pre_score,
+                deep_audit_score=profile.deep_audit_score,
+                output_limit=profile.output_limit,
+                concurrency=profile.concurrency,
+                provider_strategy="fallback_first_nonempty",
+            ),
+            updated_at=record.updated_at,
+            updated_by=record.updated_by,
+            reason=record.reason,
+        )
 
     def get(self) -> HunterSettingsRecord:
-        with self._lock, self._connect() as db:
-            row = db.execute("SELECT value FROM runtime_meta WHERE key = ?", (SETTINGS_KEY,)).fetchone()
-        if row is None:
-            return HunterSettingsRecord()
-        try:
-            return HunterSettingsRecord.model_validate_json(row["value"])
-        except Exception:
-            return HunterSettingsRecord()
+        return self._project(self._strategy_repository().get())
 
     def save(self, settings: HunterSettings, *, actor_id: int, reason: str) -> HunterSettingsRecord:
         settings.validate_relationships()
-        normalized_reason = " ".join(reason.split())
-        if not normalized_reason:
-            raise ValueError("reason_required")
-        record = HunterSettingsRecord(
-            settings=settings,
-            updated_at=datetime.now(UTC).isoformat(),
-            updated_by=actor_id,
-            reason=normalized_reason[:500],
+        repository = self._strategy_repository()
+        record = repository.get()
+        strategy_settings = record.settings.model_copy(deep=True)
+        profile_id = strategy_settings.global_settings.active_tariff
+        strategy_settings.tariffs[profile_id] = strategy_settings.tariffs[profile_id].model_copy(
+            update={
+                "max_queries": settings.max_queries,
+                "results_per_query": settings.results_per_query,
+                "max_candidates": settings.max_candidates,
+                "minimum_pre_score": settings.minimum_pre_score,
+                "deep_audit_score": settings.deep_audit_score,
+                "output_limit": settings.output_limit,
+                "concurrency": settings.concurrency,
+            }
         )
-        with self._lock, self._connect() as db:
-            db.execute(
-                "INSERT OR REPLACE INTO runtime_meta(key, value) VALUES(?, ?)",
-                (SETTINGS_KEY, record.model_dump_json()),
-            )
-        return record
+        saved = repository.save(strategy_settings, actor_id=actor_id, reason=reason)
+        return self._project(saved)
 
     def apply(self, request: HuntRequest) -> HuntRequest:
-        from app.search_strategy_settings import get_search_strategy_settings_repository
-
-        strategy_record = get_search_strategy_settings_repository().get()
-        strategy_record.settings.validate_relationships()
-        return strategy_record.settings.apply_hunt_request(request)
+        record = self._strategy_repository().get()
+        record.settings.validate_relationships()
+        return record.settings.apply_hunt_request(request)
 
 
 def get_hunter_settings_repository() -> HunterSettingsRepository:
