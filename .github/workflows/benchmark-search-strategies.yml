@@ -1,0 +1,81 @@
+name: Search Strategy Benchmark
+
+on:
+  push:
+    branches:
+      - bench/krasnoyarsk-dentistry-search-strategies
+    paths:
+      - scripts/benchmark_search_strategies.py
+      - .github/workflows/benchmark-search-strategies.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aimeton-search-strategy-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    environment: stage
+    timeout-minutes: 45
+    steps:
+      - name: Checkout benchmark harness
+        uses: actions/checkout@v4
+
+      - name: Verify live Stage container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker inspect -f '{{.State.Health.Status}}' aimeton-auditor | grep -qx healthy
+          echo "Stage auditor container is healthy"
+
+      - name: Install one-shot benchmark harness into running container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker cp scripts/benchmark_search_strategies.py aimeton-auditor:/tmp/benchmark_search_strategies.py
+          docker exec aimeton-auditor rm -rf /tmp/search-strategy-benchmark
+
+      - name: Run all ten real Search Gateway strategies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p benchmark-output
+          docker exec \
+            -e BENCHMARK_OUT=/tmp/search-strategy-benchmark \
+            aimeton-auditor \
+            python /tmp/benchmark_search_strategies.py \
+            2>&1 | tee benchmark-output/benchmark.log
+          docker cp aimeton-auditor:/tmp/search-strategy-benchmark/. benchmark-output/
+
+      - name: Show comparative summary
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -f benchmark-output/summary.md ]]; then
+            cat benchmark-output/summary.md
+          fi
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: krasnoyarsk-dentistry-search-strategy-benchmark-${{ github.run_id }}
+          path: benchmark-output/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Cleanup one-shot container files
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          docker exec aimeton-auditor rm -rf /tmp/benchmark_search_strategies.py /tmp/search-strategy-benchmark
