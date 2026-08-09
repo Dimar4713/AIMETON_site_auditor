@@ -255,6 +255,7 @@
       "enum": [
         "not_configured",
         "policy_blocked",
+        "contract_blocked",
         "pricing_unknown",
         "budget_blocked",
         "quota_blocked",
