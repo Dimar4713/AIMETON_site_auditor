@@ -1,0 +1,77 @@
+name: Accept Tavily Gate Stage
+
+on:
+  push:
+    branches:
+      - diag/stage-search-egress
+    paths:
+      - .github/workflows/accept-tavily-gate-stage.yml
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    environment: stage
+    timeout-minutes: 10
+    steps:
+      - name: Verify deployed SHA and fail-closed Tavily gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='dc746db848355b0df0109d4c3fe2315144370670'
+          health="$(curl -fsS https://stage-auditor.aimeton.ru/api/health)"
+          printf '%s' "$health" | grep -Fq "$expected"
+          docker inspect -f '{{.State.Health.Status}}' aimeton-auditor | grep -qx healthy
+
+          docker exec \
+            -w /app \
+            -e PYTHONPATH=/app \
+            -e TAVILY_CONTRACT_ALLOWED=false \
+            -e SEARCH_EFFECTIVENESS_DEBUG=true \
+            aimeton-auditor python - <<'PY'
+          import asyncio
+          import json
+          from app.search_gateway.factory import get_search_gateway, reset_search_gateway
+          from app.search_gateway.models import SearchPolicy, SearchRequest, SearchStrategy
+
+          async def main():
+              reset_search_gateway()
+              gateway = get_search_gateway()
+              response = await gateway.search(
+                  SearchRequest(
+                      query='Красноярск стоматология gate acceptance',
+                      limit=3,
+                      mission_id='accept-tavily-contract-gate',
+                      correlation_id='accept-tavily-contract-gate',
+                  ),
+                  SearchPolicy(
+                      provider_order=('tavily',),
+                      allowed_providers=frozenset({'tavily'}),
+                      strategy=SearchStrategy.PRIMARY_ONLY,
+                      max_cost_by_currency={'USD': 999999},
+                      cache_ttl_seconds=0,
+                      retries=0,
+                  ),
+              )
+              attempt = response.diagnostics.attempts[0]
+              safe = {
+                  'results': len(response.results),
+                  'attempt_state': str(attempt.state),
+                  'reason': str(attempt.reason),
+                  'costs': {k: str(v) for k, v in response.diagnostics.total_cost_by_currency.items()},
+              }
+              print(json.dumps(safe, sort_keys=True))
+              assert response.results == []
+              assert str(attempt.state) == 'skipped'
+              assert str(attempt.reason) == 'not_configured'
+              assert response.diagnostics.total_cost_by_currency == {}
+
+          asyncio.run(main())
+          PY
