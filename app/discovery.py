@@ -11,7 +11,7 @@ from app.heuristics import heuristic_analysis
 from app.hunter_forensic_trace import HunterForensicTrace
 from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries
 from app.hunter_query_intelligence import generate_hunter_query_plan
-from app.models import HuntCandidate, HuntRequest, HuntResult
+from app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
 from app.search_gateway import (
     SearchDiagnostics,
@@ -274,12 +274,13 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         raw_results.extend(item.as_legacy_dict() for item in response.results)
     aggregate = SearchDiagnostics.aggregate(search_diagnostics)
     if not raw_results:
+        funnel = HuntFunnel()
         trace.append(
             "hunt_funnel_complete",
             state=TraceState.SUCCEEDED,
             reason_code="hunter_no_raw_results",
             summary="Hunter completed with no raw search results",
-            counters={"raw_results": 0, "unique_candidates": 0, "returned_candidates": 0},
+            counters=funnel.model_dump(),
         )
         return HuntResult(
             region=effective_req.region,
@@ -287,6 +288,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             queries=queries,
             discovered=0,
             candidates=[],
+            funnel=funnel,
             notes=[query_intelligence_note, f"Поиск не дал результатов: gateway state={aggregate.state}."],
             search=aggregate,
         )
@@ -572,22 +574,23 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 metadata={"qualification": candidate.qualification},
             )
 
+    funnel = HuntFunnel(
+        raw_results=len(raw_results),
+        excluded_results=excluded_count,
+        duplicate_results=duplicate_count,
+        pool_omitted_results=pool_omitted_count,
+        unique_candidates=len(unique),
+        inspected_candidates=len(inspected),
+        qualified_candidates=len(candidates),
+        returned_candidates=len(returned),
+        output_omitted_candidates=max(0, len(candidates) - len(returned)),
+    )
     trace.append(
         "hunt_funnel_complete",
         state=TraceState.SUCCEEDED,
         reason_code="hunter_candidate_funnel_completed",
         summary="Hunter candidate funnel completed with bounded forensic counters",
-        counters={
-            "raw_results": len(raw_results),
-            "excluded_results": excluded_count,
-            "duplicate_results": duplicate_count,
-            "pool_omitted_results": pool_omitted_count,
-            "unique_candidates": len(unique),
-            "inspected_candidates": len(inspected),
-            "qualified_candidates": len(candidates),
-            "returned_candidates": len(returned),
-            "output_omitted_candidates": max(0, len(candidates) - len(returned)),
-        },
+        counters=funnel.model_dump(),
     )
     return HuntResult(
         region=effective_req.region,
@@ -595,6 +598,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         queries=queries,
         discovered=len(unique),
         candidates=returned,
+        funnel=funnel,
         notes=[
             query_intelligence_note,
             "План охоты сформирован по Справочнику охотника.",
