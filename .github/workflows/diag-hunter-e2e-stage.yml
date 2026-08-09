@@ -1,0 +1,152 @@
+name: Diagnose Hunter E2E Stage
+
+on:
+  push:
+    branches:
+      - bench/krasnoyarsk-dentistry-search-strategies
+    paths:
+      - .github/workflows/diag-hunter-e2e-stage.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    timeout-minutes: 30
+    steps:
+      - name: Verify Stage deployment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl -fsS https://stage-auditor.aimeton.ru/api/health | python3 -m json.tool
+          docker inspect -f '{{.State.Health.Status}}' aimeton-auditor | grep -qx healthy
+
+      - name: Read active runtime Hunter and Search Strategy settings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i -w /app aimeton-auditor python - <<'PY'
+          import json
+          from app.search_strategy_settings import get_search_strategy_settings_repository
+          from app.hunter_settings import get_hunter_settings_repository
+
+          srec = get_search_strategy_settings_repository().get()
+          hrec = get_hunter_settings_repository().get()
+          gs = srec.settings.global_settings
+          profile = srec.settings.active_profile()
+          payload = {
+              'updated_at': srec.updated_at,
+              'reason': srec.reason,
+              'active_tariff': gs.active_tariff,
+              'default_strategy': str(gs.default_strategy),
+              'emergency_strategy_override': str(gs.emergency_strategy_override) if gs.emergency_strategy_override else None,
+              'enabled_providers': gs.enabled_providers,
+              'canonical_provider_order': gs.canonical_provider_order,
+              'global_paid_policy': str(gs.paid_policy),
+              'global_paid_fanout_policy': str(gs.paid_fanout_policy),
+              'hard_max_cost_rub': str(gs.hard_max_cost_rub),
+              'hard_max_cost_usd': str(gs.hard_max_cost_usd),
+              'profile': {
+                  'id': profile.id,
+                  'strategy': str(profile.strategy) if profile.strategy else None,
+                  'provider_order': profile.provider_order,
+                  'paid_policy': str(profile.paid_policy),
+                  'paid_fanout_policy': str(profile.paid_fanout_policy),
+                  'max_cost_rub': str(profile.max_cost_rub),
+                  'max_cost_usd': str(profile.max_cost_usd),
+                  'target_results': profile.target_results,
+                  'max_providers_per_query': profile.max_providers_per_query,
+                  'max_queries': profile.max_queries,
+                  'results_per_query': profile.results_per_query,
+                  'max_candidates': profile.max_candidates,
+                  'output_limit': profile.output_limit,
+                  'minimum_pre_score': profile.minimum_pre_score,
+                  'deep_audit_score': profile.deep_audit_score,
+                  'concurrency': profile.concurrency,
+              },
+              'hunter_projection': hrec.settings.model_dump(mode='json'),
+          }
+          print('ACTIVE_RUNTIME_SETTINGS=' + json.dumps(payload, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Run real HTTP Hunter request and inspect forensic funnel
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i -w /app aimeton-auditor python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from datetime import UTC, datetime
+          import httpx
+
+          started = datetime.now(UTC).isoformat()
+          payload = {
+              'region': 'Красноярск',
+              'industries': ['Стоматология'],
+              'focus': [],
+          }
+          with httpx.Client(timeout=900.0) as client:
+              response = client.post('http://127.0.0.1:5000/api/hunt', json=payload)
+          print('HUNT_HTTP_STATUS=' + str(response.status_code))
+          response.raise_for_status()
+          data = response.json()
+          summary = {
+              'region': data.get('region'),
+              'query_count': len(data.get('queries') or []),
+              'queries': data.get('queries') or [],
+              'discovered': data.get('discovered'),
+              'returned_candidates': len(data.get('candidates') or []),
+              'candidate_domains': [c.get('url') for c in (data.get('candidates') or [])],
+              'notes': data.get('notes') or [],
+              'search_state': (data.get('search') or {}).get('state'),
+              'search_strategy': (data.get('search') or {}).get('strategy'),
+              'provider_order': (data.get('search') or {}).get('provider_order'),
+              'attempt_count': len((data.get('search') or {}).get('attempts') or []),
+              'costs': (data.get('search') or {}).get('costs'),
+          }
+          print('HUNT_RESPONSE_SUMMARY=' + json.dumps(summary, ensure_ascii=False, sort_keys=True))
+
+          db_path = os.getenv('AIMETON_TRACE_DB') or os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          db = sqlite3.connect(db_path)
+          db.row_factory = sqlite3.Row
+          funnel = db.execute(
+              """SELECT mission_id, attempt_id, counters_json, created_at
+                   FROM mission_trace_events
+                  WHERE component='hunter' AND operation='hunt_funnel_complete' AND created_at >= ?
+                  ORDER BY created_at DESC LIMIT 1""",
+              (started,),
+          ).fetchone()
+          if funnel:
+              mission_id = funnel['mission_id']
+              print('HUNT_FUNNEL=' + json.dumps({
+                  'mission_id': mission_id,
+                  'counters': json.loads(funnel['counters_json']),
+                  'created_at': funnel['created_at'],
+              }, ensure_ascii=False, sort_keys=True))
+              reasons = db.execute(
+                  """SELECT reason_code, COUNT(*) AS n
+                       FROM mission_trace_events
+                      WHERE mission_id=? AND component='hunter'
+                      GROUP BY reason_code ORDER BY n DESC, reason_code""",
+                  (mission_id,),
+              ).fetchall()
+              print('HUNTER_REASON_COUNTS=' + json.dumps({r['reason_code']: r['n'] for r in reasons}, ensure_ascii=False, sort_keys=True))
+              planned = db.execute(
+                  """SELECT metadata_json
+                       FROM mission_trace_events
+                      WHERE mission_id=? AND component='search_gateway' AND operation='query_planned'
+                      ORDER BY sequence LIMIT 1""",
+                  (mission_id,),
+              ).fetchone()
+              if planned:
+                  print('EFFECTIVE_SEARCH_POLICY=' + planned['metadata_json'])
+          else:
+              print('HUNT_FUNNEL=NOT_FOUND')
+          PY
