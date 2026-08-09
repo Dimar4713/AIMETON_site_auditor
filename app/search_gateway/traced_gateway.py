@@ -120,6 +120,8 @@ class TracedSearchGateway(SearchGateway):
                             "result_title": item.title[:_TRACE_TITLE_LIMIT],
                             "result_snippet": item.snippet[:_TRACE_SNIPPET_LIMIT],
                             "published_at": item.published_at,
+                            "corroborated_by": item.corroborated_by,
+                            "corroboration_count": len(item.corroborated_by),
                         },
                         event_key=f"{mission_id}:{attempt_id}:query:{query_index}:result:{rank}",
                         runtime_version=runtime_version,
