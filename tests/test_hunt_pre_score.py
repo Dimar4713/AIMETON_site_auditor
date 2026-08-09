@@ -105,7 +105,10 @@ def test_missing_text_is_explicit_insufficient_data_not_zero():
 
 @pytest.mark.asyncio
 async def test_deep_processing_is_not_called_below_threshold(monkeypatch):
-    req = _request(deep_audit_score=90)
+    # The explicit industry-match factor intentionally raises a clear dentistry
+    # result. Keep this regression focused on the threshold rule itself by using
+    # the strictest allowed threshold.
+    req = _request(deep_audit_score=100)
     monkeypatch.setattr(
         discovery,
         "_build_queries",
