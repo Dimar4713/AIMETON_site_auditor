@@ -45,8 +45,18 @@ class SearchProvider(ABC):
 
 
 class HttpSearchProvider(SearchProvider):
-    def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        proxy_url: str | None = None,
+    ) -> None:
         self._transport = transport
+        self._proxy_url = (proxy_url or "").strip() or None
+
+    @property
+    def proxy_configured(self) -> bool:
+        return bool(self._proxy_url)
 
     @staticmethod
     def _http_failure_reason(response: httpx.Response) -> FallbackReason:
@@ -67,12 +77,21 @@ class HttpSearchProvider(SearchProvider):
         timeout_seconds: float,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        client_kwargs: dict[str, Any] = {
+            "timeout": timeout_seconds,
+            "follow_redirects": True,
+        }
+        if self._transport is not None:
+            # Mock/custom transports own routing during tests and specialized use.
+            client_kwargs["transport"] = self._transport
+        elif self._proxy_url:
+            # Explicit provider-local egress. The URL is intentionally never
+            # copied into ProviderError/diagnostics so credentials cannot leak.
+            client_kwargs["proxy"] = self._proxy_url
+            client_kwargs["trust_env"] = False
+
         try:
-            async with httpx.AsyncClient(
-                timeout=timeout_seconds,
-                follow_redirects=True,
-                transport=self._transport,
-            ) as client:
+            async with httpx.AsyncClient(**client_kwargs) as client:
                 response = await client.request(method, url, **kwargs)
                 response.raise_for_status()
                 payload = response.json()
@@ -206,16 +225,35 @@ class TavilyProvider(HttpSearchProvider):
         *,
         cost_amount: Decimal = Decimal("0"),
         transport: httpx.AsyncBaseTransport | None = None,
+        proxy_url: str | None = None,
+        contract_allowed: bool = True,
     ) -> None:
-        super().__init__(transport=transport)
+        super().__init__(transport=transport, proxy_url=proxy_url)
         self._api_key = (api_key or "").strip()
+        self._contract_allowed = bool(contract_allowed)
         self.cost_amount = cost_amount
 
     @property
-    def configured(self) -> bool:
+    def technical_configured(self) -> bool:
         return bool(self._api_key)
 
+    @property
+    def contract_allowed(self) -> bool:
+        return self._contract_allowed
+
+    @property
+    def configured(self) -> bool:
+        # SearchGateway checks configured before reserving paid cost, making the
+        # compliance gate fail closed without a network call or accounting hit.
+        return self.technical_configured and self._contract_allowed
+
     async def search(self, request: SearchRequest, *, timeout_seconds: float) -> list[SearchItem]:
+        if not self._contract_allowed:
+            raise ProviderError(
+                "tavily execution is not permitted for this deployment context",
+                retryable=False,
+                reason=FallbackReason.POLICY_BLOCKED,
+            )
         payload = await self._request_json(
             "POST",
             "https://api.tavily.com/search",
