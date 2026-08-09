@@ -13,6 +13,7 @@ def test_admin_workspace_exposes_search_strategy_and_active_tariff_controls() ->
     assert 'id="search-active-tariff"' in html
     assert 'id="search-default-strategy"' in html
     assert 'id="search-enabled-providers"' in html
+    assert 'id="search-canonical-provider-order"' in html
     assert 'id="search-paid-policy"' in html
     assert 'id="search-paid-fanout-policy"' in html
     assert 'id="search-tariff-profiles"' in html
@@ -22,6 +23,7 @@ def test_admin_workspace_exposes_search_strategy_and_active_tariff_controls() ->
     assert 'Tavily' in html
     assert '/api/admin/search-strategies' in strategy_script
     assert "'X-CSRF-Token': csrfToken()" in strategy_script
+    assert 'canonical_provider_order: parseProviderOrder(canonicalProviderOrder.value)' in strategy_script
     assert 'Наследовать глобальную стратегию' in strategy_script
     assert 'только global/debug' in strategy_script
     assert 'tariffSafeOnly: true' in strategy_script

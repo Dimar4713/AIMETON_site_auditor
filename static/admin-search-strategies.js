@@ -11,6 +11,7 @@
   const defaultStrategy = document.querySelector('#search-default-strategy');
   const emergencyStrategy = document.querySelector('#search-emergency-strategy');
   const providersSelect = document.querySelector('#search-enabled-providers');
+  const canonicalProviderOrder = document.querySelector('#search-canonical-provider-order');
 
   let state = null;
   let catalog = [];
@@ -44,6 +45,10 @@
 
   function selectedValues(select) {
     return [...select.selectedOptions].map(option => option.value);
+  }
+
+  function parseProviderOrder(value) {
+    return String(value || '').split(',').map(item => item.trim()).filter(Boolean);
   }
 
   function tariffCard(profile) {
@@ -107,6 +112,7 @@
     document.querySelector('#search-paid-fanout-policy').value = global.paid_fanout_policy;
     document.querySelector('#search-hard-rub').value = global.hard_max_cost_rub;
     document.querySelector('#search-hard-usd').value = global.hard_max_cost_usd;
+    canonicalProviderOrder.value = (global.canonical_provider_order || []).join(',');
     [...providersSelect.options].forEach(option => { option.selected = global.enabled_providers.includes(option.value); });
 
     tariffsNode.replaceChildren(...profiles.map(tariffCard));
@@ -123,7 +129,7 @@
     const tariffs = {};
     tariffsNode.querySelectorAll('[data-tariff]').forEach(card => {
       const old = state.tariffs[card.dataset.tariff];
-      const order = card.querySelector('[data-field="provider_order"]').value.split(',').map(v => v.trim()).filter(Boolean);
+      const order = parseProviderOrder(card.querySelector('[data-field="provider_order"]').value);
       tariffs[old.id] = {
         id: old.id,
         label: old.label,
@@ -174,7 +180,7 @@
           active_tariff: activeTariff.value,
           default_strategy: defaultStrategy.value,
           enabled_providers: selectedValues(providersSelect),
-          canonical_provider_order: state.global_settings.canonical_provider_order,
+          canonical_provider_order: parseProviderOrder(canonicalProviderOrder.value),
           paid_policy: document.querySelector('#search-paid-policy').value,
           paid_fanout_policy: document.querySelector('#search-paid-fanout-policy').value,
           hard_max_cost_rub: Number(document.querySelector('#search-hard-rub').value || 0),
