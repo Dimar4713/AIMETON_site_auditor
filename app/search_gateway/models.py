@@ -71,6 +71,7 @@ class SearchItem(GatewayModel):
     snippet: str = Field(default="", max_length=4000)
     published_at: str | None = Field(default=None, max_length=100)
     provider: str = Field(min_length=1, max_length=100)
+    corroborated_by: list[str] = Field(default_factory=list, max_length=16)
 
     def as_legacy_dict(self) -> dict[str, str]:
         payload = {
