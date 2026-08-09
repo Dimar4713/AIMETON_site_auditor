@@ -5,7 +5,7 @@ import random
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
-from app.search_gateway.models import SearchItem, SearchRequest
+from app.search_gateway.models import FallbackReason, SearchItem, SearchRequest
 from app.search_gateway.providers import SearchProvider
 
 
@@ -19,6 +19,10 @@ class ScheduledProvider(SearchProvider):
     The wrapper deliberately does not hide origin, rotate identities, or retry on
     its own. SearchGateway keeps fallback/retry/circuit policy; this layer only
     smooths outbound pressure independently for each provider.
+
+    Provider readiness/eligibility is part of search semantics and therefore
+    MUST be delegated to the wrapped provider rather than falling back to the
+    permissive base-class defaults.
     """
 
     def __init__(
@@ -64,6 +68,14 @@ class ScheduledProvider(SearchProvider):
     @property
     def configured(self) -> bool:
         return self._provider.configured
+
+    @property
+    def execution_allowed(self) -> bool:
+        return self._provider.execution_allowed
+
+    @property
+    def execution_block_reason(self) -> FallbackReason | None:
+        return self._provider.execution_block_reason
 
     async def search(
         self,
