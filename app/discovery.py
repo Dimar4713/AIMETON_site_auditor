@@ -38,6 +38,22 @@ EXCLUDED_HOSTS = {
 
 COMMERCIAL_MARKERS = ("каталог", "товар", "оборудован", "услуг", "подбор", "расчет", "заказать")
 COMPLEXITY_MARKERS = ("опт", "производ", "монтаж", "проект", "комплектац", "прайс")
+STRONG_INDUSTRY_MARKERS_BY_REQUEST = {
+    "стоматология": (
+        "стоматол",
+        "лечение зуб",
+        "имплант",
+        "ортодонт",
+        "эндодонт",
+        "пародонт",
+        "протезирован",
+        "dental",
+        "dentist",
+        "stomatolog",
+        "implantaci",
+        "ortodont",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -86,6 +102,8 @@ def _industry_markers(req: HuntRequest) -> list[str]:
     We intentionally derive these from the actual requested values rather than every
     broad handbook alias. For example a dentistry hunt should not receive an
     industry-match merely because a result contains the generic word `клиника`.
+    Strong, industry-specific synonyms may be added for a concrete requested
+    industry so valid specialist pages are not lost when they omit the umbrella term.
     """
     markers: list[str] = []
     seen: set[str] = set()
@@ -94,6 +112,9 @@ def _industry_markers(req: HuntRequest) -> list[str]:
         if not normalized:
             continue
         candidates = [normalized]
+        for trigger, strong_markers in STRONG_INDUSTRY_MARKERS_BY_REQUEST.items():
+            if trigger in normalized or normalized in trigger:
+                candidates.extend(strong_markers)
         for token in normalized.replace(",", " ").split():
             clean = token.strip("-—–()[]{}.,:;!?")
             if len(clean) >= 5:

@@ -31,6 +31,28 @@ def test_morphological_industry_form_is_detected_by_bounded_stem() -> None:
     assert result.factors["industry_match"] == 25
 
 
+def test_strong_dentistry_service_terms_match_without_umbrella_word() -> None:
+    result = discovery._pre_score(
+        _request(),
+        "Allure Dent — имплантация зубов в Красноярске",
+        "Протезирование и восстановление зубов",
+        "https://allure-dent.ru/implantaciya",
+    )
+
+    assert result.factors["industry_match"] == 25
+
+
+def test_dentistry_translit_url_and_orthodontics_match() -> None:
+    result = discovery._pre_score(
+        _request(),
+        "Исправление прикуса в Красноярске",
+        "Брекеты и консультация ортодонта",
+        "https://example-dent.ru/ortodontiya",
+    )
+
+    assert result.factors["industry_match"] == 25
+
+
 def test_generic_medical_clinic_does_not_get_dentistry_match() -> None:
     result = discovery._pre_score(
         _request(),
@@ -39,6 +61,18 @@ def test_generic_medical_clinic_does_not_get_dentistry_match() -> None:
         "https://medical-center.ru/",
     )
 
+    assert result.factors["industry_match"] == 0
+
+
+def test_generic_clinic_request_does_not_inherit_dentistry_strong_markers() -> None:
+    result = discovery._pre_score(
+        _request("клиника"),
+        "Многопрофильный медицинский центр в Красноярске",
+        "Диагностика, терапия, хирургия",
+        "https://medical-center.ru/",
+    )
+
+    assert "имплант" not in discovery._industry_markers(_request("клиника"))
     assert result.factors["industry_match"] == 0
 
 
