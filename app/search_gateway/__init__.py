@@ -14,6 +14,7 @@ from app.search_gateway.models import (
     SearchPolicy,
     SearchRequest,
     SearchResponse,
+    SearchStrategy,
 )
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "SearchPolicy",
     "SearchRequest",
     "SearchResponse",
+    "SearchStrategy",
     "get_search_gateway",
     "identity_search_policy_from_env",
     "reset_search_gateway",

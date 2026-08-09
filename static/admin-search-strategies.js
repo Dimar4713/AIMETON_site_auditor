@@ -26,14 +26,16 @@
     message.className = `message ${kind}`.trim();
   }
 
-  function implementedStrategies() {
-    return catalog.filter(item => item.implemented);
+  function implementedStrategies(tariffSafeOnly = false) {
+    return catalog.filter(item => item.implemented && (!tariffSafeOnly || item.tariff_safe));
   }
 
-  function strategyOptions(selected, includeEmpty = false) {
+  function strategyOptions(selected, {emptyLabel = '', tariffSafeOnly = false} = {}) {
     const options = [];
-    if (includeEmpty) options.push('<option value="">Нет</option>');
-    implementedStrategies().forEach(item => {
+    if (emptyLabel) {
+      options.push(`<option value="" ${selected ? '' : 'selected'}>${emptyLabel}</option>`);
+    }
+    implementedStrategies(tariffSafeOnly).forEach(item => {
       const isSelected = item.id === selected ? ' selected' : '';
       options.push(`<option value="${item.id}"${isSelected}>${item.label}</option>`);
     });
@@ -51,7 +53,7 @@
     article.innerHTML = `
       <h3>${profile.label} <small>(${profile.id})</small></h3>
       <label>Включён<input data-field="enabled" type="checkbox" ${profile.enabled ? 'checked' : ''}></label>
-      <label>Стратегия<select data-field="strategy">${strategyOptions(profile.strategy)}</select></label>
+      <label>Стратегия<select data-field="strategy">${strategyOptions(profile.strategy, {emptyLabel: 'Наследовать глобальную стратегию', tariffSafeOnly: true})}</select></label>
       <label>Порядок providers<input data-field="provider_order" value="${profile.provider_order.join(',')}"></label>
       <label>Платные providers<select data-field="paid_policy">
         <option value="inherit" ${profile.paid_policy === 'inherit' ? 'selected' : ''}>Наследовать</option>
@@ -83,7 +85,8 @@
     catalog.forEach(item => {
       const card = document.createElement('article');
       card.className = 'mission-card';
-      card.innerHTML = `<strong>${item.label}</strong><div>${item.description}</div><div class="message">${item.id} · охват: ${item.coverage} · стоимость: ${item.cost_profile} · ${item.implemented ? 'реализовано' : 'planned'}</div>`;
+      const scope = item.tariff_safe ? 'доступно глобально и в тарифах' : 'только global/debug';
+      card.innerHTML = `<strong>${item.label}</strong><div>${item.description}</div><div class="message">${item.id} · охват: ${item.coverage} · стоимость: ${item.cost_profile} · ${item.implemented ? 'реализовано' : 'planned'} · ${scope}</div>`;
       catalogNode.append(card);
     });
   }
@@ -93,9 +96,13 @@
     const global = state.global_settings;
     const profiles = Object.values(state.tariffs);
 
-    activeTariff.innerHTML = profiles.map(p => `<option value="${p.id}" ${p.id === global.active_tariff ? 'selected' : ''}>${p.label}</option>`).join('');
+    activeTariff.innerHTML = profiles.map(p => {
+      const selected = p.id === global.active_tariff ? ' selected' : '';
+      const disabled = !p.enabled && !selected ? ' disabled' : '';
+      return `<option value="${p.id}"${selected}${disabled}>${p.label}${p.enabled ? '' : ' [выключен]'}</option>`;
+    }).join('');
     defaultStrategy.innerHTML = strategyOptions(global.default_strategy);
-    emergencyStrategy.innerHTML = strategyOptions(global.emergency_strategy_override || '', true);
+    emergencyStrategy.innerHTML = strategyOptions(global.emergency_strategy_override || '', {emptyLabel: 'Нет аварийного override'});
     document.querySelector('#search-paid-policy').value = global.paid_policy;
     document.querySelector('#search-paid-fanout-policy').value = global.paid_fanout_policy;
     document.querySelector('#search-hard-rub').value = global.hard_max_cost_rub;
@@ -121,7 +128,7 @@
         id: old.id,
         label: old.label,
         enabled: card.querySelector('[data-field="enabled"]').checked,
-        strategy: card.querySelector('[data-field="strategy"]').value,
+        strategy: card.querySelector('[data-field="strategy"]').value || null,
         provider_order: order,
         paid_policy: card.querySelector('[data-field="paid_policy"]').value,
         paid_fanout_policy: card.querySelector('[data-field="paid_fanout_policy"]').value,
