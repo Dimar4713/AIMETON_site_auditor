@@ -1,0 +1,112 @@
+name: Persist Current Stage Benchmark Evidence
+
+on:
+  push:
+    branches:
+      - bench/krasnoyarsk-dentistry-search-strategies
+    paths:
+      - .github/workflows/persist-stage-current-benchmark.yml
+
+permissions:
+  contents: write
+
+jobs:
+  persist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout evidence branch
+        uses: actions/checkout@v4
+        with:
+          ref: evidence/stage-current-krasnoyarsk-dentistry-20260809
+          fetch-depth: 0
+
+      - name: Download exact Stage benchmark artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: current-stage-krasnoyarsk-dentistry-strategy-benchmark-31301705371
+          path: /tmp/stage-benchmark-artifact
+          run-id: 31301705371
+          github-token: ${{ github.token }}
+
+      - name: Build durable evidence directory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          dest='docs/evidence/search-benchmarks/2026-08-09-krasnoyarsk-dentistry-stage-current'
+          rm -rf "$dest"
+          mkdir -p "$dest"
+          cp /tmp/stage-benchmark-artifact/stage-benchmark-output/benchmark.json "$dest/benchmark.json"
+          cp /tmp/stage-benchmark-artifact/stage-benchmark-output/summary.md "$dest/summary.md"
+          cp /tmp/stage-benchmark-artifact/stage-benchmark-output/replay.log "$dest/replay.log"
+          cp /tmp/stage-benchmark-artifact/stage-benchmark-output/input-provenance.json "$dest/input-provenance.json"
+          cp /tmp/stage-benchmark-artifact/stage-benchmark-input/yandex.json "$dest/yandex-current.json"
+          cp /tmp/stage-benchmark-artifact/stage-benchmark-input/searxng.json "$dest/searxng-current.json"
+          cp docs/evidence/search-benchmarks/2026-08-09-krasnoyarsk-dentistry-three-provider/tavily-snapshot.zip "$dest/tavily-snapshot.zip"
+          (cd /tmp/stage-benchmark-artifact && zip -qr "$GITHUB_WORKSPACE/$dest/current-stage-benchmark.zip" .)
+
+          cat > "$dest/README.md" <<'EOF'
+          # Красноярск / Стоматология — current Stage Search Gateway benchmark
+
+          Дата: 2026-08-09 UTC  
+          Workflow run: `31301705371`  
+          Stage application SHA: `1bcc6cee231b02d00fd53815e97243d83e2764bf`  
+          Benchmark harness commit: `c0188706208153f5fe856bc16a78950941b1dcf2`
+
+          ## Цель
+
+          Повторно сравнить все 10 реализованных стратегий AIMETON Search Gateway на сценарии `Красноярск ; Стоматология` после доработки provider eligibility/contract gate.
+
+          ## Методика и происхождение входов
+
+          Одинаковые 8 query-вариантов использованы для всех стратегий.
+
+          - **Yandex Search:** свежий live snapshot непосредственно из Stage-контейнера — 8 вызовов, 160 raw results, стоимость `0.08 RUB`.
+          - **SearXNG:** свежий live snapshot непосредственно из Stage — 8 запросов, 86 raw results, нулевая маржинальная API-стоимость.
+          - **Tavily:** переиспользован ранее зафиксированный live snapshot — 8 запросов, 110 raw results, историческая стоимость получения `$0.064`. В этом повторном Stage-run новых Tavily API-вызовов не было; `TAVILY_CONTRACT_ALLOWED=false`.
+
+          Все 10 executor-стратегий исполнялись настоящим текущим `SearchGateway` внутри Stage-контейнера на одном фиксированном корпусе. Формула score была задана заранее: `50% recall + 35% precision + 10% corroboration + 5% time/cost efficiency`.
+
+          ## Рейтинг
+
+          Reference union: **76 probable direct-company domains**, regional subset: **66**.
+
+          | Место | Стратегия | Score | Direct | Precision | Recall | Regional recall | Corroboration | Время, с | Y/T/S | RUB | USD |
+          |---:|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|
+          | 1 | `exhaustive_coverage` | 77.23 | 76 | 71.0% | 100.0% | 98.5% | 23.7% | 26.20 | 8/8/8 | 0.08 | 0.064 |
+          | 2 | `consensus_union` | 75.39 | 70 | 70.0% | 92.1% | 89.4% | 38.6% | 15.95 | 8/8/8 | 0.08 | 0.064 |
+          | 3 | `adaptive_cost_quality` | 73.24 | 62 | 80.5% | 81.6% | 89.4% | 37.1% | 22.02 | 8/7/7 | 0.08 | 0.056 |
+          | 4 | `parallel_union` | 72.77 | 64 | 79.0% | 84.2% | 81.8% | 20.3% | 15.95 | 8/8/8 | 0.08 | 0.064 |
+          | 5 | `cascade_until_target` | 72.27 | 64 | 79.0% | 84.2% | 81.8% | 20.3% | 21.18 | 8/8/4 | 0.08 | 0.064 |
+          | 6 | `sequential_union` | 71.79 | 64 | 79.0% | 84.2% | 81.8% | 20.3% | 26.20 | 8/8/8 | 0.08 | 0.064 |
+          | 7 | `fallback_first_nonempty` | 62.46 | 44 | 86.3% | 57.9% | 60.6% | 0.0% | 4.56 | 8/0/0 | 0.08 | 0 |
+          | 8 | `primary_only` | 62.46 | 44 | 86.3% | 57.9% | 60.6% | 0.0% | 4.56 | 8/0/0 | 0.08 | 0 |
+          | 9 | `split_query_routing` | 61.09 | 40 | 81.6% | 52.6% | 59.1% | 30.0% | 8.99 | 3/3/2 | 0.03 | 0.024 |
+          | 10 | `shadow_compare` | 59.69 | 44 | 86.3% | 57.9% | 60.6% | 0.0% | 20.51 | 8/8/8 | 0.08 | 0.064 |
+
+          ## Стоимость
+
+          Инкрементальная стоимость именно run `31301705371`: Yandex `0.08 RUB`; SearXNG `$0`; новых Tavily расходов `$0`. Таблица сохраняет модельную стоимость стратегии так, как если бы соответствующий Tavily corpus получался live: полноохватные режимы `0.08 RUB + $0.064`, adaptive `0.08 RUB + $0.056`, split `0.03 RUB + $0.024`.
+
+          ## Интерпретация
+
+          `Precision` и `Recall` — benchmark-метрики относительно heuristic direct-company classification и объединённого reference corpus, а не абсолютная доля всех реально существующих клиник Красноярска. Один домен может представлять несколько филиалов.
+
+          ## Артефакты
+
+          `benchmark.json`, `summary.md`, `replay.log`, `input-provenance.json`, свежие `yandex-current.json` и `searxng-current.json`, переиспользованный `tavily-snapshot.zip`, точный `current-stage-benchmark.zip` и `SHA256SUMS.txt`.
+          EOF
+
+          (cd "$dest" && sha256sum README.md benchmark.json current-stage-benchmark.zip input-provenance.json replay.log searxng-current.json summary.md tavily-snapshot.zip yandex-current.json > SHA256SUMS.txt)
+          (cd "$dest" && sha256sum -c SHA256SUMS.txt)
+
+      - name: Commit durable evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/evidence/search-benchmarks/2026-08-09-krasnoyarsk-dentistry-stage-current
+          git diff --cached --check
+          git commit -m 'Record current Stage Krasnoyarsk dentistry benchmark evidence'
+          git push origin HEAD:evidence/stage-current-krasnoyarsk-dentistry-20260809
