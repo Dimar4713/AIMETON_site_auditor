@@ -30,7 +30,7 @@ jobs:
           printf '%s' "$health" | grep -Fq "$expected"
           docker inspect -f '{{.State.Health.Status}}' aimeton-auditor | grep -qx healthy
 
-          docker exec \
+          docker exec -i \
             -w /app \
             -e PYTHONPATH=/app \
             -e TAVILY_CONTRACT_ALLOWED=false \
@@ -38,6 +38,7 @@ jobs:
             aimeton-auditor python - <<'PY'
           import asyncio
           import json
+          from decimal import Decimal
           from app.search_gateway.factory import get_search_gateway, reset_search_gateway
           from app.search_gateway.models import SearchPolicy, SearchRequest, SearchStrategy
 
@@ -55,7 +56,7 @@ jobs:
                       provider_order=('tavily',),
                       allowed_providers=frozenset({'tavily'}),
                       strategy=SearchStrategy.PRIMARY_ONLY,
-                      max_cost_by_currency={'USD': 999999},
+                      max_cost_by_currency={'USD': Decimal('999999')},
                       cache_ttl_seconds=0,
                       retries=0,
                   ),
