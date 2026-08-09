@@ -69,6 +69,7 @@ CURRENT_DIR="$STACK_DIR/app-source"
 SHA_FILE="$STACK_DIR/app-source-sha.txt"
 RUNTIME_SECRETS_FILE="$STACK_DIR/.runtime-secrets.env"
 COMPOSE_OVERRIDE_FILE="$STACK_DIR/docker-compose.runtime-secrets.yml"
+DATA_DIR="${DATA_DIR:-$STACK_DIR/data/runtime-core}"
 PREVIOUS_SHA="unknown"
 SWITCHED=0
 
@@ -79,6 +80,8 @@ configure_runtime_secrets() {
   secret_tmp="$(mktemp "$DEPLOY_ROOT/runtime-secrets.XXXXXX")"
   override_tmp="$(mktemp "$DEPLOY_ROOT/runtime-compose.XXXXXX")"
   chmod 600 "$secret_tmp"
+  mkdir -p "$DATA_DIR"
+  chmod 700 "$DATA_DIR"
   {
     printf 'TAVILY_TOKEN=%s\n' "$TAVILY_TOKEN"
     printf 'YANDEX_SEARCH_API_KEY=%s\n' "$YANDEX_SEARCH_API_KEY"
@@ -102,11 +105,21 @@ services:
       IDENTITY_SEARCH_PROVIDER_ORDER: "$IDENTITY_SEARCH_PROVIDER_ORDER"
       IDENTITY_SEARCH_ALLOW_PAID_FALLBACK: "$IDENTITY_SEARCH_ALLOW_PAID_FALLBACK"
       IDENTITY_AUTHORITY_HOSTS: "$IDENTITY_AUTHORITY_HOSTS"
+    volumes:
+      - ./data/runtime-core:/app/data
 EOF
   chmod 600 "$override_tmp"
   mv "$secret_tmp" "$RUNTIME_SECRETS_FILE"
   mv "$override_tmp" "$COMPOSE_OVERRIDE_FILE"
-  log "Runtime provider configuration installed without exposing credentials"
+  log "Runtime provider configuration and persistent /app/data mount installed without exposing credentials"
+}
+
+verify_runtime_persistence_mount() {
+  local mount
+  mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}' 2>/dev/null || true)"
+  [[ -n "$mount" ]] || { log "runtime persistence mount missing from deployed container"; return 1; }
+  [[ "${mount##*|}" == "/app/data" ]] || { log "unexpected runtime persistence destination: $mount"; return 1; }
+  log "Runtime persistence mount verified: $mount"
 }
 
 compose_stack() {
@@ -262,6 +275,7 @@ grep -q 'stage-auditor.aimeton.ru' "$STAGING_DIR/app/mcp_server.py" || fail "Sta
 grep -q 'Location.*\/mcp\/' "$STAGING_DIR/app/main.py" || fail "Relative MCP redirect implementation missing"
 
 configure_runtime_secrets
+compose_stack config --quiet
 
 log "Switching bundle atomically; previous SHA: $PREVIOUS_SHA"
 if [[ -d "$CURRENT_DIR" ]]; then
@@ -276,6 +290,7 @@ compose_stack build "$SERVICE"
 compose_stack up -d --force-recreate "$SERVICE"
 
 wait_healthy || rollback "container failed health check"
+verify_runtime_persistence_mount || rollback "runtime persistence mount missing from deployed container"
 smoke_test || rollback "stage smoke test failed"
 
 trap - ERR
