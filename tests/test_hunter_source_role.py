@@ -25,10 +25,22 @@ def test_real_e2e_directories_and_articles_are_supporting_sources() -> None:
         assert classify_source_role(title, "адреса, цены, отзывы", url) == "supporting_source"
 
 
+def test_map_and_social_platform_results_are_supporting_sources() -> None:
+    cases = (
+        ("Стоматологии в Красноярске: рейтинг, отзывы, врачи, адреса и цены", "https://yandex.ru/medicine/stomatologiya_krasnoyarsk"),
+        ("Стоматологии в Красноярске на карте", "https://2gis.ru/krasnoyarsk/search/stomatologii"),
+        ("Лечение и имплантация зубов DENTIST | Красноярск", "https://vk.ru/dentist_krsk"),
+        ("DENTIST Красноярск", "https://vk.com/dentist_krsk"),
+    )
+    for title, url in cases:
+        assert classify_source_role(title, "", url) == "supporting_source"
+
+
 def test_subdomains_of_known_sources_are_supporting() -> None:
     assert is_supporting_host("krsk.infodoctor.ru")
     assert is_supporting_host("krasnoyarsk.yp.ru")
     assert is_supporting_host("krsk.docdoc.ru")
+    assert is_supporting_host("m.yandex.ru")
 
 
 def test_challenge_pages_are_not_direct_candidates() -> None:

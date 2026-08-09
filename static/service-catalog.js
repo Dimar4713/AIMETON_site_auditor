@@ -11,7 +11,7 @@
     'krasotaimedicina.ru', 'startsmile.ru', 'stomotologiya.ru', 'alldantist.ru',
     'doctu.ru', 'zdravzdrav.ru', 'totadres.ru', 'like.doctor', 'gdevrach.com',
     'dentistpro.ru', 'dentalclinics.care', 'napopravku.ru', 'vc.ru', 'wikipedia.org',
-    'poidata.io', 'barb.pro', '1dentist.ru', 'yp.ru', 'yandex.com',
+    'poidata.io', 'barb.pro', '1dentist.ru', 'yp.ru', '2gis.ru', 'vk.com', 'vk.ru', 'yandex.com', 'yandex.ru',
   ]);
   const SUPPORTING_TITLE_MARKERS = [
     'рейтинг', 'лучшие', 'отзывы', 'каталог', 'список', 'обзор', 'топ ',
