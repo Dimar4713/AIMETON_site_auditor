@@ -45,12 +45,19 @@ jobs:
           cp docs/evidence/search-benchmarks/2026-08-09-krasnoyarsk-dentistry-three-provider/tavily-snapshot.zip "$dest/tavily-snapshot.zip"
           (cd /tmp/stage-benchmark-artifact && zip -qr "$GITHUB_WORKSPACE/$dest/current-stage-benchmark.zip" .)
 
+          python3 - "$dest/replay.log" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8')
+          PY
+
           cat > "$dest/README.md" <<'EOF'
           # Красноярск / Стоматология — current Stage Search Gateway benchmark
 
-          Дата: 2026-08-09 UTC  
-          Workflow run: `31301705371`  
-          Stage application SHA: `1bcc6cee231b02d00fd53815e97243d83e2764bf`  
+          Дата: 2026-08-09 UTC
+          Workflow run: `31301705371`
+          Stage application SHA: `1bcc6cee231b02d00fd53815e97243d83e2764bf`
           Benchmark harness commit: `c0188706208153f5fe856bc16a78950941b1dcf2`
 
           ## Цель
