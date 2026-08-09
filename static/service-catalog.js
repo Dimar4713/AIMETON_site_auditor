@@ -288,10 +288,15 @@
       const data = await postJson('/api/hunt', payload);
       const candidates = data.candidates || [];
       const counts = candidateGroupCounts(candidates);
+      const funnel = data.funnel || {};
+      const rawResults = funnel.raw_results ?? '—';
+      const uniqueCandidates = funnel.unique_candidates ?? data.discovered ?? 0;
+      const qualifiedCandidates = funnel.qualified_candidates ?? candidates.length;
+      const returnedCandidates = funnel.returned_candidates ?? candidates.length;
       appendItem(
         list,
-        'Результат поиска',
-        `Уникальных источников-кандидатов после дедупликации: ${data.discovered ?? 0} · API вернуло: ${candidates.length}`,
+        'Поисковая воронка',
+        `Raw: ${rawResults} → уникальные: ${uniqueCandidates} → прошли фильтр: ${qualifiedCandidates} → возвращено API: ${returnedCandidates}`,
         `Компании-кандидаты: ${counts.company} · источники для проверки: ${counts.supporting} · наблюдение: ${counts.observation} · все возвращённые результаты раскрыты ниже`,
       );
       renderHunterCandidates(list, candidates, data.region || region);
