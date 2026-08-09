@@ -1,0 +1,180 @@
+REPLAY_START strategy=primary_only
+REPLAY_DONE {"calls": {"tavily": 8}, "costs": {"USD": "0.064"}, "direct": 66, "strategy": "primary_only"}
+REPLAY_START strategy=fallback_first_nonempty
+REPLAY_DONE {"calls": {"tavily": 8}, "costs": {"USD": "0.064"}, "direct": 66, "strategy": "fallback_first_nonempty"}
+REPLAY_START strategy=cascade_until_target
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8}, "costs": {"USD": "0.064"}, "direct": 77, "strategy": "cascade_until_target"}
+REPLAY_START strategy=sequential_union
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8}, "costs": {"USD": "0.064"}, "direct": 77, "strategy": "sequential_union"}
+REPLAY_START strategy=parallel_union
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8}, "costs": {"USD": "0.064"}, "direct": 77, "strategy": "parallel_union"}
+REPLAY_START strategy=consensus_union
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8}, "costs": {"USD": "0.064"}, "direct": 77, "strategy": "consensus_union"}
+REPLAY_START strategy=split_query_routing
+REPLAY_DONE {"calls": {"searxng": 4, "tavily": 4}, "costs": {"USD": "0.032"}, "direct": 46, "strategy": "split_query_routing"}
+REPLAY_START strategy=adaptive_cost_quality
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8}, "costs": {"USD": "0.064"}, "direct": 77, "strategy": "adaptive_cost_quality"}
+REPLAY_START strategy=exhaustive_coverage
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8}, "costs": {"USD": "0.064"}, "direct": 77, "strategy": "exhaustive_coverage"}
+REPLAY_START strategy=shadow_compare
+REPLAY_DONE {"calls": {"searxng": 8, "tavily": 8}, "costs": {"USD": "0.064"}, "direct": 66, "strategy": "shadow_compare"}
+# Krasnoyarsk dentistry Search Gateway snapshot/replay benchmark
+
+Providers: tavily, searxng
+Reference union: 77 probable direct-company domains; regional subset: 50.
+
+| Rank | Strategy | Score | Direct | Precision | Recall | Regional recall | Corroboration | Simulated seconds | Calls | Cost RUB | Cost USD |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|
+| 1 | `consensus_union` | 73.42 | 77 | 63.6% | 100.0% | 100.0% | 9.1% | 17.39 | tavily:8/searxng:8 | 0 | 0.064 |
+| 2 | `parallel_union` | 73.29 | 77 | 63.6% | 100.0% | 100.0% | 7.8% | 17.39 | tavily:8/searxng:8 | 0 | 0.064 |
+| 3 | `exhaustive_coverage` | 73.05 | 77 | 63.6% | 100.0% | 100.0% | 7.8% | 19.18 | tavily:8/searxng:8 | 0 | 0.064 |
+| 4 | `adaptive_cost_quality` | 73.05 | 77 | 63.6% | 100.0% | 100.0% | 7.8% | 19.18 | tavily:8/searxng:8 | 0 | 0.064 |
+| 5 | `cascade_until_target` | 73.05 | 77 | 63.6% | 100.0% | 100.0% | 7.8% | 19.18 | tavily:8/searxng:8 | 0 | 0.064 |
+| 6 | `sequential_union` | 73.05 | 77 | 63.6% | 100.0% | 100.0% | 7.8% | 19.18 | tavily:8/searxng:8 | 0 | 0.064 |
+| 7 | `fallback_first_nonempty` | 70.92 | 66 | 79.5% | 85.7% | 80.0% | 0.0% | 17.38 | tavily:8/searxng:0 | 0 | 0.064 |
+| 8 | `primary_only` | 70.92 | 66 | 79.5% | 85.7% | 80.0% | 0.0% | 17.38 | tavily:8/searxng:0 | 0 | 0.064 |
+| 9 | `shadow_compare` | 70.69 | 66 | 79.5% | 85.7% | 80.0% | 0.0% | 19.18 | tavily:8/searxng:8 | 0 | 0.064 |
+| 10 | `split_query_routing` | 54.95 | 46 | 63.0% | 59.7% | 66.0% | 6.5% | 10.58 | tavily:4/searxng:4 | 0 | 0.032 |
+
+## Top probable direct-company domains
+
+### 1. `consensus_union`
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — tavily
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=4 — searxng,tavily
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — searxng,tavily
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=3 — searxng,tavily
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске — q=3 — searxng,tavily
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов ... — q=3 — tavily
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=2 — searxng,tavily
+- `nita-stom.ru` — Нита - эстетическая, антивозрастная и функциональная стоматология — q=2 — searxng,tavily
+- `crystal-dent.ru` — Стоматология в Красноярске | CRYSTAL-DENT — q=2 — searxng
+- `dentosha.ru` — Детская стоматология Дентоша в Красноярске — q=2 — tavily
+- `health.krasgmu.ru` — Университетский центр стоматологии — q=2 — tavily
+- `kgsp1krsk.gosuslugi.ru` — Главная (без ФАП) — q=2 — tavily
+
+### 2. `parallel_union`
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — tavily
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=4 — searxng,tavily
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — searxng,tavily
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=3 — searxng,tavily
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске — q=3 — searxng,tavily
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов ... — q=3 — tavily
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=2 — searxng,tavily
+- `nita-stom.ru` — Нита - эстетическая, антивозрастная и функциональная стоматология — q=2 — searxng,tavily
+- `crystal-dent.ru` — Стоматология в Красноярске | CRYSTAL-DENT — q=2 — searxng
+- `dentosha.ru` — Детская стоматология Дентоша в Красноярске — q=2 — tavily
+- `health.krasgmu.ru` — Университетский центр стоматологии — q=2 — tavily
+- `kgsp1krsk.gosuslugi.ru` — Главная (без ФАП) — q=2 — tavily
+
+### 3. `exhaustive_coverage`
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — tavily
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=4 — searxng,tavily
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — searxng,tavily
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=3 — searxng,tavily
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске — q=3 — searxng,tavily
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов ... — q=3 — tavily
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=2 — searxng,tavily
+- `nita-stom.ru` — Нита - эстетическая, антивозрастная и функциональная стоматология — q=2 — searxng,tavily
+- `crystal-dent.ru` — Стоматология в Красноярске | CRYSTAL-DENT — q=2 — searxng
+- `dentosha.ru` — Детская стоматология Дентоша в Красноярске — q=2 — tavily
+- `health.krasgmu.ru` — Университетский центр стоматологии — q=2 — tavily
+- `kgsp1krsk.gosuslugi.ru` — Главная (без ФАП) — q=2 — tavily
+
+### 4. `adaptive_cost_quality`
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — tavily
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=4 — searxng,tavily
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — searxng,tavily
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=3 — searxng,tavily
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске — q=3 — searxng,tavily
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов ... — q=3 — tavily
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=2 — searxng,tavily
+- `nita-stom.ru` — Нита - эстетическая, антивозрастная и функциональная стоматология — q=2 — searxng,tavily
+- `crystal-dent.ru` — Стоматология в Красноярске | CRYSTAL-DENT — q=2 — searxng
+- `dentosha.ru` — Детская стоматология Дентоша в Красноярске — q=2 — tavily
+- `health.krasgmu.ru` — Университетский центр стоматологии — q=2 — tavily
+- `kgsp1krsk.gosuslugi.ru` — Главная (без ФАП) — q=2 — tavily
+
+### 5. `cascade_until_target`
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — tavily
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=4 — searxng,tavily
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — searxng,tavily
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=3 — searxng,tavily
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске — q=3 — searxng,tavily
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов ... — q=3 — tavily
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=2 — searxng,tavily
+- `nita-stom.ru` — Нита - эстетическая, антивозрастная и функциональная стоматология — q=2 — searxng,tavily
+- `crystal-dent.ru` — Стоматология в Красноярске | CRYSTAL-DENT — q=2 — searxng
+- `dentosha.ru` — Детская стоматология Дентоша в Красноярске — q=2 — tavily
+- `health.krasgmu.ru` — Университетский центр стоматологии — q=2 — tavily
+- `kgsp1krsk.gosuslugi.ru` — Главная (без ФАП) — q=2 — tavily
+
+### 6. `sequential_union`
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — tavily
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=4 — searxng,tavily
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=4 — searxng,tavily
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=3 — searxng,tavily
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске — q=3 — searxng,tavily
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов ... — q=3 — tavily
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=2 — searxng,tavily
+- `nita-stom.ru` — Нита - эстетическая, антивозрастная и функциональная стоматология — q=2 — searxng,tavily
+- `crystal-dent.ru` — Стоматология в Красноярске | CRYSTAL-DENT — q=2 — searxng
+- `dentosha.ru` — Детская стоматология Дентоша в Красноярске — q=2 — tavily
+- `health.krasgmu.ru` — Университетский центр стоматологии — q=2 — tavily
+- `kgsp1krsk.gosuslugi.ru` — Главная (без ФАП) — q=2 — tavily
+
+### 7. `fallback_first_nonempty`
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — tavily
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов ... — q=3 — tavily
+- `aldenta.ru` — Контакты стоматологии "Альдента" в Красноярске — q=2 — tavily
+- `dentosha.ru` — Детская стоматология Дентоша в Красноярске — q=2 — tavily
+- `health.krasgmu.ru` — Университетский центр стоматологии — q=2 — tavily
+- `kgsp1krsk.gosuslugi.ru` — Главная (без ФАП) — q=2 — tavily
+- `korona24.ru` — Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона» — q=2 — tavily
+- `sapfircs.ru` — Стоматология в Красноярске — Центр стоматологии Сапфир — q=2 — tavily
+- `stomalux.ru` — Главная - Стоматологическая клиника Стомалюкс, Красноярск — q=2 — tavily
+- `stomferos.ru` — Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос» — q=2 — tavily
+- `zyboff.ru` — Детский стоматолог в Красноярске — Запись на прием — q=2 — tavily
+- `abilis-med.ru` — Стоматология в Октябрьском районе Красноярска - клиника «Абилис» — q=1 — tavily
+
+### 8. `primary_only`
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — tavily
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов ... — q=3 — tavily
+- `aldenta.ru` — Контакты стоматологии "Альдента" в Красноярске — q=2 — tavily
+- `dentosha.ru` — Детская стоматология Дентоша в Красноярске — q=2 — tavily
+- `health.krasgmu.ru` — Университетский центр стоматологии — q=2 — tavily
+- `kgsp1krsk.gosuslugi.ru` — Главная (без ФАП) — q=2 — tavily
+- `korona24.ru` — Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона» — q=2 — tavily
+- `sapfircs.ru` — Стоматология в Красноярске — Центр стоматологии Сапфир — q=2 — tavily
+- `stomalux.ru` — Главная - Стоматологическая клиника Стомалюкс, Красноярск — q=2 — tavily
+- `stomferos.ru` — Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос» — q=2 — tavily
+- `zyboff.ru` — Детский стоматолог в Красноярске — Запись на прием — q=2 — tavily
+- `abilis-med.ru` — Стоматология в Октябрьском районе Красноярска - клиника «Абилис» — q=1 — tavily
+
+### 9. `shadow_compare`
+- `mira-stom.ru` — Стоматология в Красноярске Mira — Лечение зубов — q=5 — tavily
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов ... — q=3 — tavily
+- `aldenta.ru` — Контакты стоматологии "Альдента" в Красноярске — q=2 — tavily
+- `dentosha.ru` — Детская стоматология Дентоша в Красноярске — q=2 — tavily
+- `health.krasgmu.ru` — Университетский центр стоматологии — q=2 — tavily
+- `kgsp1krsk.gosuslugi.ru` — Главная (без ФАП) — q=2 — tavily
+- `korona24.ru` — Стоматология Красноярск детская и взрослая цены доступные | Стоматология «Корона» — q=2 — tavily
+- `sapfircs.ru` — Стоматология в Красноярске — Центр стоматологии Сапфир — q=2 — tavily
+- `stomalux.ru` — Главная - Стоматологическая клиника Стомалюкс, Красноярск — q=2 — tavily
+- `stomferos.ru` — Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос» — q=2 — tavily
+- `zyboff.ru` — Детский стоматолог в Красноярске — Запись на прием — q=2 — tavily
+- `abilis-med.ru` — Стоматология в Октябрьском районе Красноярска - клиника «Абилис» — q=1 — tavily
+
+### 10. `split_query_routing`
+- `aldenta.ru` — Частная стоматология в Красноярске Al'denta (Альдента) — q=3 — searxng,tavily
+- `astreyastom.ru` — Стоматология АСТРЕЯ - лечение зубов в Красноярске — q=3 — searxng,tavily
+- `zyboff.ru` — Стоматологическая клиника ЗУБОFF | Стоматология Красноярск — q=3 — searxng,tavily
+- `mira-stom.ru` — Контакты - Стоматологическая клиника Mira — q=3 — tavily
+- `apex24.ru` — Стоматология Апекс в Красноярске — q=2 — searxng
+- `crystal-dent.ru` — Стоматология в Красноярске | CRYSTAL-DENT — q=2 — searxng
+- `dostupstom24.ru` — Доступная стоматология в Красноярске | Лечение зубов без ... — q=2 — tavily
+- `medident.ru` — Стоматология в Красноярске — МедиДент — q=2 — searxng
+- `stomferos.ru` — Имплантация зубов в Красноярске, низкие цены - стоматологическая клиника «Ферос» — q=2 — tavily
+- `voka-stom.ru` — Стоматология ВОКА в Красноярске - стоматологическая … — q=2 — searxng
+- `abilis-med.ru` — Стоматология в Октябрьском районе Красноярска - клиника «Абилис» — q=1 — tavily
+- `albus24.ru` — Стоматология в Красноярске | клиника Альбус — q=1 — tavily
+
