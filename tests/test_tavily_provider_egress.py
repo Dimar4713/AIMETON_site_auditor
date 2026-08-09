@@ -8,6 +8,7 @@ import pytest
 from app.search_gateway.gateway import SearchGateway
 from app.search_gateway.models import AttemptState, FallbackReason, ProviderReadiness, SearchPolicy, SearchRequest
 from app.search_gateway.providers import ProviderError, TavilyProvider
+from app.search_gateway.scheduler import ScheduledProvider
 
 
 def _request(query: str = "Красноярск стоматология") -> SearchRequest:
@@ -108,6 +109,47 @@ async def test_tavily_contract_gate_blocks_before_network_and_paid_accounting() 
         await provider.search(_request("direct blocked"), timeout_seconds=1)
     assert exc_info.value.reason == FallbackReason.CONTRACT_BLOCKED
     assert "51.241.23.14" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_scheduled_tavily_preserves_contract_gate_before_cost_and_network() -> None:
+    seen = {"calls": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["calls"] += 1
+        return httpx.Response(200, json={"results": []})
+
+    raw = TavilyProvider(
+        "test-token",
+        cost_amount=Decimal("0.008"),
+        transport=httpx.MockTransport(handler),
+        contract_allowed=False,
+    )
+    provider = ScheduledProvider(raw, max_concurrency=3)
+    gateway = SearchGateway([provider])
+    policy = SearchPolicy(
+        provider_order=("tavily",),
+        allowed_providers=frozenset({"tavily"}),
+        max_cost_by_currency={"USD": Decimal("100")},
+        cache_ttl_seconds=0,
+    )
+
+    assert provider.configured is True
+    assert provider.execution_allowed is False
+    assert provider.execution_block_reason == FallbackReason.CONTRACT_BLOCKED
+
+    health = gateway.health(policy)[0]
+    response = await gateway.search(_request("scheduled contract gate"), policy)
+    attempt = response.diagnostics.attempts[0]
+
+    assert health.state == ProviderReadiness.CONTRACT_BLOCKED
+    assert health.configured is True
+    assert health.ready is False
+    assert seen["calls"] == 0
+    assert response.results == []
+    assert attempt.state == AttemptState.SKIPPED
+    assert attempt.reason == FallbackReason.CONTRACT_BLOCKED
+    assert response.diagnostics.total_cost_by_currency == {}
 
 
 @pytest.mark.asyncio
