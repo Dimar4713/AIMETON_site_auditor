@@ -4,11 +4,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_admin_workspace_exposes_dedicated_hunter_settings_panel() -> None:
+def test_admin_workspace_exposes_search_strategy_and_active_tariff_controls() -> None:
     html = (ROOT / "static" / "admin-workspace.html").read_text(encoding="utf-8")
-    script = (ROOT / "static" / "admin-hunter-settings.js").read_text(encoding="utf-8")
+    strategy_script = (ROOT / "static" / "admin-search-strategies.js").read_text(encoding="utf-8")
+    hunter_script = (ROOT / "static" / "admin-hunter-settings.js").read_text(encoding="utf-8")
 
-    assert 'id="hunter-settings-title">Настройки Hunter<' in html
+    assert 'id="search-strategy-title">Стратегии поисковых движков<' in html
+    assert 'id="search-active-tariff"' in html
+    assert 'id="search-default-strategy"' in html
+    assert 'id="search-enabled-providers"' in html
+    assert 'id="search-paid-policy"' in html
+    assert 'id="search-paid-fanout-policy"' in html
+    assert 'id="search-tariff-profiles"' in html
+    assert 'id="search-strategy-catalog"' in html
+    assert 'SearXNG (self-hosted)' in html
+    assert 'Yandex Search' in html
+    assert 'Tavily' in html
+    assert '/api/admin/search-strategies' in strategy_script
+    assert "'X-CSRF-Token': csrfToken()" in strategy_script
+
+    assert 'id="hunter-settings-title">Параметры активного Hunter-профиля<' in html
     assert 'id="hunter-settings-form"' in html
     assert 'id="hunter-setting-max-queries"' in html
     assert 'id="hunter-setting-results-per-query"' in html
@@ -17,10 +32,7 @@ def test_admin_workspace_exposes_dedicated_hunter_settings_panel() -> None:
     assert 'id="hunter-setting-minimum-pre-score"' in html
     assert 'id="hunter-setting-deep-audit-score"' in html
     assert 'id="hunter-setting-concurrency"' in html
-    assert 'fallback_first_nonempty' in html
-    assert 'Объединение выдач нескольких providers пока не реализовано' in html
-    assert '/api/admin/hunter-settings' in script
-    assert "'X-CSRF-Token': csrfToken()" in script
+    assert '/api/admin/hunter-settings' in hunter_script
 
 
 def test_user_hunter_form_no_longer_hardcodes_operational_limits() -> None:
