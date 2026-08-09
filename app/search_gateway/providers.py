@@ -35,6 +35,15 @@ class SearchProvider(ABC):
     @abstractmethod
     def configured(self) -> bool: ...
 
+    @property
+    def execution_allowed(self) -> bool:
+        """Whether the provider may execute in this deployment context."""
+        return True
+
+    @property
+    def execution_block_reason(self) -> FallbackReason | None:
+        return None
+
     @abstractmethod
     async def search(
         self,
@@ -243,16 +252,25 @@ class TavilyProvider(HttpSearchProvider):
 
     @property
     def configured(self) -> bool:
-        # SearchGateway checks configured before reserving paid cost, making the
-        # compliance gate fail closed without a network call or accounting hit.
-        return self.technical_configured and self._contract_allowed
+        # `configured` reports technical configuration only. Eligibility is a
+        # separate dimension so health/trace can distinguish a missing key from
+        # a contract restriction.
+        return self.technical_configured
+
+    @property
+    def execution_allowed(self) -> bool:
+        return self._contract_allowed
+
+    @property
+    def execution_block_reason(self) -> FallbackReason | None:
+        return None if self._contract_allowed else FallbackReason.CONTRACT_BLOCKED
 
     async def search(self, request: SearchRequest, *, timeout_seconds: float) -> list[SearchItem]:
         if not self._contract_allowed:
             raise ProviderError(
                 "tavily execution is not permitted for this deployment context",
                 retryable=False,
-                reason=FallbackReason.POLICY_BLOCKED,
+                reason=FallbackReason.CONTRACT_BLOCKED,
             )
         payload = await self._request_json(
             "POST",
