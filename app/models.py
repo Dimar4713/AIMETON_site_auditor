@@ -220,12 +220,25 @@ class HuntCandidate(BaseModel):
     analysis: SiteAnalysis | None = None
 
 
+class HuntFunnel(BaseModel):
+    raw_results: int = Field(default=0, ge=0)
+    excluded_results: int = Field(default=0, ge=0)
+    duplicate_results: int = Field(default=0, ge=0)
+    pool_omitted_results: int = Field(default=0, ge=0)
+    unique_candidates: int = Field(default=0, ge=0)
+    inspected_candidates: int = Field(default=0, ge=0)
+    qualified_candidates: int = Field(default=0, ge=0)
+    returned_candidates: int = Field(default=0, ge=0)
+    output_omitted_candidates: int = Field(default=0, ge=0)
+
+
 class HuntResult(BaseModel):
     region: str
     search_zone: str | None = None
     queries: list[str] = Field(default_factory=list)
     discovered: int
     candidates: list[HuntCandidate] = Field(default_factory=list)
+    funnel: HuntFunnel = Field(default_factory=HuntFunnel)
     notes: list[str] = Field(default_factory=list)
     search: SearchDiagnostics | None = None
 
