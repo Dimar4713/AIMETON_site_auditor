@@ -1,0 +1,110 @@
+name: Temporary Apply Hunter Quality Patch
+
+on:
+  push:
+    branches:
+      - fix/hunter-source-role-quality
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[quality-patched]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/hunter-source-role-quality
+          fetch-depth: 1
+
+      - name: Apply guarded source-role quality patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/discovery.py')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = []
+          replacements.append((
+              'from app.hunter_query_intelligence import generate_hunter_query_plan\nfrom app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult\n',
+              'from app.hunter_query_intelligence import generate_hunter_query_plan\nfrom app.hunter_source_role import classify_source_role, role_rank\nfrom app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult\n',
+          ))
+          replacements.append((
+              'COMMERCIAL_MARKERS = ("каталог", "товар", "оборудован", "услуг", "подбор", "расчет", "заказать")',
+              'COMMERCIAL_MARKERS = ("товар", "оборудован", "услуг", "подбор", "расчет", "заказать")',
+          ))
+          replacements.append((
+              '    score = 20 + sum(value for value in factors.values() if value is not None)\n    return PreScoreResult(min(score, 100), "calculated", factors, reasons)\n',
+              '''    score = 20 + sum(value for value in factors.values() if value is not None)\n    source_role = classify_source_role(title, snippet, url)\n    if source_role in {"supporting_source", "blocked_source"}:\n        score = min(score, 45)\n        reasons.append("результат является источником для проверки, а не прямым сайтом компании")\n    elif factors.get("industry_match") == 0 and factors.get("region_match") == 0:\n        score = min(score, 30)\n        reasons.append("не обнаружено ни отрасли, ни региона из задания охоты")\n    return PreScoreResult(min(score, 100), "calculated", factors, reasons)\n''',
+          ))
+          replacements.append((
+              'def _score_metadata(result: PreScoreResult) -> dict[str, object]:\n',
+              '''def _candidate_rank_role(candidate: HuntCandidate) -> str:\n    role = classify_source_role(candidate.source_title, candidate.source_snippet, str(candidate.url))\n    if role != "direct_candidate":\n        return role\n    industry_match = candidate.pre_score_factors.get("industry_match")\n    region_match = candidate.pre_score_factors.get("region_match")\n    if candidate.region_confirmed is False:\n        return "possible_candidate"\n    if industry_match == 0 and region_match == 0:\n        return "noise"\n    if industry_match and region_match == 0 and not candidate.deep_analysis_performed:\n        return "possible_candidate"\n    return "direct_candidate"\n\n\ndef _score_metadata(result: PreScoreResult) -> dict[str, object]:\n''',
+          ))
+          replacements.append((
+              '''            final_score = round((result.score + analysis.commercial_opportunity.score) / 2)\n            reasons = list(result.reasons)\n            if not region_confirmed:\n                final_score = max(0, final_score - 20)\n                reasons.append("региональная принадлежность требует проверки")\n''',
+              '''            final_score = round((result.score + analysis.commercial_opportunity.score) / 2)\n            reasons = list(result.reasons)\n            qualification = analysis.commercial_opportunity.qualification\n            if not region_confirmed:\n                final_score = min(49, max(0, final_score - 20))\n                qualification = "Наблюдение"\n                reasons.append("региональная принадлежность не подтверждена; прямой лид понижен до наблюдения")\n''',
+          ))
+          replacements.append((
+              '                    "qualification": analysis.commercial_opportunity.qualification,\n                    "source_host": host,\n',
+              '                    "qualification": qualification,\n                    "source_host": host,\n                    "source_role": _candidate_rank_role(\n                        _shallow_candidate(display_title, snippet, url, result, qualification=qualification, summary="", recommendation="")\n                    ),\n',
+          ))
+          # Avoid constructing an artificial candidate in trace metadata; simplify immediately after guarded replacement.
+          replacements.append((
+              '''                    "source_role": _candidate_rank_role(\n                        _shallow_candidate(display_title, snippet, url, result, qualification=qualification, summary="", recommendation="")\n                    ),\n''',
+              '                    "source_role": classify_source_role(display_title, snippet, url),\n',
+          ))
+          replacements.append((
+              '                qualification=analysis.commercial_opportunity.qualification,\n',
+              '                qualification=qualification,\n',
+          ))
+          replacements.append((
+              '''    candidates.sort(\n        key=lambda candidate: (\n            candidate.pre_score_status == "calculated",\n''',
+              '''    candidates.sort(\n        key=lambda candidate: (\n            role_rank(_candidate_rank_role(candidate)),\n            candidate.pre_score_status == "calculated",\n''',
+          ))
+          replacements.append((
+              '''                metadata={\n                    "qualification": candidate.qualification,\n                    "deep_analysis_performed": candidate.deep_analysis_performed,\n                },\n''',
+              '''                metadata={\n                    "qualification": candidate.qualification,\n                    "deep_analysis_performed": candidate.deep_analysis_performed,\n                    "source_role": _candidate_rank_role(candidate),\n                },\n''',
+          ))
+          replacements.append((
+              '                metadata={"qualification": candidate.qualification},\n',
+              '                metadata={"qualification": candidate.qualification, "source_role": _candidate_rank_role(candidate)},\n',
+          ))
+          replacements.append((
+              '            "Количество найденных ссылок не входит в формулу pre-score.",\n',
+              '            "Количество найденных ссылок не входит в формулу pre-score.",\n            "Каталоги, рейтинги и редакционные источники сохраняются для проверки, но не конкурируют с прямыми компаниями в lead-ranking.",\n',
+          ))
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'discovery replacement expected once, found {count}: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+          ui_path = Path('static/service-catalog.js')
+          ui = ui_path.read_text(encoding='utf-8')
+          old_hosts = '''  const SUPPORTING_HOSTS = new Set([\n    'prodoctorov.ru', '32top.ru', 'zoon.ru', 'flamp.ru', 'otzovik.com', 'irecommend.ru',\n    'rusprofile.ru', 'checko.ru', 'list-org.com', 'audit-it.ru', 'companies.rbc.ru',\n    'spark-interfax.ru', 'sbis.ru', 'kp.ru', 'rbc.ru', 'tass.ru', 'ria.ru',\n    'vedomosti.ru', 'kommersant.ru', 'interfax.ru',\n  ]);'''
+          new_hosts = '''  const SUPPORTING_HOSTS = new Set([\n    'prodoctorov.ru', '32top.ru', 'zoon.ru', 'flamp.ru', 'otzovik.com', 'irecommend.ru',\n    'rusprofile.ru', 'checko.ru', 'list-org.com', 'audit-it.ru', 'companies.rbc.ru',\n    'spark-interfax.ru', 'sbis.ru', 'kp.ru', 'rbc.ru', 'tass.ru', 'ria.ru',\n    'vedomosti.ru', 'kommersant.ru', 'interfax.ru', 'dentistfind.ru', 'infodoctor.ru',\n    'docdoc.ru', 'jsprav.ru', 'zubbo.ru', 'kleos.ru', 'dent-list.ru',\n    'krasotaimedicina.ru', 'startsmile.ru', 'stomotologiya.ru', 'alldantist.ru',\n    'doctu.ru', 'zdravzdrav.ru', 'totadres.ru', 'like.doctor', 'gdevrach.com',\n    'dentistpro.ru', 'dentalclinics.care', 'napopravku.ru', 'vc.ru', 'wikipedia.org',\n    'poidata.io', 'barb.pro', '1dentist.ru', 'yp.ru', 'yandex.com',\n  ]);'''
+          if ui.count(old_hosts) != 1:
+              raise SystemExit('service-catalog supporting-host block drifted')
+          ui = ui.replace(old_hosts, new_hosts, 1)
+          old_classify = '''    if (isSupportingHost(host) || SUPPORTING_TITLE_MARKERS.some(marker => sourceText.includes(marker))) {\n      return {kind: 'supporting', label: 'Источник для проверки'};\n    }\n    if (candidate.deep_analysis_performed === true) {'''
+          new_classify = '''    if (isSupportingHost(host) || SUPPORTING_TITLE_MARKERS.some(marker => sourceText.includes(marker))) {\n      return {kind: 'supporting', label: 'Источник для проверки'};\n    }\n    if (candidate.region_confirmed === false) {\n      return {kind: 'observation', label: 'Регион не подтверждён'};\n    }\n    if (candidate.deep_analysis_performed === true) {'''
+          if ui.count(old_classify) != 1:
+              raise SystemExit('service-catalog classify block drifted')
+          ui = ui.replace(old_classify, new_classify, 1)
+          ui_path.write_text(ui, encoding='utf-8')
+          PY
+
+          python -m py_compile app/discovery.py app/hunter_source_role.py
+          rm .github/workflows/tmp-apply-hunter-quality-patch.yml
+          git config user.name 'AIMETON Quality Patch'
+          git config user.email '127470701+Dimar4713@users.noreply.github.com'
+          git add app/discovery.py app/hunter_source_role.py static/service-catalog.js tests/test_hunter_source_role.py tests/test_hunter_quality_gates.py .github/workflows/tmp-apply-hunter-quality-patch.yml
+          git commit -m 'Separate Hunter direct leads from supporting sources [quality-patched]'
+          git push origin HEAD:fix/hunter-source-role-quality
