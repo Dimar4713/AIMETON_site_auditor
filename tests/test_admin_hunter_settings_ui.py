@@ -22,6 +22,9 @@ def test_admin_workspace_exposes_search_strategy_and_active_tariff_controls() ->
     assert 'Tavily' in html
     assert '/api/admin/search-strategies' in strategy_script
     assert "'X-CSRF-Token': csrfToken()" in strategy_script
+    assert 'Наследовать глобальную стратегию' in strategy_script
+    assert 'только global/debug' in strategy_script
+    assert 'tariffSafeOnly: true' in strategy_script
 
     assert 'id="hunter-settings-title">Параметры активного Hunter-профиля<' in html
     assert 'id="hunter-settings-form"' in html
