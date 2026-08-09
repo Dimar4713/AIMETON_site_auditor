@@ -27,6 +27,11 @@ on:
         required: true
         default: "10"
         type: string
+      minimum_direct_returned:
+        description: Minimum direct company candidates required in the returned set
+        required: true
+        default: "10"
+        type: string
       allow_paid_calls:
         description: Explicitly authorize provider calls that may incur configured Stage search cost
         required: true
@@ -91,12 +96,18 @@ jobs:
             -e E2E_INDUSTRY='${{ inputs.industry }}' \
             -e E2E_EXPECTED_PROVIDERS='${{ inputs.expected_providers }}' \
             -e E2E_MIN_RETURNED='${{ inputs.minimum_returned }}' \
+            -e E2E_MIN_DIRECT_RETURNED='${{ inputs.minimum_direct_returned }}' \
             -i "$CONTAINER" python - <<'PY'
           import json
           import os
           import sqlite3
           import time
+          from collections import Counter
+
           import httpx
+
+          from app.discovery import _candidate_rank_role
+          from app.models import HuntCandidate
 
           db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
           db = sqlite3.connect(db_path, timeout=30)
@@ -134,6 +145,30 @@ jobs:
           funnel = json.loads(row['counters_json'])
 
           candidates = data.get('candidates') or []
+          validated_candidates = [HuntCandidate.model_validate(item) for item in candidates]
+          candidate_roles = [_candidate_rank_role(candidate) for candidate in validated_candidates]
+          role_counts = Counter(candidate_roles)
+          minimum_direct_returned = int(os.environ['E2E_MIN_DIRECT_RETURNED'])
+          direct_count = int(role_counts.get('direct_candidate', 0))
+          supporting_deep = [
+              str(candidate.url)
+              for candidate, role in zip(validated_candidates, candidate_roles)
+              if role in {'supporting_source', 'blocked_source'} and candidate.deep_analysis_performed
+          ]
+          top_direct_window_size = min(20, direct_count, len(candidate_roles))
+          top_direct_window = candidate_roles[:top_direct_window_size]
+
+          assert direct_count >= minimum_direct_returned, {
+              'minimum_direct_returned': minimum_direct_returned,
+              'direct_returned': direct_count,
+              'role_counts': dict(role_counts),
+          }
+          assert not supporting_deep, {'supporting_sources_with_deep_analysis': supporting_deep}
+          assert all(role == 'direct_candidate' for role in top_direct_window), {
+              'top_direct_window': top_direct_window,
+              'role_counts': dict(role_counts),
+          }
+
           search = data.get('search') or {}
           attempts = search.get('attempts') or []
           called_states = {'succeeded', 'empty', 'failed', 'cache_hit'}
@@ -181,6 +216,10 @@ jobs:
                   'returned': returned,
               },
               'candidate_count_in_api': len(candidates),
+              'candidate_role_counts': dict(role_counts),
+              'minimum_direct_returned': minimum_direct_returned,
+              'top_direct_window': top_direct_window,
+              'supporting_sources_with_deep_analysis': len(supporting_deep),
               'participating_providers': participating,
               'provider_attempt_states': provider_counts,
               'search_total_cost_by_currency': search.get('total_cost_by_currency') or {},
