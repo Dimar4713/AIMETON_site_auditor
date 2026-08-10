@@ -22,7 +22,7 @@ jobs:
           [[ "$deployed" == "$expected" ]]
 
           health_json="$(curl --fail --silent --show-error https://stage-auditor.aimeton.ru/api/search/health)"
-          HEALTH_JSON="$health_json" python - <<'PY'
+          docker exec -e HEALTH_JSON="$health_json" -i aimeton-auditor python - <<'PY'
           import json, os
           payload = json.loads(os.environ['HEALTH_JSON'])
           assert payload['status'] in {'ok', 'degraded'}
@@ -143,8 +143,6 @@ jobs:
               assert all(row.reason.value == 'rate_limited' for row in health.upstream_cooldowns)
               assert all(row.retry_after_seconds == 20 for row in health.upstream_cooldowns)
               return mock_calls
-
-          partial_calls, all_calls = asyncio.run(asyncio.gather(partial_case(), all_case())) if False else (None, None)
 
           async def main():
               return await partial_case(), await all_case()
