@@ -124,7 +124,7 @@ jobs:
           replace_once(
               'app/search_gateway/trace_bridge.py',
               '''            "cost_currency": row["cost"]["currency"],\n        }\n''',
-              '''            "cost_currency": row["cost"]["currency"],\n            "degraded_upstreams": row.get("degraded_upstreams", []),\n            "partial_degradation_reason": row.get("reason") if row.get("degraded_upstreams") else None,\n        }\n''',
+              '''            "cost_currency": row["cost"]["currency"],\n        }\n        if row.get("degraded_upstreams"):\n            common_metadata["degraded_upstreams"] = row["degraded_upstreams"]\n            common_metadata["partial_degradation_reason"] = row.get("reason")\n''',
           )
           PY
 
