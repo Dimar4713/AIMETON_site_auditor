@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
@@ -154,15 +155,30 @@ class SearxngProvider(HttpSearchProvider):
         base_url: str | None,
         *,
         engines: tuple[str, ...] = (),
+        engine_fanout: int | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         super().__init__(transport=transport)
         self._base_url = (base_url or "").strip().rstrip("/")
         self._engines = tuple(item.strip() for item in engines if item.strip())
+        self._engine_fanout = max(1, int(engine_fanout)) if engine_fanout is not None else None
 
     @property
     def configured(self) -> bool:
         return bool(self._base_url)
+
+    def _engines_for_request(self, request: SearchRequest) -> tuple[str, ...]:
+        if not self._engines:
+            return ()
+        if self._engine_fanout is None or self._engine_fanout >= len(self._engines):
+            return self._engines
+        seed = "\n".join((" ".join(request.query.split()).casefold(), request.language.casefold()))
+        digest = hashlib.sha256(seed.encode("utf-8")).digest()
+        start = int.from_bytes(digest[:8], "big") % len(self._engines)
+        return tuple(
+            self._engines[(start + offset) % len(self._engines)]
+            for offset in range(self._engine_fanout)
+        )
 
     async def search(self, request: SearchRequest, *, timeout_seconds: float) -> list[SearchItem]:
         params: dict[str, str | int] = {
@@ -171,8 +187,9 @@ class SearxngProvider(HttpSearchProvider):
             "language": request.language,
             "safesearch": 1,
         }
-        if self._engines:
-            params["engines"] = ",".join(self._engines)
+        selected_engines = self._engines_for_request(request)
+        if selected_engines:
+            params["engines"] = ",".join(selected_engines)
 
         payload = await self._request_json(
             "GET",

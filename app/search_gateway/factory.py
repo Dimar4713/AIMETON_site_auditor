@@ -198,7 +198,13 @@ def get_search_gateway() -> TracedSearchGateway:
         jitter_max_env="SEARCH_JITTER_YANDEX_MAX_SECONDS", jitter_max_default=0.0,
     )
     searxng = _scheduled(
-        SearxngProvider(os.getenv("SEARXNG_BASE_URL"), engines=_csv_env("SEARXNG_ENGINES", DEFAULT_SEARXNG_ENGINES)),
+        SearxngProvider(
+            os.getenv("SEARXNG_BASE_URL"),
+            engines=_csv_env("SEARXNG_ENGINES", DEFAULT_SEARXNG_ENGINES),
+            engine_fanout=_int_env(
+                "SEARXNG_ENGINES_PER_REQUEST", 2, minimum=1, maximum=64
+            ),
+        ),
         concurrency_env="SEARCH_CONCURRENCY_SEARXNG", concurrency_default=2,
         jitter_min_env="SEARCH_JITTER_SEARXNG_MIN_SECONDS", jitter_min_default=0.2,
         jitter_max_env="SEARCH_JITTER_SEARXNG_MAX_SECONDS", jitter_max_default=0.8,
