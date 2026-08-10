@@ -122,6 +122,7 @@ class SearchGateway:
         self._global_quotas = dict(global_quotas or {})
         self._global_usage = {name: 0 for name in self._providers}
         self._mission_costs: dict[str, dict[str, Decimal]] = {}
+        self._inflight: dict[str, asyncio.Task[SearchResponse]] = {}
         self._sleep = sleep
         self._lock = asyncio.Lock()
 
@@ -493,7 +494,57 @@ class SearchGateway:
         ]
         return list(await asyncio.gather(*tasks)) if tasks else []
 
+    async def _clear_inflight(
+        self,
+        cache_key: str,
+        task: asyncio.Task[SearchResponse],
+    ) -> None:
+        async with self._lock:
+            if self._inflight.get(cache_key) is task:
+                self._inflight.pop(cache_key, None)
+
     async def search(self, request: SearchRequest, policy: SearchPolicy | None = None) -> SearchResponse:
+        policy = policy or SearchPolicy()
+        if policy.strategy is SearchStrategy.SHADOW_COMPARE:
+            return await self._search_impl(request, policy)
+
+        fingerprint = request_fingerprint(request)
+        cache_key = f"{fingerprint}:{policy_cache_suffix(policy)}"
+        async with self._lock:
+            task = self._inflight.get(cache_key)
+            if task is not None and task.done():
+                self._inflight.pop(cache_key, None)
+                task = None
+            coalesced = task is not None
+            if task is None:
+                task = asyncio.create_task(self._search_impl(request, policy))
+                self._inflight[cache_key] = task
+                task.add_done_callback(
+                    lambda finished, key=cache_key: asyncio.create_task(
+                        self._clear_inflight(key, finished)
+                    )
+                )
+
+        response = await asyncio.shield(task)
+        if not coalesced or response.diagnostics.cache_hit:
+            return response
+
+        shared_attempts = [
+            attempt.model_copy(update={"cost_amount": Decimal("0")})
+            for attempt in response.diagnostics.attempts
+        ]
+        diagnostics = response.diagnostics.model_copy(
+            update={
+                "coalesced": True,
+                "attempts": shared_attempts,
+                "total_cost_by_currency": {},
+            }
+        )
+        return response.model_copy(update={"diagnostics": diagnostics})
+
+    async def _search_impl(
+        self, request: SearchRequest, policy: SearchPolicy | None = None
+    ) -> SearchResponse:
         policy = policy or SearchPolicy()
         strategy = policy.strategy
         if strategy not in IMPLEMENTED_STRATEGIES:

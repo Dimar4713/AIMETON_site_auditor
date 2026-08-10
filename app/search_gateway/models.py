@@ -127,6 +127,7 @@ class SearchDiagnostics(GatewayModel):
     state: GatewayState
     selected_provider: str | None = None
     cache_hit: bool = False
+    coalesced: bool = False
     fallback_used: bool = False
     attempts: list[ProviderAttempt] = Field(default_factory=list)
     total_cost_by_currency: dict[str, Decimal] = Field(default_factory=dict)
@@ -149,6 +150,7 @@ class SearchDiagnostics(GatewayModel):
             state=state,
             selected_provider=selected,
             cache_hit=any(item.cache_hit for item in diagnostics),
+            coalesced=any(item.coalesced for item in diagnostics),
             fallback_used=any(item.fallback_used for item in diagnostics),
             attempts=attempts,
             total_cost_by_currency=totals,
