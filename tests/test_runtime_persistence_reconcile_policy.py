@@ -1,11 +1,21 @@
 from pathlib import Path
 
+import yaml
+
 
 WORKFLOW = Path(".github/workflows/runtime-persistence-reconcile.yml")
 
 
 def _workflow_text() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_runtime_persistence_reconcile_yaml_is_parseable() -> None:
+    document = yaml.safe_load(_workflow_text())
+    assert isinstance(document, dict)
+    assert "jobs" in document
+    assert "deployment-gate" in document["jobs"]
+    assert "reconcile" in document["jobs"]
 
 
 def test_runtime_persistence_reconcile_has_verify_only_path() -> None:
