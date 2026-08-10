@@ -1,5 +1,10 @@
 (() => {
   const CONTEXT_ID = 'hunterCompanyHandoffContext';
+  const LEAD_FIT_LABELS = {
+    commercial_candidate: 'Коммерческий кандидат',
+    unknown_candidate: 'Коммерческий статус не подтверждён',
+    institutional_candidate: 'Институциональная организация',
+  };
 
   function safeHost(value) {
     try {
@@ -30,15 +35,23 @@
     if (!node) return;
     node.hidden = true;
     node.replaceChildren();
+    const form = document.querySelector('#companyIntelligenceForm');
+    if (form) {
+      delete form.dataset.hunterLeadFit;
+      delete form.dataset.hunterLeadFitReason;
+    }
   }
 
   function renderContext() {
     const node = contextNode();
     if (!node) return;
+    const form = document.querySelector('#companyIntelligenceForm');
     const name = document.querySelector('#companyName')?.value.trim() || '';
     const url = document.querySelector('#companyUrl')?.value.trim() || '';
     const region = document.querySelector('#companyRegion')?.value.trim() || '';
     const host = safeHost(url);
+    const leadFit = form?.dataset.hunterLeadFit || '';
+    const leadFitReason = form?.dataset.hunterLeadFitReason || '';
 
     const heading = document.createElement('strong');
     heading.textContent = 'Выбранный кандидат';
@@ -51,10 +64,17 @@
     const parts = [];
     if (host) parts.push(`Сайт: ${host}`);
     if (region) parts.push(`Регион: ${region}`);
+    if (LEAD_FIT_LABELS[leadFit]) parts.push(`Hunter: ${LEAD_FIT_LABELS[leadFit]}`);
     parts.push('Из поиска клиентов');
     meta.textContent = parts.join(' · ');
 
     node.replaceChildren(heading, identity, meta);
+    if (leadFitReason) {
+      const fitReason = document.createElement('div');
+      fitReason.className = 'service-summary__meta';
+      fitReason.textContent = `Основание приоритета: ${leadFitReason}`;
+      node.append(fitReason);
+    }
     if (name && host && name.toLowerCase() !== host.toLowerCase()) {
       const sourceName = document.createElement('div');
       sourceName.className = 'service-summary__meta';
