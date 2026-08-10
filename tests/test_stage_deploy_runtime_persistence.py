@@ -30,6 +30,9 @@ def test_transactional_deploy_refuses_to_pass_without_live_app_data_mount() -> N
 def test_reconcile_remains_idempotent_safety_net_not_primary_mount_creator() -> None:
     text = RECONCILE.read_text(encoding="utf-8")
 
-    assert "if ! grep -Fq '/app/data' \"$RUNTIME_COMPOSE\"; then" in text
-    assert "./data/runtime-core:/app/data" in text
-    assert "Runtime persistence is reconciled and verified" in text
+    assert "expected_volume='./data/runtime-core:/app/data'" in text
+    assert "mode='verify-only / no mutation required'" in text
+    assert 'if [[ "$compose_correct" != yes || "$mount_correct" != yes ]]; then' in text
+    assert 'if [[ "$mutation_required" == yes ]]; then' in text
+    assert 'up -d --force-recreate "$SERVICE"' in text
+    assert "verify-only path completed with zero container recreation" in text
