@@ -1,0 +1,76 @@
+name: Temporary Accept Persistent Search Cache Stage 441
+
+on:
+  push:
+    branches:
+      - diag/persistent-search-cache-stage-441
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact Stage SHA and persistent cache backend
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='a58f2b691fa31a601d940e9d291d9d9f25ad240d'
+          stack=/opt/aimeton/auditor-stack
+          container=aimeton-auditor
+
+          deployed="$(cat "$stack/app-source-sha.txt")"
+          [[ "$deployed" == "$expected" ]]
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")"
+          [[ "$status" == healthy ]]
+
+          env_path="$(docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SEARCH_CACHE_DB_PATH=' | cut -d= -f2-)"
+          [[ "$env_path" == '/app/data/search-cache.sqlite3' ]]
+
+          docker exec "$container" python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          from app.search_gateway.cache import SQLiteSearchCache
+          from app.search_gateway.factory import _search_cache_from_env
+
+          path = Path(os.environ['SEARCH_CACHE_DB_PATH'])
+          cache = _search_cache_from_env()
+          assert isinstance(cache, SQLiteSearchCache), type(cache)
+          assert cache.path == path
+          assert path.exists(), path
+
+          with sqlite3.connect(path) as connection:
+              integrity = connection.execute('PRAGMA integrity_check').fetchone()[0]
+              tables = [
+                  row[0]
+                  for row in connection.execute(
+                      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+                  )
+              ]
+              count = connection.execute('SELECT COUNT(*) FROM search_cache').fetchone()[0]
+          assert integrity == 'ok', integrity
+          assert 'search_cache' in tables, tables
+
+          print(json.dumps({
+              'backend': type(cache).__name__,
+              'path': str(path),
+              'integrity': integrity,
+              'tables': tables,
+              'cached_entries': count,
+              'provider_calls': 0,
+          }, sort_keys=True))
+          PY
+
+          mount="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
+          [[ -n "$mount" ]]
+          [[ "${mount##*|}" == '/app/data' ]]
+          echo "deployed_sha=$deployed"
+          echo "status=$status"
+          echo "cache_path=$env_path"
+          echo "mount=$mount"
+          echo 'provider_calls=0'
