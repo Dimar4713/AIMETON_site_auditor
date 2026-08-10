@@ -217,6 +217,14 @@ class HuntCandidate(BaseModel):
     business_summary: str
     recommended_solution: str
     reasons: list[str] = Field(default_factory=list)
+    lead_fit: Literal[
+        "commercial_candidate",
+        "unknown_candidate",
+        "institutional_candidate",
+        "not_applicable",
+    ] = "unknown_candidate"
+    lead_fit_reason: str = ""
+    lead_fit_evidence: list[str] = Field(default_factory=list)
     analysis: SiteAnalysis | None = None
 
 
