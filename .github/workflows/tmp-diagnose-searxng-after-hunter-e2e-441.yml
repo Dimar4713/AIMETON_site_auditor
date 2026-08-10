@@ -1,0 +1,63 @@
+name: Temporary Diagnose SearXNG After Hunter E2E 441
+
+on:
+  push:
+    branches:
+      - fix/hunter-e2e-router-health-441
+    paths:
+      - .github/workflows/tmp-diagnose-searxng-after-hunter-e2e-441.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: 2987e292f7a0b6d12fe2aeb3a3d657cb549a5468
+
+    steps:
+      - name: Verify exact Stage and inspect zero-call search health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deployed="$(cat "$STACK_DIR/app-source-sha.txt")"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$status" == "healthy" ]]
+          docker exec -i "$CONTAINER" python - <<'PY'
+          import json
+          import httpx
+
+          response = httpx.get('http://127.0.0.1:5000/api/search/health', timeout=30.0)
+          response.raise_for_status()
+          data = response.json()
+          providers = data.get('providers') or []
+          searxng = next((row for row in providers if row.get('provider') == 'searxng'), None)
+          assert searxng is not None, data
+          safe = {
+              'health_status': data.get('status'),
+              'searxng_state': searxng.get('state'),
+              'ready': searxng.get('ready'),
+              'reason': searxng.get('reason'),
+              'scheduling': searxng.get('scheduling'),
+              'upstream_cooldowns': searxng.get('upstream_cooldowns'),
+              'upstream_telemetry': searxng.get('upstream_telemetry'),
+              'provider_calls': 0,
+          }
+          print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Inspect recent sanitized search-related container log lines
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker logs --since 15m "$CONTAINER" 2>&1 \
+            | grep -Ei 'searx|captcha|rate.limit|provider.block|circuit.open|unresponsive' \
+            | tail -n 120 \
+            | sed -E 's/(api[_-]?key|token|secret|authorization)[=: ]+[^ ,;]+/\1=[REDACTED]/Ig' \
+            || true
