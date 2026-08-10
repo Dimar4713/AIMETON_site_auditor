@@ -93,6 +93,17 @@
     return {kind: 'observation', label: 'Наблюдение'};
   }
 
+  function leadFitPresentation(candidate) {
+    const fit = String(candidate.lead_fit || '');
+    const labels = {
+      commercial_candidate: 'Коммерческий кандидат',
+      unknown_candidate: 'Коммерческий статус не подтверждён',
+      institutional_candidate: 'Институциональная организация',
+    };
+    if (!labels[fit]) return null;
+    return {fit, label: labels[fit], reason: String(candidate.lead_fit_reason || '').trim()};
+  }
+
   function priorityLabel(score, qualification) {
     if (score == null) return qualification || 'Недостаточно данных';
     if (score >= 70) return 'Высокий приоритет';
@@ -139,6 +150,11 @@
     document.querySelector('#companyName').value = name;
     document.querySelector('#companyUrl').value = url;
     document.querySelector('#companyRegion').value = region;
+    const form = document.querySelector('#companyIntelligenceForm');
+    if (form) {
+      form.dataset.hunterLeadFit = String(candidate.lead_fit || '');
+      form.dataset.hunterLeadFitReason = String(candidate.lead_fit_reason || '');
+    }
     selectService('company-intelligence');
     const status = document.querySelector('#companyIntelligenceStatus');
     setStatus(status, 'Данные кандидата перенесены. Проверьте их и явно запустите исследование.', 'success');
@@ -147,6 +163,7 @@
 
   function appendCandidate(container, candidate, fallbackRegion) {
     const classification = classifyCandidate(candidate);
+    const leadFit = leadFitPresentation(candidate);
     const item = document.createElement('article');
     item.className = `service-summary__item service-summary__candidate service-summary__candidate--${classification.kind}`;
     const name = String(candidate.company_name || candidate.url || 'Результат без названия').trim();
@@ -165,6 +182,12 @@
     badge.className = `service-summary__kind service-summary__kind--${classification.kind}`;
     badge.textContent = classification.label;
     top.append(heading, badge);
+    if (leadFit) {
+      const leadBadge = document.createElement('span');
+      leadBadge.className = 'service-summary__kind';
+      leadBadge.textContent = leadFit.label;
+      top.append(leadBadge);
+    }
     item.append(top);
 
     const body = document.createElement('div');
@@ -187,6 +210,13 @@
     const humanPriority = priorityLabel(score, qualification);
     meta.textContent = `${region ? `Регион: ${region} · ` : ''}${humanPriority}${score == null ? '' : ` · балл ${score}/100`}${nameOnly ? ' · Недостаточно данных' : ''}`;
     item.append(meta);
+
+    if (leadFit?.reason) {
+      const leadReason = document.createElement('div');
+      leadReason.className = 'service-summary__meta';
+      leadReason.textContent = `Основание коммерческого статуса: ${leadFit.reason}`;
+      item.append(leadReason);
+    }
 
     if (classification.kind === 'company') {
       const action = document.createElement('button');
@@ -244,6 +274,81 @@
     }
   }
 
+  const COMPANY_FACT_LABELS = {
+    legal_name: 'Юридическое лицо',
+    phones: 'Телефон',
+    emails: 'Email',
+    website: 'Сайт',
+    executives: 'Руководитель / ЛПР-факт',
+  };
+
+  function renderCompanySalesHandoff(container, data) {
+    const analysis = data.site_analysis || null;
+    if (!analysis) return;
+
+    const facts = Array.isArray(analysis.company_facts) ? analysis.company_facts : [];
+    facts
+      .filter(fact => COMPANY_FACT_LABELS[fact.field] && String(fact.value || '').trim())
+      .slice(0, 12)
+      .forEach(fact => {
+        const refs = Array.isArray(fact.source_ids) && fact.source_ids.length
+          ? ` · источники: ${fact.source_ids.join(', ')}`
+          : '';
+        const period = fact.period ? ` · период: ${fact.period}` : '';
+        appendItem(
+          container,
+          `Факт · ${COMPANY_FACT_LABELS[fact.field]}`,
+          String(fact.value),
+          `Уверенность: ${fact.confidence || 'не указана'}${period}${refs}`,
+        );
+      });
+
+    const opportunity = analysis.commercial_opportunity || null;
+    if (opportunity) {
+      const opportunityText = [
+        opportunity.problem_hypothesis ? `Проблема: ${opportunity.problem_hypothesis}` : '',
+        opportunity.recommended_solution ? `Решение: ${opportunity.recommended_solution}` : '',
+        opportunity.expected_value ? `Ожидаемая ценность: ${opportunity.expected_value}` : '',
+      ].filter(Boolean).join(' · ');
+      appendItem(
+        container,
+        'Коммерческая возможность — гипотеза',
+        opportunityText || 'Гипотеза не сформирована',
+        `Не является подтверждённым фактом · ${opportunity.qualification || 'без квалификации'} · балл ${opportunity.score ?? '—'}/100`,
+      );
+    }
+
+    const action = analysis.action_package || null;
+    if (action) {
+      if (action.decision_maker_hypothesis) {
+        appendItem(container, 'ЛПР — гипотеза', action.decision_maker_hypothesis, 'Требует проверки по первичным источникам');
+      }
+      if (action.contact_reason) {
+        appendItem(container, 'Причина контакта — гипотеза', action.contact_reason, 'Рабочее основание для подготовки контакта, не факт');
+      }
+      if (Array.isArray(action.demo_scenario) && action.demo_scenario.length) {
+        appendItem(container, 'Демо-сценарий — рабочая гипотеза', action.demo_scenario.join(' → '), 'Проверить перед внешним использованием');
+      }
+      if (action.first_message) {
+        appendItem(container, 'Первое сообщение — черновик, не отправлено', action.first_message, 'Автоматическая отправка отключена; решение остаётся за человеком');
+      }
+      if (action.next_action) {
+        appendItem(container, 'Следующий шаг — предлагаемое действие', action.next_action, 'Выполняется только после явного решения человека');
+      }
+    }
+
+    const readiness = analysis.readiness || null;
+    if (readiness && (readiness.client_release_eligible === false || (readiness.release_blockers || []).length)) {
+      const blockers = Array.isArray(readiness.release_blockers) ? readiness.release_blockers : [];
+      appendItem(
+        container,
+        'Статус готовности',
+        'Предварительный результат: требуется проверка перед внешним использованием.',
+        blockers.length ? `Блокеры выпуска: ${blockers.join(', ')}` : 'Client release пока не разрешён',
+      );
+    }
+  }
+
   const companyForm = document.querySelector('#companyIntelligenceForm');
   companyForm?.addEventListener('submit', async event => {
     event.preventDefault();
@@ -265,6 +370,7 @@
       const data = await postJson('/api/company-intelligence', payload);
       appendItem(list, data.company_name || companyName, data.recommended_solution || 'Исследование завершено', `Статус: ${data.status || 'partial'} · коммерческий балл: ${data.commercial_score ?? '—'}`);
       (data.scent_summary || []).slice(0, 6).forEach((item, index) => appendItem(list, `Сигнал ${index + 1}`, item));
+      renderCompanySalesHandoff(list, data);
       appendItem(list, 'Источники', `Найдено: ${(data.sources || []).length}`);
       output.hidden = false;
       setStatus(status, 'Профиль компании подготовлен.', 'success');
