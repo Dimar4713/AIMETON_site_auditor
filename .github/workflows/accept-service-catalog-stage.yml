@@ -126,6 +126,13 @@ jobs:
               'Выполняется только после явного решения человека',
               'Предварительный результат: требуется проверка перед внешним использованием.',
               'Блокеры выпуска:',
+              'function companySalesPackageMarkdown(data)',
+              'function appendSalesPackageCopyAction(output, data, status)',
+              "button.textContent = 'Скопировать sales-пакет'",
+              'navigator.clipboard.writeText(packageText)',
+              'Первое сообщение — черновик — не отправлено',
+              'Никакое сообщение не отправлено и никакое внешнее действие не выполнено.',
+              'Не удалось скопировать sales-пакет:',
           )
           for token in sales_handoff_catalog_tokens:
               assert token in catalog, f'sales-handoff catalog contract missing: {token}'
@@ -144,6 +151,13 @@ jobs:
           )[1].split('function appendCandidate', 1)[0]
           for forbidden_call in ('postJson(', 'requestSubmit(', '.submit('):
               assert forbidden_call not in handoff_body, f'handoff performs forbidden automatic action: {forbidden_call}'
+
+          clipboard_body = catalog.split(
+              'function appendSalesPackageCopyAction(output, data, status) {', 1
+          )[1].split("const companyForm = document.querySelector('#companyIntelligenceForm');", 1)[0]
+          assert 'navigator.clipboard.writeText(packageText)' in clipboard_body, 'clipboard export does not use local clipboard API'
+          for forbidden_call in ('fetch(', 'postJson(', 'requestSubmit(', '.submit(', 'sendEmail', 'sendMessage'):
+              assert forbidden_call not in clipboard_body, f'clipboard export performs forbidden external action: {forbidden_call}'
 
           auto_call_tokens = ('postJson(\'/api/company-intelligence\'', 'postJson(\'/api/hunt\'')
           for token in auto_call_tokens:
@@ -169,6 +183,8 @@ jobs:
             echo '- opportunity/LPR/contact/demo/message explicitly labelled as hypotheses or drafts: ✅'
             echo '- preliminary readiness/release blockers visible: ✅'
             echo '- handoff performs no automatic submit/outreach: ✅'
+            echo '- local sales-package clipboard export with draft/review labels: ✅'
+            echo '- clipboard export performs no network/submit/outreach: ✅'
             echo '- explicit submit-only provider boundary: ✅'
             echo '- catalog-first mobile entry state: ✅'
             echo '- interface audit beta guard: ✅'
