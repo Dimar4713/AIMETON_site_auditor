@@ -10,6 +10,7 @@ import httpx
 from app.heuristics import heuristic_analysis
 from app.hunter_forensic_trace import HunterForensicTrace
 from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries
+from app.hunter_lead_fit import classify_lead_fit, lead_fit_rank
 from app.hunter_query_intelligence import generate_hunter_query_plan
 from app.hunter_source_role import classify_source_role, role_rank
 from app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult
@@ -197,6 +198,13 @@ def _shallow_candidate(
     summary: str,
     recommendation: str,
 ) -> HuntCandidate:
+    source_role = classify_source_role(title, snippet, url)
+    lead_fit = classify_lead_fit(
+        title=title,
+        snippet=snippet,
+        url=url,
+        source_role=source_role,
+    )
     return HuntCandidate(
         company_name=title or _domain(url),
         url=url,
@@ -212,6 +220,9 @@ def _shallow_candidate(
         business_summary=summary,
         recommended_solution=recommendation,
         reasons=result.reasons,
+        lead_fit=lead_fit.fit,
+        lead_fit_reason=lead_fit.reason,
+        lead_fit_evidence=list(lead_fit.evidence),
         analysis=None,
     )
 
@@ -508,6 +519,14 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             final_score = round((result.score + analysis.commercial_opportunity.score) / 2)
             reasons = list(result.reasons)
             qualification = analysis.commercial_opportunity.qualification
+            source_role = classify_source_role(display_title, snippet, url)
+            lead_fit = classify_lead_fit(
+                title=display_title,
+                snippet=snippet,
+                url=url,
+                source_role=source_role,
+                analysis=analysis,
+            )
             if not region_confirmed:
                 final_score = min(49, max(0, final_score - 20))
                 qualification = "Наблюдение"
@@ -529,7 +548,10 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                     "region_confirmed": region_confirmed,
                     "qualification": qualification,
                     "source_host": host,
-                    "source_role": classify_source_role(display_title, snippet, url),
+                    "source_role": source_role,
+                    "lead_fit": lead_fit.fit,
+                    "lead_fit_reason": lead_fit.reason,
+                    "lead_fit_evidence": list(lead_fit.evidence),
                 },
             )
             return HuntCandidate(
@@ -547,6 +569,9 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 business_summary=analysis.business_summary,
                 recommended_solution=analysis.commercial_opportunity.recommended_solution,
                 reasons=reasons,
+                lead_fit=lead_fit.fit,
+                lead_fit_reason=lead_fit.reason,
+                lead_fit_evidence=list(lead_fit.evidence),
                 analysis=analysis,
             )
         except (FetchError, httpx.HTTPError, ValueError) as exc:
@@ -584,6 +609,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
     candidates.sort(
         key=lambda candidate: (
             role_rank(_candidate_rank_role(candidate)),
+            lead_fit_rank(candidate.lead_fit),
             candidate.pre_score_status == "calculated",
             candidate.final_score if candidate.final_score is not None else -1,
             candidate.preliminary_score if candidate.preliminary_score is not None else -1,
@@ -608,6 +634,9 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                     "qualification": candidate.qualification,
                     "deep_analysis_performed": candidate.deep_analysis_performed,
                     "source_role": _candidate_rank_role(candidate),
+                    "lead_fit": candidate.lead_fit,
+                    "lead_fit_reason": candidate.lead_fit_reason,
+                    "lead_fit_evidence": candidate.lead_fit_evidence,
                 },
             )
         else:
@@ -620,7 +649,12 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 url=url,
                 title=candidate.company_name,
                 counters={"qualified_rank": rank, "output_limit": req.output_limit},
-                metadata={"qualification": candidate.qualification, "source_role": _candidate_rank_role(candidate)},
+                metadata={
+                    "qualification": candidate.qualification,
+                    "source_role": _candidate_rank_role(candidate),
+                    "lead_fit": candidate.lead_fit,
+                    "lead_fit_reason": candidate.lead_fit_reason,
+                },
             )
 
     funnel = HuntFunnel(
@@ -655,6 +689,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             f"Глубокая обработка запускается только при pre-score >= {req.deep_audit_score}.",
             "Количество найденных ссылок не входит в формулу pre-score.",
             "Каталоги, рейтинги и редакционные источники сохраняются для проверки, но не конкурируют с прямыми компаниями в lead-ranking.",
+            "Внутри сопоставимого качества прямых сайтов коммерчески подтвержденные кандидаты ранжируются выше неизвестных, а явно институциональные остаются в разведке ниже них.",
         ],
         search=aggregate,
     )
