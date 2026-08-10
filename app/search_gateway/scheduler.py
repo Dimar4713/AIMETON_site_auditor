@@ -5,7 +5,7 @@ import random
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
-from app.search_gateway.models import FallbackReason, SearchItem, SearchRequest
+from app.search_gateway.models import FallbackReason, SearchItem, SearchRequest, UpstreamCooldown
 from app.search_gateway.providers import ProviderDegradation, SearchProvider
 
 
@@ -79,6 +79,12 @@ class ScheduledProvider(SearchProvider):
 
     def consume_degradation(self, request: SearchRequest) -> ProviderDegradation | None:
         return self._provider.consume_degradation(request)
+
+    def upstream_cooldowns(self) -> list[UpstreamCooldown]:
+        return self._provider.upstream_cooldowns()
+
+    def upstream_circuit_open(self) -> bool:
+        return self._provider.upstream_circuit_open()
 
     async def search(
         self,

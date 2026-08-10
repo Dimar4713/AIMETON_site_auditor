@@ -789,7 +789,9 @@ class SearchGateway:
         for name, provider in self._providers.items():
             quota = self._global_quotas.get(name)
             remaining = None if quota is None else max(0, quota - self._global_usage[name])
-            circuit_state = self._circuit_state(name)
+            upstream_cooldowns = provider.upstream_cooldowns()
+            upstream_open = provider.upstream_circuit_open()
+            circuit_state = "open" if upstream_open else self._circuit_state(name)
             maximum = policy.max_cost_by_currency.get(provider.cost_currency)
             policy_blocked = policy.allowed_providers is not None and name not in policy.allowed_providers
             if policy_blocked:
@@ -821,6 +823,7 @@ class SearchGateway:
                     paid=provider.paid,
                     circuit_state=circuit_state,
                     quota_remaining=remaining,
+                    upstream_cooldowns=upstream_cooldowns or None,
                 )
             )
         return health

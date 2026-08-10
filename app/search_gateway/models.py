@@ -163,6 +163,12 @@ class SearchResponse(GatewayModel):
     diagnostics: SearchDiagnostics
 
 
+class UpstreamCooldown(GatewayModel):
+    upstream: str = Field(min_length=1, max_length=100)
+    reason: FallbackReason
+    retry_after_seconds: int = Field(ge=0, le=2592000)
+
+
 class ProviderHealth(GatewayModel):
     provider: str
     state: ProviderReadiness
@@ -171,3 +177,4 @@ class ProviderHealth(GatewayModel):
     paid: bool
     circuit_state: Literal["closed", "open", "half_open"]
     quota_remaining: int | None = Field(default=None, ge=0)
+    upstream_cooldowns: list[UpstreamCooldown] | None = None
