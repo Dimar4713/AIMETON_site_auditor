@@ -1,0 +1,44 @@
+name: Temporary Accept SearXNG Fanout CFF9
+
+on:
+  push:
+    branches:
+      - diag/accept-searxng-fanout-cff9
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 5
+    steps:
+      - name: Verify deployed fanout without provider calls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='cff9c6415dd31fe01a41f7ada5d62ae970dc8b55'
+          deployed="$(cat /opt/aimeton/auditor-stack/app-source-sha.txt)"
+          [[ "$deployed" == "$expected" ]]
+          docker exec -i aimeton-auditor python - <<'PY'
+          import json
+          import os
+          from app.search_gateway.factory import DEFAULT_SEARXNG_ENGINES, _int_env
+
+          engines = tuple(
+              item.strip()
+              for item in os.getenv('SEARXNG_ENGINES', ','.join(DEFAULT_SEARXNG_ENGINES)).split(',')
+              if item.strip()
+          )
+          fanout = _int_env('SEARXNG_ENGINES_PER_REQUEST', 2, minimum=1, maximum=64)
+          assert len(engines) == 5, engines
+          assert fanout == 2, fanout
+          safe = {
+              'deployed_fanout': fanout,
+              'engine_count': len(engines),
+              'engines': engines,
+              'fanout_reduction_ceiling_percent': 60,
+              'provider_calls': 0,
+          }
+          print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          PY
