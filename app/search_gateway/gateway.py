@@ -824,6 +824,7 @@ class SearchGateway:
                     circuit_state=circuit_state,
                     quota_remaining=remaining,
                     upstream_cooldowns=upstream_cooldowns or None,
+                    scheduling=provider.scheduling_policy(),
                 )
             )
         return health

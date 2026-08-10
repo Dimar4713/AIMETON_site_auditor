@@ -169,6 +169,12 @@ class UpstreamCooldown(GatewayModel):
     retry_after_seconds: int = Field(ge=0, le=2592000)
 
 
+class ProviderScheduling(GatewayModel):
+    max_concurrency: int = Field(ge=1, le=64)
+    jitter_min_seconds: float = Field(ge=0.0, le=30.0)
+    jitter_max_seconds: float = Field(ge=0.0, le=30.0)
+
+
 class ProviderHealth(GatewayModel):
     provider: str
     state: ProviderReadiness
@@ -178,3 +184,4 @@ class ProviderHealth(GatewayModel):
     circuit_state: Literal["closed", "open", "half_open"]
     quota_remaining: int | None = Field(default=None, ge=0)
     upstream_cooldowns: list[UpstreamCooldown] | None = None
+    scheduling: ProviderScheduling | None = None
