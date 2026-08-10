@@ -1,0 +1,74 @@
+name: Temporary Patch Hunter Sales Handoff UI
+
+on:
+  push:
+    branches:
+      - fix/hunter-sales-handoff-ui
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[sales-handoff-ui-patched]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/hunter-sales-handoff-ui
+          fetch-depth: 1
+
+      - name: Apply guarded service-catalog patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('static/service-catalog.js')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  '''  function priorityLabel(score, qualification) {\n''',
+                  '''  function leadFitPresentation(candidate) {\n    const fit = String(candidate.lead_fit || '');\n    const labels = {\n      commercial_candidate: 'Коммерческий кандидат',\n      unknown_candidate: 'Коммерческий статус не подтверждён',\n      institutional_candidate: 'Институциональная организация',\n    };\n    if (!labels[fit]) return null;\n    return {fit, label: labels[fit], reason: String(candidate.lead_fit_reason || '').trim()};\n  }\n\n  function priorityLabel(score, qualification) {\n''',
+              ),
+              (
+                  '''    document.querySelector('#companyRegion').value = region;\n    selectService('company-intelligence');\n''',
+                  '''    document.querySelector('#companyRegion').value = region;\n    const form = document.querySelector('#companyIntelligenceForm');\n    if (form) {\n      form.dataset.hunterLeadFit = String(candidate.lead_fit || '');\n      form.dataset.hunterLeadFitReason = String(candidate.lead_fit_reason || '');\n    }\n    selectService('company-intelligence');\n''',
+              ),
+              (
+                  '''  function appendCandidate(container, candidate, fallbackRegion) {\n    const classification = classifyCandidate(candidate);\n''',
+                  '''  function appendCandidate(container, candidate, fallbackRegion) {\n    const classification = classifyCandidate(candidate);\n    const leadFit = leadFitPresentation(candidate);\n''',
+              ),
+              (
+                  '''    top.append(heading, badge);\n    item.append(top);\n''',
+                  '''    top.append(heading, badge);\n    if (leadFit) {\n      const leadBadge = document.createElement('span');\n      leadBadge.className = 'service-summary__kind';\n      leadBadge.textContent = leadFit.label;\n      top.append(leadBadge);\n    }\n    item.append(top);\n''',
+              ),
+              (
+                  '''    item.append(meta);\n\n    if (classification.kind === 'company') {\n''',
+                  '''    item.append(meta);\n\n    if (leadFit?.reason) {\n      const leadReason = document.createElement('div');\n      leadReason.className = 'service-summary__meta';\n      leadReason.textContent = `Основание коммерческого статуса: ${leadFit.reason}`;\n      item.append(leadReason);\n    }\n\n    if (classification.kind === 'company') {\n''',
+              ),
+              (
+                  '''  const companyForm = document.querySelector('#companyIntelligenceForm');\n''',
+                  '''  const COMPANY_FACT_LABELS = {\n    legal_name: 'Юридическое лицо',\n    phones: 'Телефон',\n    emails: 'Email',\n    website: 'Сайт',\n    executives: 'Руководитель / ЛПР-факт',\n  };\n\n  function renderCompanySalesHandoff(container, data) {\n    const analysis = data.site_analysis || null;\n    if (!analysis) return;\n\n    const facts = Array.isArray(analysis.company_facts) ? analysis.company_facts : [];\n    facts\n      .filter(fact => COMPANY_FACT_LABELS[fact.field] && String(fact.value || '').trim())\n      .slice(0, 12)\n      .forEach(fact => {\n        const refs = Array.isArray(fact.source_ids) && fact.source_ids.length\n          ? ` · источники: ${fact.source_ids.join(', ')}`\n          : '';\n        const period = fact.period ? ` · период: ${fact.period}` : '';\n        appendItem(\n          container,\n          `Факт · ${COMPANY_FACT_LABELS[fact.field]}`,\n          String(fact.value),\n          `Уверенность: ${fact.confidence || 'не указана'}${period}${refs}`,\n        );\n      });\n\n    const opportunity = analysis.commercial_opportunity || null;\n    if (opportunity) {\n      const opportunityText = [\n        opportunity.problem_hypothesis ? `Проблема: ${opportunity.problem_hypothesis}` : '',\n        opportunity.recommended_solution ? `Решение: ${opportunity.recommended_solution}` : '',\n        opportunity.expected_value ? `Ожидаемая ценность: ${opportunity.expected_value}` : '',\n      ].filter(Boolean).join(' · ');\n      appendItem(\n        container,\n        'Коммерческая возможность — гипотеза',\n        opportunityText || 'Гипотеза не сформирована',\n        `Не является подтверждённым фактом · ${opportunity.qualification || 'без квалификации'} · балл ${opportunity.score ?? '—'}/100`,\n      );\n    }\n\n    const action = analysis.action_package || null;\n    if (action) {\n      if (action.decision_maker_hypothesis) {\n        appendItem(container, 'ЛПР — гипотеза', action.decision_maker_hypothesis, 'Требует проверки по первичным источникам');\n      }\n      if (action.contact_reason) {\n        appendItem(container, 'Причина контакта — гипотеза', action.contact_reason, 'Рабочее основание для подготовки контакта, не факт');\n      }\n      if (Array.isArray(action.demo_scenario) && action.demo_scenario.length) {\n        appendItem(container, 'Демо-сценарий — рабочая гипотеза', action.demo_scenario.join(' → '), 'Проверить перед внешним использованием');\n      }\n      if (action.first_message) {\n        appendItem(container, 'Первое сообщение — черновик, не отправлено', action.first_message, 'Автоматическая отправка отключена; решение остаётся за человеком');\n      }\n      if (action.next_action) {\n        appendItem(container, 'Следующий шаг — предлагаемое действие', action.next_action, 'Выполняется только после явного решения человека');\n      }\n    }\n\n    const readiness = analysis.readiness || null;\n    if (readiness && (readiness.client_release_eligible === false || (readiness.release_blockers || []).length)) {\n      const blockers = Array.isArray(readiness.release_blockers) ? readiness.release_blockers : [];\n      appendItem(\n        container,\n        'Статус готовности',\n        'Предварительный результат: требуется проверка перед внешним использованием.',\n        blockers.length ? `Блокеры выпуска: ${blockers.join(', ')}` : 'Client release пока не разрешён',\n      );\n    }\n  }\n\n  const companyForm = document.querySelector('#companyIntelligenceForm');\n''',
+              ),
+              (
+                  '''      (data.scent_summary || []).slice(0, 6).forEach((item, index) => appendItem(list, `Сигнал ${index + 1}`, item));\n      appendItem(list, 'Источники', `Найдено: ${(data.sources || []).length}`);\n''',
+                  '''      (data.scent_summary || []).slice(0, 6).forEach((item, index) => appendItem(list, `Сигнал ${index + 1}`, item));\n      renderCompanySalesHandoff(list, data);\n      appendItem(list, 'Источники', `Найдено: ${(data.sources || []).length}`);\n''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one replacement, found {count}: {old[:140]!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          node --check static/service-catalog.js
+          git config user.name 'AIMETON Sales Handoff UI'
+          git config user.email '127470701+Dimar4713@users.noreply.github.com'
+          git add static/service-catalog.js
+          git commit -m 'Expose Hunter lead-fit and sales handoff package [sales-handoff-ui-patched]'
+          git push origin HEAD:fix/hunter-sales-handoff-ui
