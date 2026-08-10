@@ -71,9 +71,10 @@ jobs:
           root = Path('/app/static')
           index = (root / 'index.html').read_text(encoding='utf-8')
           catalog = (root / 'service-catalog.js').read_text(encoding='utf-8')
+          handoff = (root / 'hunter-company-handoff-context.js').read_text(encoding='utf-8')
           live_analysis = (root / 'live-analysis.js').read_text(encoding='utf-8')
           app = (root / 'app.js').read_text(encoding='utf-8')
-          combined = '\n'.join((index, catalog, live_analysis, app))
+          combined = '\n'.join((index, catalog, handoff, live_analysis, app))
 
           for service in ('site-audit', 'company-intelligence', 'hunter', 'interface-audit'):
               assert f'data-service-card="{service}"' in index, f'missing service card: {service}'
@@ -103,6 +104,47 @@ jobs:
               assert token in catalog, f'hunter visible-funnel contract missing: {token}'
           assert catalog.count('details.open = true;') >= 2, 'returned Hunter groups are hidden by default'
 
+          sales_handoff_catalog_tokens = (
+              'function leadFitPresentation(candidate)',
+              'Коммерческий кандидат',
+              'Коммерческий статус не подтверждён',
+              'Институциональная организация',
+              'Основание коммерческого статуса:',
+              "form.dataset.hunterLeadFit = String(candidate.lead_fit || '')",
+              "form.dataset.hunterLeadFitReason = String(candidate.lead_fit_reason || '')",
+              'function renderCompanySalesHandoff(container, data)',
+              'Факт · ${COMPANY_FACT_LABELS[fact.field]}',
+              'Уверенность: ${fact.confidence',
+              'Коммерческая возможность — гипотеза',
+              'Не является подтверждённым фактом',
+              'ЛПР — гипотеза',
+              'Причина контакта — гипотеза',
+              'Демо-сценарий — рабочая гипотеза',
+              'Первое сообщение — черновик, не отправлено',
+              'Автоматическая отправка отключена; решение остаётся за человеком',
+              'Следующий шаг — предлагаемое действие',
+              'Выполняется только после явного решения человека',
+              'Предварительный результат: требуется проверка перед внешним использованием.',
+              'Блокеры выпуска:',
+          )
+          for token in sales_handoff_catalog_tokens:
+              assert token in catalog, f'sales-handoff catalog contract missing: {token}'
+
+          sales_handoff_context_tokens = (
+              'hunterLeadFit',
+              'hunterLeadFitReason',
+              'Hunter: ${LEAD_FIT_LABELS[leadFit]}',
+              'Основание приоритета: ${leadFitReason}',
+          )
+          for token in sales_handoff_context_tokens:
+              assert token in handoff, f'sales-handoff context contract missing: {token}'
+
+          handoff_body = catalog.split(
+              'function handoffCandidate(candidate, fallbackRegion)', 1
+          )[1].split('function appendCandidate', 1)[0]
+          for forbidden_call in ('postJson(', 'requestSubmit(', '.submit('):
+              assert forbidden_call not in handoff_body, f'handoff performs forbidden automatic action: {forbidden_call}'
+
           auto_call_tokens = ('postJson(\'/api/company-intelligence\'', 'postJson(\'/api/hunt\'')
           for token in auto_call_tokens:
               position = catalog.find(token)
@@ -121,11 +163,17 @@ jobs:
             echo '- audit/company/hunter endpoint bindings: ✅'
             echo '- Hunter raw → unique → qualified → returned visibility: ✅'
             echo '- all returned Hunter groups open by default: ✅'
+            echo '- Hunter lead-fit label and reason: ✅'
+            echo '- Hunter → Company Intelligence commercial context handoff: ✅'
+            echo '- factual identity/contact fields with confidence/source context: ✅'
+            echo '- opportunity/LPR/contact/demo/message explicitly labelled as hypotheses or drafts: ✅'
+            echo '- preliminary readiness/release blockers visible: ✅'
+            echo '- handoff performs no automatic submit/outreach: ✅'
             echo '- explicit submit-only provider boundary: ✅'
             echo '- catalog-first mobile entry state: ✅'
             echo '- interface audit beta guard: ✅'
             echo '- unsafe internal projection tokens absent: ✅'
-            echo '- verdict: ✅ Service catalog stage contract acceptance passed.'
+            echo '- verdict: ✅ Service catalog + sales handoff stage contract acceptance passed.'
           } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized evidence
