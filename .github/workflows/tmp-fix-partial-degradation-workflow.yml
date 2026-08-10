@@ -26,8 +26,18 @@ jobs:
 
           path = Path('.github/workflows/tmp-patch-searxng-partial-degradation-441.yml')
           text = path.read_text(encoding='utf-8')
-          old = '''          replace_once(\n              'app/search_gateway/trace_bridge.py',\n              '''            "cost_currency": row["cost"]["currency"],\\n        }\\n''',\n              '''            "cost_currency": row["cost"]["currency"],\\n            "degraded_upstreams": row.get("degraded_upstreams", []),\\n            "partial_degradation_reason": row.get("reason") if row.get("degraded_upstreams") else None,\\n        }\\n''',\n          )\n'''
-          new = '''          replace_once(\n              'app/search_gateway/trace_bridge.py',\n              '''            "cost_currency": row["cost"]["currency"],\\n        }\\n''',\n              '''            "cost_currency": row["cost"]["currency"],\\n        }\\n        if row.get("degraded_upstreams"):\\n            common_metadata["degraded_upstreams"] = row["degraded_upstreams"]\\n            common_metadata["partial_degradation_reason"] = row.get("reason")\\n''',\n          )\n'''
+          old = """          replace_once(
+              'app/search_gateway/trace_bridge.py',
+              '''            \"cost_currency\": row[\"cost\"][\"currency\"],\\n        }\\n''',
+              '''            \"cost_currency\": row[\"cost\"][\"currency\"],\\n            \"degraded_upstreams\": row.get(\"degraded_upstreams\", []),\\n            \"partial_degradation_reason\": row.get(\"reason\") if row.get(\"degraded_upstreams\") else None,\\n        }\\n''',
+          )
+"""
+          new = """          replace_once(
+              'app/search_gateway/trace_bridge.py',
+              '''            \"cost_currency\": row[\"cost\"][\"currency\"],\\n        }\\n''',
+              '''            \"cost_currency\": row[\"cost\"][\"currency\"],\\n        }\\n        if row.get(\"degraded_upstreams\"):\\n            common_metadata[\"degraded_upstreams\"] = row[\"degraded_upstreams\"]\\n            common_metadata[\"partial_degradation_reason\"] = row.get(\"reason\")\\n''',
+          )
+"""
           if old not in text:
               raise SystemExit('expected workflow replacement block not found')
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
@@ -36,7 +46,6 @@ jobs:
           git config user.name 'AIMETON Search Hardening'
           git config user.email '127470701+Dimar4713@users.noreply.github.com'
           git add .github/workflows/tmp-patch-searxng-partial-degradation-441.yml
-          git rm --cached .github/workflows/tmp-fix-partial-degradation-workflow.yml >/dev/null 2>&1 || true
           git add -u .github/workflows/tmp-fix-partial-degradation-workflow.yml
           git commit -m 'Fix partial degradation trace compatibility gate'
           git push origin HEAD:fix/searxng-partial-degradation-441
