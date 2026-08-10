@@ -1,0 +1,85 @@
+name: Temporary Patch SearXNG Engine Fanout 441
+
+on:
+  push:
+    branches:
+      - fix/searxng-bounded-engine-fanout-441
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/searxng-bounded-engine-fanout-441
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Apply guarded fanout patch and validate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old[:160]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'app/search_gateway/providers.py',
+              'import base64\nimport html\n',
+              'import base64\nimport hashlib\nimport html\n',
+          )
+          replace_once(
+              'app/search_gateway/providers.py',
+              '''        engines: tuple[str, ...] = (),\n        transport: httpx.AsyncBaseTransport | None = None,\n    ) -> None:\n        super().__init__(transport=transport)\n        self._base_url = (base_url or "").strip().rstrip("/")\n        self._engines = tuple(item.strip() for item in engines if item.strip())\n''',
+              '''        engines: tuple[str, ...] = (),\n        engine_fanout: int | None = None,\n        transport: httpx.AsyncBaseTransport | None = None,\n    ) -> None:\n        super().__init__(transport=transport)\n        self._base_url = (base_url or "").strip().rstrip("/")\n        self._engines = tuple(item.strip() for item in engines if item.strip())\n        self._engine_fanout = max(1, int(engine_fanout)) if engine_fanout is not None else None\n''',
+          )
+          replace_once(
+              'app/search_gateway/providers.py',
+              '''    @property\n    def configured(self) -> bool:\n        return bool(self._base_url)\n\n    async def search(self, request: SearchRequest, *, timeout_seconds: float) -> list[SearchItem]:\n''',
+              '''    @property\n    def configured(self) -> bool:\n        return bool(self._base_url)\n\n    def _engines_for_request(self, request: SearchRequest) -> tuple[str, ...]:\n        if not self._engines:\n            return ()\n        if self._engine_fanout is None or self._engine_fanout >= len(self._engines):\n            return self._engines\n        seed = "\\n".join((" ".join(request.query.split()).casefold(), request.language.casefold()))\n        digest = hashlib.sha256(seed.encode("utf-8")).digest()\n        start = int.from_bytes(digest[:8], "big") % len(self._engines)\n        return tuple(\n            self._engines[(start + offset) % len(self._engines)]\n            for offset in range(self._engine_fanout)\n        )\n\n    async def search(self, request: SearchRequest, *, timeout_seconds: float) -> list[SearchItem]:\n''',
+          )
+          replace_once(
+              'app/search_gateway/providers.py',
+              '''        if self._engines:\n            params["engines"] = ",".join(self._engines)\n''',
+              '''        selected_engines = self._engines_for_request(request)\n        if selected_engines:\n            params["engines"] = ",".join(selected_engines)\n''',
+          )
+          replace_once(
+              'app/search_gateway/factory.py',
+              '''        SearxngProvider(os.getenv("SEARXNG_BASE_URL"), engines=_csv_env("SEARXNG_ENGINES", DEFAULT_SEARXNG_ENGINES)),\n''',
+              '''        SearxngProvider(\n            os.getenv("SEARXNG_BASE_URL"),\n            engines=_csv_env("SEARXNG_ENGINES", DEFAULT_SEARXNG_ENGINES),\n            engine_fanout=_int_env(\n                "SEARXNG_ENGINES_PER_REQUEST", 2, minimum=1, maximum=64\n            ),\n        ),\n''',
+          )
+          replace_once(
+              '.env.example',
+              'SEARXNG_BASE_URL=http://searxng:8080\n',
+              'SEARXNG_BASE_URL=http://searxng:8080\nSEARXNG_ENGINES_PER_REQUEST=2\n',
+          )
+          PY
+
+          python -m py_compile app/search_gateway/providers.py app/search_gateway/factory.py tests/test_searxng_engine_fanout.py
+          pytest -q \
+            tests/test_searxng_engine_fanout.py \
+            tests/test_searxng_resilience.py \
+            tests/test_search_typed_failures.py \
+            tests/test_search_provider_gateway.py \
+            tests/test_search_scheduler.py
+
+          git config user.name 'AIMETON Search Hardening'
+          git config user.email '127470701+Dimar4713@users.noreply.github.com'
+          git add app/search_gateway/providers.py app/search_gateway/factory.py .env.example
+          git commit -m 'Bound SearXNG upstream engine fanout [searxng-fanout-patched]'
+          git push origin HEAD:fix/searxng-bounded-engine-fanout-441
