@@ -47,6 +47,7 @@ BLOCK_REASONS = frozenset(
         "circuit_open",
     }
 )
+NON_CALL_STATES = frozenset({"skipped", "cache_hit"})
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
@@ -97,6 +98,7 @@ def build_plan(
             "latency_p95_seconds",
             "block_or_degradation_rate",
             "precision_proxy",
+            "provider_calls",
         ],
         "precision_proxy_definition": (
             "mean per-result score: 0.5 for dentistry signal + 0.5 for Krasnoyarsk signal; "
@@ -143,6 +145,7 @@ def summarize_records(
     return {
         "concurrency": concurrency,
         "query_count": query_count,
+        "provider_calls": sum(1 for row in records if bool(row.get("provider_called"))),
         "successful_queries": successful,
         "success_rate": round(successful / query_count, 4) if query_count else 0.0,
         "latency_p50_seconds": round(statistics.median(latencies), 4) if latencies else 0.0,
@@ -177,7 +180,7 @@ async def _run_live_query(
         limit=result_limit,
         language="ru-RU",
         mission_id="benchmark-searxng-concurrency-stage",
-        correlation_id=f"benchmark-c{policy.provider_order[0]}-{index}-{time.time_ns()}",
+        correlation_id=f"benchmark-searxng-{index}-{time.time_ns()}",
     )
     started = time.monotonic()
     response = await gateway.search(request, policy)
@@ -190,6 +193,8 @@ async def _run_live_query(
         "query_index": index,
         "latency_seconds": latency,
         "result_count": len(response.results),
+        "provider_called": bool(attempt and attempt.state.value not in NON_CALL_STATES),
+        "attempt_state": attempt.state.value if attempt else None,
         "reason": attempt.reason.value if attempt and attempt.reason else None,
         "degraded_upstreams": list(attempt.degraded_upstreams) if attempt else [],
         "precision_scores": [
@@ -292,6 +297,7 @@ async def run_live_benchmark() -> dict[str, Any]:
         "matrix": list(CONCURRENCY_MATRIX),
         "query_count_per_concurrency": len(BENCHMARK_QUERIES),
         "planned_searxng_calls": len(BENCHMARK_QUERIES) * len(CONCURRENCY_MATRIX),
+        "actual_searxng_provider_calls": sum(int(row["provider_calls"]) for row in rows),
         "engine_pool": list(engines),
         "engine_fanout": engine_fanout,
         "jitter_seconds": {"min": jitter_min, "max": jitter_max},
