@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
+import time
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -166,12 +168,21 @@ class SearxngProvider(HttpSearchProvider):
         *,
         engines: tuple[str, ...] = (),
         engine_fanout: int | None = None,
+        engine_rate_limit_cooldown_seconds: float = 3600.0,
+        engine_block_cooldown_seconds: float = 86400.0,
+        engine_error_cooldown_seconds: float = 60.0,
+        clock: Callable[[], float] = time.monotonic,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         super().__init__(transport=transport)
         self._base_url = (base_url or "").strip().rstrip("/")
         self._engines = tuple(item.strip() for item in engines if item.strip())
         self._engine_fanout = max(1, int(engine_fanout)) if engine_fanout is not None else None
+        self._engine_rate_limit_cooldown_seconds = max(0.0, float(engine_rate_limit_cooldown_seconds))
+        self._engine_block_cooldown_seconds = max(0.0, float(engine_block_cooldown_seconds))
+        self._engine_error_cooldown_seconds = max(0.0, float(engine_error_cooldown_seconds))
+        self._clock = clock
+        self._engine_cooldown_until: dict[str, float] = {}
         self._degradations: dict[int, ProviderDegradation] = {}
 
     @property
@@ -181,15 +192,46 @@ class SearxngProvider(HttpSearchProvider):
     def _engines_for_request(self, request: SearchRequest) -> tuple[str, ...]:
         if not self._engines:
             return ()
-        if self._engine_fanout is None or self._engine_fanout >= len(self._engines):
-            return self._engines
+        now = self._clock()
+        eligible = tuple(
+            engine
+            for engine in self._engines
+            if self._engine_cooldown_until.get(engine.casefold(), 0.0) <= now
+        )
+        if not eligible:
+            return ()
+        if self._engine_fanout is None or self._engine_fanout >= len(eligible):
+            return eligible
         seed = "\n".join((" ".join(request.query.split()).casefold(), request.language.casefold()))
         digest = hashlib.sha256(seed.encode("utf-8")).digest()
-        start = int.from_bytes(digest[:8], "big") % len(self._engines)
+        start = int.from_bytes(digest[:8], "big") % len(eligible)
         return tuple(
-            self._engines[(start + offset) % len(self._engines)]
+            eligible[(start + offset) % len(eligible)]
             for offset in range(self._engine_fanout)
         )
+
+    def _cooldown_seconds(self, reason: FallbackReason) -> float:
+        if reason is FallbackReason.RATE_LIMITED:
+            return self._engine_rate_limit_cooldown_seconds
+        if reason in {FallbackReason.CAPTCHA, FallbackReason.PROVIDER_BLOCKED}:
+            return self._engine_block_cooldown_seconds
+        return self._engine_error_cooldown_seconds
+
+    def _record_degradation(self, degradation: ProviderDegradation) -> None:
+        cooldown = self._cooldown_seconds(degradation.reason)
+        if cooldown <= 0:
+            return
+        configured = {engine.casefold(): engine for engine in self._engines}
+        blocked_until = self._clock() + cooldown
+        for upstream in degradation.upstreams:
+            canonical = configured.get(upstream.casefold())
+            if canonical is None:
+                continue
+            key = canonical.casefold()
+            self._engine_cooldown_until[key] = max(
+                self._engine_cooldown_until.get(key, 0.0),
+                blocked_until,
+            )
 
     def consume_degradation(self, request: SearchRequest) -> ProviderDegradation | None:
         return self._degradations.pop(id(request), None)
@@ -233,6 +275,12 @@ class SearxngProvider(HttpSearchProvider):
             "safesearch": 1,
         }
         selected_engines = self._engines_for_request(request)
+        if self._engines and not selected_engines:
+            raise ProviderError(
+                "searxng upstream engines cooling down",
+                retryable=False,
+                reason=FallbackReason.CIRCUIT_OPEN,
+            )
         if selected_engines:
             params["engines"] = ",".join(selected_engines)
 
@@ -256,6 +304,7 @@ class SearxngProvider(HttpSearchProvider):
 
         degradation = self._classify_unresponsive(payload.get("unresponsive_engines") or [])
         if degradation is not None:
+            self._record_degradation(degradation)
             if results:
                 self._degradations[id(request)] = degradation
             else:

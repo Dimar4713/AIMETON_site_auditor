@@ -204,6 +204,24 @@ def get_search_gateway() -> TracedSearchGateway:
             engine_fanout=_int_env(
                 "SEARXNG_ENGINES_PER_REQUEST", 2, minimum=1, maximum=64
             ),
+            engine_rate_limit_cooldown_seconds=_float_env(
+                "SEARXNG_ENGINE_RATE_LIMIT_COOLDOWN_SECONDS",
+                3600.0,
+                minimum=0.0,
+                maximum=604800.0,
+            ),
+            engine_block_cooldown_seconds=_float_env(
+                "SEARXNG_ENGINE_BLOCK_COOLDOWN_SECONDS",
+                86400.0,
+                minimum=0.0,
+                maximum=2592000.0,
+            ),
+            engine_error_cooldown_seconds=_float_env(
+                "SEARXNG_ENGINE_ERROR_COOLDOWN_SECONDS",
+                60.0,
+                minimum=0.0,
+                maximum=86400.0,
+            ),
         ),
         concurrency_env="SEARCH_CONCURRENCY_SEARXNG", concurrency_default=2,
         jitter_min_env="SEARCH_JITTER_SEARXNG_MIN_SECONDS", jitter_min_default=0.2,
