@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 import yaml
 
@@ -10,12 +11,32 @@ def _workflow_text() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
 
 
-def test_runtime_persistence_reconcile_yaml_is_parseable() -> None:
+def _workflow_document() -> dict:
     document = yaml.safe_load(_workflow_text())
     assert isinstance(document, dict)
+    return document
+
+
+def test_runtime_persistence_reconcile_yaml_is_parseable() -> None:
+    document = _workflow_document()
     assert "jobs" in document
     assert "deployment-gate" in document["jobs"]
     assert "reconcile" in document["jobs"]
+
+
+def test_runtime_persistence_reconcile_shell_is_parseable() -> None:
+    document = _workflow_document()
+    steps = document["jobs"]["reconcile"]["steps"]
+    reconcile = next(step for step in steps if step.get("name") == "Reconcile persistent runtime storage")
+    script = reconcile["run"]
+    result = subprocess.run(
+        ["bash", "-n"],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_runtime_persistence_reconcile_has_verify_only_path() -> None:
@@ -50,7 +71,8 @@ def test_runtime_persistence_reconcile_repairs_only_with_backup() -> None:
     assert 'cp -a "$RUNTIME_COMPOSE" "$backup"' in text
     assert "backup_state='not required'" in text
     assert 'backup_state="created: $backup"' in text
-    assert "python3 - \"$RUNTIME_COMPOSE\" \"$expected_volume\" <<'PY'" in text
+    assert "sed -i -E" in text
+    assert "printf '%s\\n' '    volumes:' '      - ./data/runtime-core:/app/data'" in text
 
 
 def test_runtime_persistence_reconcile_requires_durable_runtime_db() -> None:
