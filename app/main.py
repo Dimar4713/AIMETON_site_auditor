@@ -219,7 +219,7 @@ def health():
 @app.get("/api/search/health")
 def search_health():
     providers = [
-        item.model_dump(mode="json")
+        item.model_dump(mode="json", exclude_none=True)
         for item in get_search_gateway().health(search_policy_from_env())
     ]
     active = [item for item in providers if item["state"] == "active"]

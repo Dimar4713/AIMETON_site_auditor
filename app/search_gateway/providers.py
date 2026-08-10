@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from app.search_gateway.models import FallbackReason, SearchItem, SearchRequest
+from app.search_gateway.models import FallbackReason, SearchItem, SearchRequest, UpstreamCooldown
 
 
 class ProviderError(RuntimeError):
@@ -56,6 +56,12 @@ class SearchProvider(ABC):
 
     def consume_degradation(self, request: SearchRequest) -> ProviderDegradation | None:
         return None
+
+    def upstream_cooldowns(self) -> list[UpstreamCooldown]:
+        return []
+
+    def upstream_circuit_open(self) -> bool:
+        return False
 
     @abstractmethod
     async def search(
@@ -183,6 +189,7 @@ class SearxngProvider(HttpSearchProvider):
         self._engine_error_cooldown_seconds = max(0.0, float(engine_error_cooldown_seconds))
         self._clock = clock
         self._engine_cooldown_until: dict[str, float] = {}
+        self._engine_cooldown_reasons: dict[str, FallbackReason] = {}
         self._degradations: dict[int, ProviderDegradation] = {}
 
     @property
@@ -228,13 +235,44 @@ class SearxngProvider(HttpSearchProvider):
             if canonical is None:
                 continue
             key = canonical.casefold()
-            self._engine_cooldown_until[key] = max(
-                self._engine_cooldown_until.get(key, 0.0),
-                blocked_until,
-            )
+            previous_until = self._engine_cooldown_until.get(key, 0.0)
+            if blocked_until >= previous_until:
+                self._engine_cooldown_until[key] = blocked_until
+                self._engine_cooldown_reasons[key] = degradation.reason
 
     def consume_degradation(self, request: SearchRequest) -> ProviderDegradation | None:
         return self._degradations.pop(id(request), None)
+
+    def upstream_cooldowns(self) -> list[UpstreamCooldown]:
+        now = self._clock()
+        rows: list[UpstreamCooldown] = []
+        for engine in self._engines:
+            key = engine.casefold()
+            until = self._engine_cooldown_until.get(key, 0.0)
+            if until <= now:
+                self._engine_cooldown_until.pop(key, None)
+                self._engine_cooldown_reasons.pop(key, None)
+                continue
+            remaining = max(1, int((until - now) + 0.999999))
+            rows.append(
+                UpstreamCooldown(
+                    upstream=engine,
+                    reason=self._engine_cooldown_reasons.get(
+                        key, FallbackReason.PROVIDER_ERROR
+                    ),
+                    retry_after_seconds=remaining,
+                )
+            )
+        return rows
+
+    def upstream_circuit_open(self) -> bool:
+        if not self._engines:
+            return False
+        now = self._clock()
+        return all(
+            self._engine_cooldown_until.get(engine.casefold(), 0.0) > now
+            for engine in self._engines
+        )
 
     @staticmethod
     def _classify_unresponsive(unresponsive: object) -> ProviderDegradation | None:
