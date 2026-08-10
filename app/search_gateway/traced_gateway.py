@@ -5,8 +5,14 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from app.search_gateway.gateway import SearchGateway, request_fingerprint
-from app.search_gateway.models import SearchItem, SearchPolicy, SearchRequest, SearchResponse
+from app.search_gateway.gateway import HARD_UPSTREAM_FAILURES, SearchGateway, request_fingerprint
+from app.search_gateway.models import (
+    FallbackReason,
+    SearchItem,
+    SearchPolicy,
+    SearchRequest,
+    SearchResponse,
+)
 from app.search_gateway.trace_bridge import persist_provider_waterfall
 from app.trace_context import current_trace_identity
 from app.trace_ledger import TraceEventCreate, TraceState
@@ -33,6 +39,22 @@ class TracedSearchGateway(SearchGateway):
             os.getenv("AIMETON_RUNTIME_DB", "data/runtime-core.sqlite3"),
         )
         self._trace_ledger = InstrumentedSQLiteTraceLedger(configured)
+
+    async def _record_failure(
+        self,
+        provider: str,
+        reason: FallbackReason = FallbackReason.PROVIDER_ERROR,
+    ) -> None:
+        provider_impl = self._providers.get(provider)
+        if provider_impl is not None and reason in HARD_UPSTREAM_FAILURES:
+            cooldowns = provider_impl.upstream_cooldowns()
+            if cooldowns and not provider_impl.upstream_circuit_open():
+                # A multi-upstream provider such as SearXNG has already isolated
+                # the failed engines. Keep the provider routable while at least
+                # one configured upstream remains eligible instead of opening a
+                # coarse provider-wide circuit on the first CAPTCHA/403/429.
+                return
+        await super()._record_failure(provider, reason)
 
     async def search(
         self,
