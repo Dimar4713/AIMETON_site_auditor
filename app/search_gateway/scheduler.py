@@ -5,7 +5,13 @@ import random
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
-from app.search_gateway.models import FallbackReason, SearchItem, SearchRequest, UpstreamCooldown
+from app.search_gateway.models import (
+    FallbackReason,
+    ProviderScheduling,
+    SearchItem,
+    SearchRequest,
+    UpstreamCooldown,
+)
 from app.search_gateway.providers import ProviderDegradation, SearchProvider
 
 
@@ -85,6 +91,13 @@ class ScheduledProvider(SearchProvider):
 
     def upstream_circuit_open(self) -> bool:
         return self._provider.upstream_circuit_open()
+
+    def scheduling_policy(self) -> ProviderScheduling:
+        return ProviderScheduling(
+            max_concurrency=self.max_concurrency,
+            jitter_min_seconds=self._jitter_min_seconds,
+            jitter_max_seconds=self._jitter_max_seconds,
+        )
 
     async def search(
         self,

@@ -13,7 +13,13 @@ from typing import Any
 
 import httpx
 
-from app.search_gateway.models import FallbackReason, SearchItem, SearchRequest, UpstreamCooldown
+from app.search_gateway.models import (
+    FallbackReason,
+    ProviderScheduling,
+    SearchItem,
+    SearchRequest,
+    UpstreamCooldown,
+)
 
 
 class ProviderError(RuntimeError):
@@ -62,6 +68,9 @@ class SearchProvider(ABC):
 
     def upstream_circuit_open(self) -> bool:
         return False
+
+    def scheduling_policy(self) -> ProviderScheduling | None:
+        return None
 
     @abstractmethod
     async def search(
