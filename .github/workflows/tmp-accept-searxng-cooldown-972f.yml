@@ -1,0 +1,101 @@
+name: Temporary Accept SearXNG Cooldown 972F
+
+on:
+  push:
+    branches:
+      - diag/accept-searxng-cooldown-972f
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 5
+    steps:
+      - name: Verify deployed cooldown defaults and fail-closed behavior
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='972feda94357ffaf7fbadc8aa85bded8981e8132'
+          deployed="$(cat /opt/aimeton/auditor-stack/app-source-sha.txt)"
+          [[ "$deployed" == "$expected" ]]
+          docker exec -i aimeton-auditor python - <<'PY'
+          import asyncio
+          import json
+
+          import httpx
+
+          from app.search_gateway.factory import _float_env
+          from app.search_gateway.models import FallbackReason, SearchRequest
+          from app.search_gateway.providers import ProviderError, SearxngProvider
+
+          rate = _float_env(
+              'SEARXNG_ENGINE_RATE_LIMIT_COOLDOWN_SECONDS',
+              3600.0,
+              minimum=0.0,
+              maximum=604800.0,
+          )
+          block = _float_env(
+              'SEARXNG_ENGINE_BLOCK_COOLDOWN_SECONDS',
+              86400.0,
+              minimum=0.0,
+              maximum=2592000.0,
+          )
+          generic = _float_env(
+              'SEARXNG_ENGINE_ERROR_COOLDOWN_SECONDS',
+              60.0,
+              minimum=0.0,
+              maximum=86400.0,
+          )
+          assert (rate, block, generic) == (3600.0, 86400.0, 60.0), (rate, block, generic)
+
+          calls = 0
+          def handler(request: httpx.Request) -> httpx.Response:
+              nonlocal_calls[0] += 1
+              raise AssertionError('HTTP must not be called while all engines are cooling down')
+
+          nonlocal_calls = [0]
+          clock = lambda: 1000.0
+          provider = SearxngProvider(
+              'https://search.invalid',
+              engines=('duckduckgo', 'startpage'),
+              engine_fanout=2,
+              engine_rate_limit_cooldown_seconds=rate,
+              engine_block_cooldown_seconds=block,
+              engine_error_cooldown_seconds=generic,
+              clock=clock,
+              transport=httpx.MockTransport(handler),
+          )
+          provider._engine_cooldown_until = {
+              'duckduckgo': 2000.0,
+              'startpage': 2000.0,
+          }
+          request = SearchRequest(
+              query='zero provider acceptance',
+              limit=1,
+              language='ru-RU',
+              mission_id='accept-searxng-cooldown-972f',
+              correlation_id='accept-searxng-cooldown-972f',
+          )
+
+          async def main() -> None:
+              try:
+                  await provider.search(request, timeout_seconds=1.0)
+              except ProviderError as exc:
+                  assert exc.reason is FallbackReason.CIRCUIT_OPEN, exc.reason
+                  assert exc.retryable is False
+              else:
+                  raise AssertionError('expected fail-closed circuit_open')
+
+          asyncio.run(main())
+          assert nonlocal_calls[0] == 0, nonlocal_calls[0]
+          print(json.dumps({
+              'deployed_sha': '972feda94357ffaf7fbadc8aa85bded8981e8132',
+              'rate_limit_cooldown_seconds': rate,
+              'block_cooldown_seconds': block,
+              'generic_error_cooldown_seconds': generic,
+              'all_engines_cooling': 'circuit_open',
+              'provider_calls': 0,
+          }, sort_keys=True))
+          PY
