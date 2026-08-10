@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
 from app.search_gateway.models import FallbackReason, SearchItem, SearchRequest
-from app.search_gateway.providers import SearchProvider
+from app.search_gateway.providers import ProviderDegradation, SearchProvider
 
 
 SleepFn = Callable[[float], Awaitable[None]]
@@ -76,6 +76,9 @@ class ScheduledProvider(SearchProvider):
     @property
     def execution_block_reason(self) -> FallbackReason | None:
         return self._provider.execution_block_reason
+
+    def consume_degradation(self, request: SearchRequest) -> ProviderDegradation | None:
+        return self._provider.consume_degradation(request)
 
     async def search(
         self,
