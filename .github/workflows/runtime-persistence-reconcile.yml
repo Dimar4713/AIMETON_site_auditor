@@ -117,26 +117,11 @@ jobs:
             backup_state="created: $backup"
 
             if [[ "$compose_correct" != yes ]]; then
-              python3 - "$RUNTIME_COMPOSE" "$expected_volume" <<'PY'
-              from pathlib import Path
-              import sys
-
-              path = Path(sys.argv[1])
-              expected = sys.argv[2]
-              lines = path.read_text(encoding='utf-8').splitlines()
-              replaced = False
-              for index, line in enumerate(lines):
-                  if '/app/data' in line:
-                      indent = line[: len(line) - len(line.lstrip())]
-                      lines[index] = f'{indent}- {expected}'
-                      replaced = True
-                      break
-              if not replaced:
-                  if lines and lines[-1].strip():
-                      lines.append('')
-                  lines.extend(['    volumes:', f'      - {expected}'])
-              path.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
-              PY
+              if grep -Fq '/app/data' "$RUNTIME_COMPOSE"; then
+                sed -i -E 's#^([[:space:]]*)- .*:/app/data[[:space:]]*$#\1- ./data/runtime-core:/app/data#' "$RUNTIME_COMPOSE"
+              else
+                printf '%s\n' '    volumes:' '      - ./data/runtime-core:/app/data' >> "$RUNTIME_COMPOSE"
+              fi
             fi
           fi
 
