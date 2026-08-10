@@ -131,6 +131,12 @@ def search_policy_from_env() -> SearchPolicy:
         max_cost_by_currency=budgets,
         timeout_seconds=float(os.getenv("SEARCH_TIMEOUT_SECONDS", "15")),
         retries=int(os.getenv("SEARCH_RETRIES", "1")),
+        retry_backoff_base_seconds=_float_env(
+            "SEARCH_RETRY_BACKOFF_BASE_SECONDS", 0.5, minimum=0.0, maximum=30.0
+        ),
+        retry_backoff_max_seconds=_float_env(
+            "SEARCH_RETRY_BACKOFF_MAX_SECONDS", 4.0, minimum=0.0, maximum=120.0
+        ),
         cache_ttl_seconds=int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "900")),
     )
 

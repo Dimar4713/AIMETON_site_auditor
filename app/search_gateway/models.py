@@ -107,6 +107,8 @@ class SearchPolicy(GatewayModel):
     max_cost_by_currency: dict[str, Decimal] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=15.0, ge=0.1, le=120)
     retries: int = Field(default=1, ge=0, le=3)
+    retry_backoff_base_seconds: float = Field(default=0.5, ge=0.0, le=30.0)
+    retry_backoff_max_seconds: float = Field(default=4.0, ge=0.0, le=120.0)
     cache_ttl_seconds: int = Field(default=900, ge=0, le=86400)
 
 

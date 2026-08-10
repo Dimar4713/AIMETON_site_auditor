@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -110,6 +111,7 @@ class SearchGateway:
         failure_threshold: int = 3,
         recovery_seconds: float = 60.0,
         global_quotas: dict[str, int] | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._providers = {provider.name: provider for provider in providers}
         self._cache = cache or MemorySearchCache()
@@ -120,6 +122,7 @@ class SearchGateway:
         self._global_quotas = dict(global_quotas or {})
         self._global_usage = {name: 0 for name in self._providers}
         self._mission_costs: dict[str, dict[str, Decimal]] = {}
+        self._sleep = sleep
         self._lock = asyncio.Lock()
 
     def _circuit_state(self, provider: str) -> str:
@@ -371,6 +374,12 @@ class SearchGateway:
                 if retry_blocked:
                     error_reason = retry_blocked
                     break
+                backoff_seconds = min(
+                    policy.retry_backoff_max_seconds,
+                    policy.retry_backoff_base_seconds * (2 ** (retry - 1)),
+                )
+                if backoff_seconds > 0:
+                    await self._sleep(backoff_seconds)
             try:
                 calls_made += 1
                 results = await provider.search(request, timeout_seconds=policy.timeout_seconds)
