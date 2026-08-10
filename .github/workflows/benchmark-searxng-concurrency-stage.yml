@@ -1,0 +1,105 @@
+name: Benchmark SearXNG Concurrency Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed Stage source SHA to benchmark
+        required: true
+        type: string
+      allow_live_calls:
+        description: Explicitly authorize the 1/2/3/6 live SearXNG benchmark matrix
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aimeton-benchmark-searxng-concurrency-stage
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate dispatch identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${{ github.ref }}" == "refs/heads/main" ]]
+          [[ "${{ github.sha }}" == "$expected" ]]
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
+
+      - name: Publish zero-call benchmark plan
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/benchmark_searxng_concurrency.py \
+            --output /tmp/searxng-concurrency-plan.json | tee "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload zero-call plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: searxng-concurrency-plan-${{ github.run_id }}
+          path: /tmp/searxng-concurrency-plan.json
+          retention-days: 30
+
+  live:
+    if: ${{ inputs.allow_live_calls == true }}
+    needs: plan
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 30
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      REPORT: /tmp/searxng-concurrency-benchmark-${{ github.run_id }}.json
+
+    steps:
+      - name: Require exact deployed SHA and healthy Stage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${{ github.ref }}" == "refs/heads/main" ]]
+          [[ "${{ github.sha }}" == "$expected" ]]
+          deployed="$(cat "$STACK_DIR/app-source-sha.txt")"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$expected" ]]
+          [[ "$status" == "healthy" ]]
+
+      - name: Reconfirm planned load before live calls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i "$CONTAINER" python scripts/benchmark_searxng_concurrency.py
+
+      - name: Execute owner-authorized SearXNG-only matrix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          result="$(docker exec \
+            -e BENCHMARK_DEPLOYED_SHA="$expected" \
+            -i "$CONTAINER" \
+            python scripts/benchmark_searxng_concurrency.py --live --allow-live-calls)"
+          printf '%s\n' "$result" | tee "$REPORT" "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: searxng-concurrency-benchmark-${{ github.run_id }}
+          path: ${{ env.REPORT }}
+          if-no-files-found: warn
+          retention-days: 30
