@@ -349,6 +349,101 @@
     }
   }
 
+  function companySalesPackageMarkdown(data) {
+    const analysis = data.site_analysis || {};
+    const facts = Array.isArray(analysis.company_facts) ? analysis.company_facts : [];
+    const opportunity = analysis.commercial_opportunity || null;
+    const action = analysis.action_package || null;
+    const readiness = analysis.readiness || null;
+    const form = document.querySelector('#companyIntelligenceForm');
+    const companyName = String(data.company_name || document.querySelector('#companyName')?.value || 'Компания').trim();
+    const url = safeHttpUrl(data.official_url || document.querySelector('#companyUrl')?.value || '');
+    const region = String(data.region || document.querySelector('#companyRegion')?.value || '').trim();
+    const leadFit = String(form?.dataset.hunterLeadFit || '').trim();
+    const leadFitReason = String(form?.dataset.hunterLeadFitReason || '').trim();
+    const leadFitLabels = {
+      commercial_candidate: 'Коммерческий кандидат',
+      unknown_candidate: 'Коммерческий статус не подтверждён',
+      institutional_candidate: 'Институциональная организация',
+    };
+
+    const lines = [
+      `# Sales-пакет — ${companyName}`,
+      '',
+      '## Контекст',
+      `- Компания: ${companyName}`,
+    ];
+    if (url) lines.push(`- Сайт: ${url}`);
+    if (region) lines.push(`- Регион: ${region}`);
+    if (leadFitLabels[leadFit]) lines.push(`- Hunter lead-fit: ${leadFitLabels[leadFit]}`);
+    if (leadFitReason) lines.push(`- Основание lead-fit: ${leadFitReason}`);
+
+    const exportFacts = facts.filter(fact => COMPANY_FACT_LABELS[fact.field] && String(fact.value || '').trim()).slice(0, 12);
+    lines.push('', '## Подтверждённые / структурированные факты');
+    if (!exportFacts.length) {
+      lines.push('- Подтверждённые контактные/идентификационные факты не получены.');
+    } else {
+      exportFacts.forEach(fact => {
+        const refs = Array.isArray(fact.source_ids) && fact.source_ids.length ? `; источники: ${fact.source_ids.join(', ')}` : '';
+        const period = fact.period ? `; период: ${fact.period}` : '';
+        lines.push(`- ${COMPANY_FACT_LABELS[fact.field]}: ${String(fact.value)} (уверенность: ${fact.confidence || 'не указана'}${period}${refs})`);
+      });
+    }
+
+    lines.push('', '## Коммерческая возможность — гипотеза, не подтверждённый факт');
+    if (opportunity) {
+      if (opportunity.problem_hypothesis) lines.push(`- Проблема: ${opportunity.problem_hypothesis}`);
+      if (opportunity.recommended_solution) lines.push(`- Решение: ${opportunity.recommended_solution}`);
+      if (opportunity.expected_value) lines.push(`- Ожидаемая ценность: ${opportunity.expected_value}`);
+      lines.push(`- Квалификация: ${opportunity.qualification || 'не определена'}; балл: ${opportunity.score ?? '—'}/100`);
+    } else {
+      lines.push('- Гипотеза не сформирована.');
+    }
+
+    lines.push('', '## Рабочие гипотезы и действия');
+    if (action?.decision_maker_hypothesis) lines.push(`- ЛПР — гипотеза: ${action.decision_maker_hypothesis}`);
+    if (action?.contact_reason) lines.push(`- Причина контакта — гипотеза: ${action.contact_reason}`);
+    if (Array.isArray(action?.demo_scenario) && action.demo_scenario.length) {
+      lines.push(`- Демо-сценарий — рабочая гипотеза: ${action.demo_scenario.join(' → ')}`);
+    }
+    if (action?.first_message) {
+      lines.push('', '### Первое сообщение — черновик — не отправлено', '', action.first_message);
+    }
+    if (action?.next_action) lines.push('', `- Следующий шаг — предлагаемое действие: ${action.next_action}`);
+
+    lines.push('', '## Готовность и ограничения');
+    if (readiness && (readiness.client_release_eligible === false || (readiness.release_blockers || []).length)) {
+      lines.push('- Предварительный результат: требуется проверка перед внешним использованием.');
+      const blockers = Array.isArray(readiness.release_blockers) ? readiness.release_blockers : [];
+      if (blockers.length) lines.push(`- Блокеры выпуска: ${blockers.join(', ')}`);
+    } else {
+      lines.push('- Статус выпуска отдельно не ограничен данными результата; перед внешним использованием всё равно требуется человеческая проверка.');
+    }
+    lines.push('', '> Человеческий контроль: этот пакет только скопирован в буфер обмена. Никакое сообщение не отправлено и никакое внешнее действие не выполнено.');
+    return lines.join('\n');
+  }
+
+  function appendSalesPackageCopyAction(output, data, status) {
+    output.querySelector('.company-sales-package-copy')?.remove();
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn-ghost company-sales-package-copy';
+    button.textContent = 'Скопировать sales-пакет';
+    button.addEventListener('click', async () => {
+      try {
+        if (!navigator.clipboard?.writeText) {
+          throw new Error('буфер обмена недоступен в этом браузере');
+        }
+        const packageText = companySalesPackageMarkdown(data);
+        await navigator.clipboard.writeText(packageText);
+        setStatus(status, 'Sales-пакет скопирован. Проверьте текст перед внешним использованием.', 'success');
+      } catch (error) {
+        setStatus(status, `Не удалось скопировать sales-пакет: ${error.message}`, 'error');
+      }
+    });
+    output.append(button);
+  }
+
   const companyForm = document.querySelector('#companyIntelligenceForm');
   companyForm?.addEventListener('submit', async event => {
     event.preventDefault();
@@ -359,6 +454,7 @@
     button.disabled = true;
     output.hidden = true;
     list.replaceChildren();
+    output.querySelector('.company-sales-package-copy')?.remove();
     setStatus(status, 'Исследуем компанию и открытые источники…');
     try {
       const companyName = document.querySelector('#companyName').value.trim();
@@ -372,6 +468,7 @@
       (data.scent_summary || []).slice(0, 6).forEach((item, index) => appendItem(list, `Сигнал ${index + 1}`, item));
       renderCompanySalesHandoff(list, data);
       appendItem(list, 'Источники', `Найдено: ${(data.sources || []).length}`);
+      appendSalesPackageCopyAction(output, data, status);
       output.hidden = false;
       setStatus(status, 'Профиль компании подготовлен.', 'success');
     } catch (error) {
