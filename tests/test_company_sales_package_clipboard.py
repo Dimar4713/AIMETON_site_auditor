@@ -8,6 +8,12 @@ def _function_body(name: str, next_name: str) -> str:
     return CATALOG.split(f"function {name}", 1)[1].split(f"function {next_name}", 1)[0]
 
 
+def _clipboard_action_body() -> str:
+    return CATALOG.split(
+        "function appendSalesPackageCopyAction(output, data, status) {", 1
+    )[1].split("const companyForm = document.querySelector('#companyIntelligenceForm');", 1)[0]
+
+
 def test_sales_package_copy_action_exists_only_after_company_result() -> None:
     assert "function appendSalesPackageCopyAction(output, data, status)" in CATALOG
     assert "button.textContent = 'Скопировать sales-пакет'" in CATALOG
@@ -47,14 +53,14 @@ def test_export_preserves_hunter_lead_fit_context() -> None:
 
 
 def test_clipboard_action_has_no_network_submit_or_outreach() -> None:
-    copy = _function_body("appendSalesPackageCopyAction(output, data, status) {", "const companyForm")
+    copy = _clipboard_action_body()
     assert "navigator.clipboard.writeText(packageText)" in copy
     for forbidden in ("fetch(", "postJson(", "requestSubmit(", ".submit(", "sendEmail", "sendMessage"):
         assert forbidden not in copy
 
 
 def test_clipboard_failure_is_visible_to_operator() -> None:
-    copy = _function_body("appendSalesPackageCopyAction(output, data, status) {", "const companyForm")
+    copy = _clipboard_action_body()
     assert "буфер обмена недоступен в этом браузере" in copy
     assert "Не удалось скопировать sales-пакет:" in copy
     assert "Sales-пакет скопирован. Проверьте текст перед внешним использованием." in copy
