@@ -226,7 +226,7 @@ def get_search_gateway() -> TracedSearchGateway:
                 maximum=86400.0,
             ),
         ),
-        concurrency_env="SEARCH_CONCURRENCY_SEARXNG", concurrency_default=2,
+        concurrency_env="SEARCH_CONCURRENCY_SEARXNG", concurrency_default=1,
         jitter_min_env="SEARCH_JITTER_SEARXNG_MIN_SECONDS", jitter_min_default=0.2,
         jitter_max_env="SEARCH_JITTER_SEARXNG_MAX_SECONDS", jitter_max_default=0.8,
     )
