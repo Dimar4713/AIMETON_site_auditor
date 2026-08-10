@@ -1,0 +1,88 @@
+name: Temporary Patch Hunter Lead Fit
+
+on:
+  push:
+    branches:
+      - fix/hunter-lead-fit-ranking
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[lead-fit-patched]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/hunter-lead-fit-ranking
+          fetch-depth: 1
+
+      - name: Apply guarded lead-fit patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/discovery.py')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  'from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries\nfrom app.hunter_query_intelligence import generate_hunter_query_plan\n',
+                  'from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries\nfrom app.hunter_lead_fit import classify_lead_fit, lead_fit_rank\nfrom app.hunter_query_intelligence import generate_hunter_query_plan\n',
+              ),
+              (
+                  '''    return HuntCandidate(\n        company_name=title or _domain(url),\n''',
+                  '''    source_role = classify_source_role(title, snippet, url)\n    lead_fit = classify_lead_fit(\n        title=title,\n        snippet=snippet,\n        url=url,\n        source_role=source_role,\n    )\n    return HuntCandidate(\n        company_name=title or _domain(url),\n''',
+              ),
+              (
+                  '''        recommended_solution=recommendation,\n        reasons=result.reasons,\n        analysis=None,\n''',
+                  '''        recommended_solution=recommendation,\n        reasons=result.reasons,\n        lead_fit=lead_fit.fit,\n        lead_fit_reason=lead_fit.reason,\n        lead_fit_evidence=list(lead_fit.evidence),\n        analysis=None,\n''',
+              ),
+              (
+                  '''            qualification = analysis.commercial_opportunity.qualification\n            if not region_confirmed:\n''',
+                  '''            qualification = analysis.commercial_opportunity.qualification\n            source_role = classify_source_role(display_title, snippet, url)\n            lead_fit = classify_lead_fit(\n                title=display_title,\n                snippet=snippet,\n                url=url,\n                source_role=source_role,\n                analysis=analysis,\n            )\n            if not region_confirmed:\n''',
+              ),
+              (
+                  '''                    "source_host": host,\n                    "source_role": classify_source_role(display_title, snippet, url),\n''',
+                  '''                    "source_host": host,\n                    "source_role": source_role,\n                    "lead_fit": lead_fit.fit,\n                    "lead_fit_reason": lead_fit.reason,\n                    "lead_fit_evidence": list(lead_fit.evidence),\n''',
+              ),
+              (
+                  '''                recommended_solution=analysis.commercial_opportunity.recommended_solution,\n                reasons=reasons,\n                analysis=analysis,\n''',
+                  '''                recommended_solution=analysis.commercial_opportunity.recommended_solution,\n                reasons=reasons,\n                lead_fit=lead_fit.fit,\n                lead_fit_reason=lead_fit.reason,\n                lead_fit_evidence=list(lead_fit.evidence),\n                analysis=analysis,\n''',
+              ),
+              (
+                  '''            role_rank(_candidate_rank_role(candidate)),\n            candidate.pre_score_status == "calculated",\n''',
+                  '''            role_rank(_candidate_rank_role(candidate)),\n            lead_fit_rank(candidate.lead_fit),\n            candidate.pre_score_status == "calculated",\n''',
+              ),
+              (
+                  '''                    "deep_analysis_performed": candidate.deep_analysis_performed,\n                    "source_role": _candidate_rank_role(candidate),\n''',
+                  '''                    "deep_analysis_performed": candidate.deep_analysis_performed,\n                    "source_role": _candidate_rank_role(candidate),\n                    "lead_fit": candidate.lead_fit,\n                    "lead_fit_reason": candidate.lead_fit_reason,\n                    "lead_fit_evidence": candidate.lead_fit_evidence,\n''',
+              ),
+              (
+                  '''                metadata={"qualification": candidate.qualification, "source_role": _candidate_rank_role(candidate)},\n''',
+                  '''                metadata={\n                    "qualification": candidate.qualification,\n                    "source_role": _candidate_rank_role(candidate),\n                    "lead_fit": candidate.lead_fit,\n                    "lead_fit_reason": candidate.lead_fit_reason,\n                },\n''',
+              ),
+              (
+                  '''            "Каталоги, рейтинги и редакционные источники сохраняются для проверки, но не конкурируют с прямыми компаниями в lead-ranking.",\n''',
+                  '''            "Каталоги, рейтинги и редакционные источники сохраняются для проверки, но не конкурируют с прямыми компаниями в lead-ranking.",\n            "Внутри сопоставимого качества прямых сайтов коммерчески подтвержденные кандидаты ранжируются выше неизвестных, а явно институциональные остаются в разведке ниже них.",\n''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one discovery replacement, found {count}: {old[:160]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          python -m py_compile app/discovery.py app/hunter_lead_fit.py app/models.py
+          git config user.name 'AIMETON Hunter Lead Fit'
+          git config user.email '127470701+Dimar4713@users.noreply.github.com'
+          git add app/discovery.py
+          git commit -m 'Integrate Hunter lead-fit ranking [lead-fit-patched]'
+          git push origin HEAD:fix/hunter-lead-fit-ranking
