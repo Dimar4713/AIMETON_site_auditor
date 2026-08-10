@@ -375,6 +375,7 @@ class SearchGateway:
 
         started = time.perf_counter()
         error_reason: FallbackReason | None = None
+        degradation = None
         results: list[SearchItem] = []
         calls_made = 0
         for retry in range(policy.retries + 1):
@@ -398,6 +399,7 @@ class SearchGateway:
             try:
                 calls_made += 1
                 results = await provider.search(request, timeout_seconds=policy.timeout_seconds)
+                degradation = provider.consume_degradation(request)
                 error_reason = None
                 break
             except ProviderError as exc:
@@ -452,7 +454,12 @@ class SearchGateway:
                 request_fingerprint=fingerprint,
                 latency_ms=latency_ms,
                 result_count=len(results),
-                reason=None if results else FallbackReason.EMPTY_RESULTS,
+                reason=(
+                    degradation.reason
+                    if degradation is not None
+                    else (None if results else FallbackReason.EMPTY_RESULTS)
+                ),
+                degraded_upstreams=list(degradation.upstreams) if degradation is not None else [],
                 cost_amount=charged,
                 cost_currency=provider.cost_currency,
             ),
@@ -462,7 +469,11 @@ class SearchGateway:
     def _diagnostic_state(attempts: list[ProviderAttempt], *, has_results: bool) -> GatewayState:
         if not any(attempt.state in {AttemptState.SUCCEEDED, AttemptState.EMPTY, AttemptState.FAILED} for attempt in attempts):
             return GatewayState.UNAVAILABLE
-        if not has_results or any(attempt.state == AttemptState.FAILED for attempt in attempts):
+        if (
+            not has_results
+            or any(attempt.state == AttemptState.FAILED for attempt in attempts)
+            or any(attempt.degraded_upstreams for attempt in attempts)
+        ):
             return GatewayState.DEGRADED
         return GatewayState.SUCCESS
 
@@ -475,10 +486,14 @@ class SearchGateway:
         fallback_used: bool,
         state: GatewayState | None = None,
     ) -> SearchResponse:
+        diagnostic_state = self._diagnostic_state(attempts, has_results=bool(results))
+        effective_state = state or diagnostic_state
+        if state is GatewayState.SUCCESS and diagnostic_state is not GatewayState.SUCCESS:
+            effective_state = diagnostic_state
         return SearchResponse(
             results=results,
             diagnostics=SearchDiagnostics(
-                state=state or self._diagnostic_state(attempts, has_results=bool(results)),
+                state=effective_state,
                 selected_provider="+".join(selected_providers) or None,
                 fallback_used=fallback_used,
                 attempts=attempts,

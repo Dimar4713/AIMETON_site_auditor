@@ -21,6 +21,7 @@ def provider_waterfall(diagnostics: SearchDiagnostics) -> list[dict[str, Any]]:
                 "called": attempt.state.value not in {"skipped", "cache_hit"},
                 "state": attempt.state.value,
                 "reason": attempt.reason.value if attempt.reason else None,
+                "degraded_upstreams": list(attempt.degraded_upstreams),
                 "latency_ms": attempt.latency_ms,
                 "results_received": attempt.result_count,
                 "cost": {

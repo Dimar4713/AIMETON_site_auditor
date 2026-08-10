@@ -119,6 +119,7 @@ class ProviderAttempt(GatewayModel):
     latency_ms: int = Field(ge=0)
     result_count: int = Field(ge=0)
     reason: FallbackReason | None = None
+    degraded_upstreams: list[str] = Field(default_factory=list, max_length=16)
     cost_amount: Decimal = Field(default=Decimal("0"), ge=0)
     cost_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
 

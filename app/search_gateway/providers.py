@@ -5,6 +5,7 @@ import hashlib
 import html
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -26,6 +27,12 @@ class ProviderError(RuntimeError):
         self.reason = reason
 
 
+@dataclass(frozen=True)
+class ProviderDegradation:
+    reason: FallbackReason
+    upstreams: tuple[str, ...]
+
+
 class SearchProvider(ABC):
     name: str
     paid: bool
@@ -43,6 +50,9 @@ class SearchProvider(ABC):
 
     @property
     def execution_block_reason(self) -> FallbackReason | None:
+        return None
+
+    def consume_degradation(self, request: SearchRequest) -> ProviderDegradation | None:
         return None
 
     @abstractmethod
@@ -162,6 +172,7 @@ class SearxngProvider(HttpSearchProvider):
         self._base_url = (base_url or "").strip().rstrip("/")
         self._engines = tuple(item.strip() for item in engines if item.strip())
         self._engine_fanout = max(1, int(engine_fanout)) if engine_fanout is not None else None
+        self._degradations: dict[int, ProviderDegradation] = {}
 
     @property
     def configured(self) -> bool:
@@ -180,7 +191,41 @@ class SearxngProvider(HttpSearchProvider):
             for offset in range(self._engine_fanout)
         )
 
+    def consume_degradation(self, request: SearchRequest) -> ProviderDegradation | None:
+        return self._degradations.pop(id(request), None)
+
+    @staticmethod
+    def _classify_unresponsive(unresponsive: object) -> ProviderDegradation | None:
+        if not isinstance(unresponsive, list) or not unresponsive:
+            return None
+        failed_names: list[str] = []
+        failure_text: list[str] = []
+        for item in unresponsive[:16]:
+            if isinstance(item, (list, tuple)) and item:
+                name = str(item[0]).strip()
+                if name and name not in failed_names:
+                    failed_names.append(name)
+                failure_text.extend(str(part) for part in item[1:])
+            elif isinstance(item, str):
+                name = item.strip()
+                if name and name not in failed_names:
+                    failed_names.append(name)
+                failure_text.append(item)
+        diagnostic = " ".join(failure_text).casefold()
+        if "captcha" in diagnostic or "recaptcha" in diagnostic:
+            reason = FallbackReason.CAPTCHA
+        elif "too many" in diagnostic or "429" in diagnostic or "rate" in diagnostic:
+            reason = FallbackReason.RATE_LIMITED
+        elif "access denied" in diagnostic or "403" in diagnostic or "forbidden" in diagnostic:
+            reason = FallbackReason.PROVIDER_BLOCKED
+        elif "protocol" in diagnostic or "parse" in diagnostic:
+            reason = FallbackReason.PROTOCOL_ERROR
+        else:
+            reason = FallbackReason.PROVIDER_ERROR
+        return ProviderDegradation(reason=reason, upstreams=tuple(failed_names))
+
     async def search(self, request: SearchRequest, *, timeout_seconds: float) -> list[SearchItem]:
+        self._degradations.pop(id(request), None)
         params: dict[str, str | int] = {
             "q": request.query,
             "format": "json",
@@ -209,34 +254,17 @@ class SearxngProvider(HttpSearchProvider):
             if isinstance(item, dict) and item.get("url")
         ][: request.limit]
 
-        unresponsive = payload.get("unresponsive_engines") or []
-        if not results and isinstance(unresponsive, list) and unresponsive:
-            failed_names: list[str] = []
-            failure_text: list[str] = []
-            for item in unresponsive[:8]:
-                if isinstance(item, (list, tuple)) and item:
-                    failed_names.append(str(item[0]))
-                    failure_text.extend(str(part) for part in item[1:])
-                elif isinstance(item, str):
-                    failed_names.append(item)
-                    failure_text.append(item)
-            diagnostic = " ".join(failure_text).casefold()
-            if "captcha" in diagnostic or "recaptcha" in diagnostic:
-                reason = FallbackReason.CAPTCHA
-            elif "too many" in diagnostic or "429" in diagnostic or "rate" in diagnostic:
-                reason = FallbackReason.RATE_LIMITED
-            elif "access denied" in diagnostic or "403" in diagnostic or "forbidden" in diagnostic:
-                reason = FallbackReason.PROVIDER_BLOCKED
-            elif "protocol" in diagnostic or "parse" in diagnostic:
-                reason = FallbackReason.PROTOCOL_ERROR
+        degradation = self._classify_unresponsive(payload.get("unresponsive_engines") or [])
+        if degradation is not None:
+            if results:
+                self._degradations[id(request)] = degradation
             else:
-                reason = FallbackReason.PROVIDER_ERROR
-            suffix = f" ({', '.join(failed_names)})" if failed_names else ""
-            raise ProviderError(
-                f"searxng upstream engines unavailable{suffix}",
-                retryable=reason is FallbackReason.PROVIDER_ERROR,
-                reason=reason,
-            )
+                suffix = f" ({', '.join(degradation.upstreams)})" if degradation.upstreams else ""
+                raise ProviderError(
+                    f"searxng upstream engines unavailable{suffix}",
+                    retryable=degradation.reason is FallbackReason.PROVIDER_ERROR,
+                    reason=degradation.reason,
+                )
         return results
 
 

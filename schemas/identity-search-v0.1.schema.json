@@ -350,6 +350,14 @@
           "title": "Cost Currency",
           "type": "string"
         },
+        "degraded_upstreams": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Degraded Upstreams",
+          "type": "array"
+        },
         "latency_ms": {
           "minimum": 0,
           "title": "Latency Ms",

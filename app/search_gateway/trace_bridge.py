@@ -67,6 +67,8 @@ def _terminal_reason(row: dict[str, object]) -> str:
     state = str(row["state"])
     results_received = int(row["results_received"])
     if state == AttemptState.SUCCEEDED.value and results_received > 0:
+        if row.get("degraded_upstreams"):
+            return f"partial_{row.get('reason') or 'upstream_degraded'}"
         return "results_received"
     return str(row["reason"] or state)
 
@@ -87,12 +89,17 @@ def persist_provider_waterfall(
     for provider_index, row in enumerate(provider_waterfall(diagnostics), start=1):
         provider = row["provider"]
         final_state = _STATE_MAP[row["state"]]
+        if row.get("degraded_upstreams") and row["state"] == AttemptState.SUCCEEDED.value:
+            final_state = TraceState.DEGRADED
         reason_code = _terminal_reason(row)
         common_metadata = {
             "final_selected": row["selected"],
             "cost_amount": row["cost"]["amount"],
             "cost_currency": row["cost"]["currency"],
         }
+        if row.get("degraded_upstreams"):
+            common_metadata["degraded_upstreams"] = row["degraded_upstreams"]
+            common_metadata["partial_degradation_reason"] = row.get("reason")
 
         if row["called"]:
             events.append(
