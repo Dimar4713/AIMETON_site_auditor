@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          python scripts/benchmark_searxng_concurrency.py \
+          python -m scripts.benchmark_searxng_concurrency \
             --output /tmp/searxng-concurrency-plan.json | tee "$GITHUB_STEP_SUMMARY"
 
       - name: Upload zero-call plan
@@ -82,7 +82,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker exec -i "$CONTAINER" python scripts/benchmark_searxng_concurrency.py
+          docker exec -w /app -i "$CONTAINER" python -m scripts.benchmark_searxng_concurrency
 
       - name: Execute owner-authorized SearXNG-only matrix
         shell: bash
@@ -90,9 +90,10 @@ jobs:
           set -Eeuo pipefail
           expected='${{ inputs.expected_sha }}'
           result="$(docker exec \
+            -w /app \
             -e BENCHMARK_DEPLOYED_SHA="$expected" \
             -i "$CONTAINER" \
-            python scripts/benchmark_searxng_concurrency.py --live --allow-live-calls)"
+            python -m scripts.benchmark_searxng_concurrency --live --allow-live-calls)"
           printf '%s\n' "$result" | tee "$REPORT" "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized benchmark evidence
