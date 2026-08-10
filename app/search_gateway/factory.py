@@ -7,9 +7,12 @@ from functools import lru_cache
 from app.search_gateway.cache import SQLiteSearchCache, SearchCache
 from app.search_gateway.factory_helpers import first_nonempty_env
 from app.search_gateway.models import SearchPolicy, SearchStrategy
-from app.search_gateway.providers import SearxngProvider, TavilyProvider, YandexProvider
-from app.search_gateway.scheduler import ScheduledProvider
-from app.search_gateway.traced_gateway import TracedSearchGateway
+from app.search_gateway.providers import TavilyProvider, YandexProvider
+from app.search_gateway.upstream_telemetry import (
+    ScheduledProvider,
+    SearxngProvider,
+    TracedSearchGateway,
+)
 
 
 DEBUG_BUDGET_CEILING = Decimal("999999")
