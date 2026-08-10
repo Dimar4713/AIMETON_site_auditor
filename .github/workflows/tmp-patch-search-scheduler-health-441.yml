@@ -1,0 +1,50 @@
+name: Temporary Patch Search Scheduler Health 441
+
+on:
+  push:
+    branches:
+      - fix/search-scheduler-health-441
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/search-scheduler-health-441
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Apply guarded scheduler health patch and validate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/patch_search_scheduler_health_441.py
+          python -m py_compile \
+            app/search_gateway/models.py \
+            app/search_gateway/providers.py \
+            app/search_gateway/scheduler.py \
+            app/search_gateway/gateway.py \
+            tests/test_search_scheduler_health.py
+          pytest -q \
+            tests/test_search_scheduler_health.py \
+            tests/test_search_scheduler.py \
+            tests/test_search_provider_gateway.py \
+            tests/test_searxng_cooldown_health.py
+          git config user.name 'AIMETON Search Hardening'
+          git config user.email '127470701+Dimar4713@users.noreply.github.com'
+          git add \
+            app/search_gateway/models.py \
+            app/search_gateway/providers.py \
+            app/search_gateway/scheduler.py \
+            app/search_gateway/gateway.py
+          git commit -m 'Expose provider scheduler health [scheduler-health-patched]'
+          git push origin HEAD:fix/search-scheduler-health-441
