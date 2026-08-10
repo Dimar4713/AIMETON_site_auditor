@@ -498,6 +498,11 @@
           "title": "Cache Hit",
           "type": "boolean"
         },
+        "coalesced": {
+          "default": false,
+          "title": "Coalesced",
+          "type": "boolean"
+        },
         "fallback_used": {
           "default": false,
           "title": "Fallback Used",
