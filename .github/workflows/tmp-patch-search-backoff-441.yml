@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, '[search-backoff-patched]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -36,162 +35,39 @@ jobs:
 
           replace_once(
               'app/search_gateway/models.py',
-              '''    retries: int = Field(default=1, ge=0, le=3)\n    cache_ttl_seconds: int = Field(default=900, ge=0, le=86400)\n''',
-              '''    retries: int = Field(default=1, ge=0, le=3)\n    retry_backoff_base_seconds: float = Field(default=0.5, ge=0.0, le=30.0)\n    retry_backoff_max_seconds: float = Field(default=4.0, ge=0.0, le=120.0)\n    cache_ttl_seconds: int = Field(default=900, ge=0, le=86400)\n''',
+              '    retries: int = Field(default=1, ge=0, le=3)\n    cache_ttl_seconds: int = Field(default=900, ge=0, le=86400)\n',
+              '    retries: int = Field(default=1, ge=0, le=3)\n    retry_backoff_base_seconds: float = Field(default=0.5, ge=0.0, le=30.0)\n    retry_backoff_max_seconds: float = Field(default=4.0, ge=0.0, le=120.0)\n    cache_ttl_seconds: int = Field(default=900, ge=0, le=86400)\n',
           )
-
           replace_once(
               'app/search_gateway/factory.py',
-              '''        timeout_seconds=float(os.getenv("SEARCH_TIMEOUT_SECONDS", "15")),\n        retries=int(os.getenv("SEARCH_RETRIES", "1")),\n        cache_ttl_seconds=int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "900")),\n''',
-              '''        timeout_seconds=float(os.getenv("SEARCH_TIMEOUT_SECONDS", "15")),\n        retries=int(os.getenv("SEARCH_RETRIES", "1")),\n        retry_backoff_base_seconds=_float_env(\n            "SEARCH_RETRY_BACKOFF_BASE_SECONDS", 0.5, minimum=0.0, maximum=30.0\n        ),\n        retry_backoff_max_seconds=_float_env(\n            "SEARCH_RETRY_BACKOFF_MAX_SECONDS", 4.0, minimum=0.0, maximum=120.0\n        ),\n        cache_ttl_seconds=int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "900")),\n''',
-          )
-
-          replace_once(
-              'app/search_gateway/gateway.py',
-              '''import time\nfrom dataclasses import dataclass\n''',
-              '''import time\nfrom collections.abc import Awaitable, Callable\nfrom dataclasses import dataclass\n''',
+              '        timeout_seconds=float(os.getenv("SEARCH_TIMEOUT_SECONDS", "15")),\n        retries=int(os.getenv("SEARCH_RETRIES", "1")),\n        cache_ttl_seconds=int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "900")),\n',
+              '        timeout_seconds=float(os.getenv("SEARCH_TIMEOUT_SECONDS", "15")),\n        retries=int(os.getenv("SEARCH_RETRIES", "1")),\n        retry_backoff_base_seconds=_float_env(\n            "SEARCH_RETRY_BACKOFF_BASE_SECONDS", 0.5, minimum=0.0, maximum=30.0\n        ),\n        retry_backoff_max_seconds=_float_env(\n            "SEARCH_RETRY_BACKOFF_MAX_SECONDS", 4.0, minimum=0.0, maximum=120.0\n        ),\n        cache_ttl_seconds=int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "900")),\n',
           )
           replace_once(
               'app/search_gateway/gateway.py',
-              '''        recovery_seconds: float = 60.0,\n        global_quotas: dict[str, int] | None = None,\n    ) -> None:\n''',
-              '''        recovery_seconds: float = 60.0,\n        global_quotas: dict[str, int] | None = None,\n        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,\n    ) -> None:\n''',
+              'import time\nfrom dataclasses import dataclass\n',
+              'import time\nfrom collections.abc import Awaitable, Callable\nfrom dataclasses import dataclass\n',
           )
           replace_once(
               'app/search_gateway/gateway.py',
-              '''        self._mission_costs: dict[str, dict[str, Decimal]] = {}\n        self._lock = asyncio.Lock()\n''',
-              '''        self._mission_costs: dict[str, dict[str, Decimal]] = {}\n        self._sleep = sleep\n        self._lock = asyncio.Lock()\n''',
+              '        recovery_seconds: float = 60.0,\n        global_quotas: dict[str, int] | None = None,\n    ) -> None:\n',
+              '        recovery_seconds: float = 60.0,\n        global_quotas: dict[str, int] | None = None,\n        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,\n    ) -> None:\n',
           )
           replace_once(
               'app/search_gateway/gateway.py',
-              '''                if retry_blocked:\n                    error_reason = retry_blocked\n                    break\n            try:\n''',
-              '''                if retry_blocked:\n                    error_reason = retry_blocked\n                    break\n                backoff_seconds = min(\n                    policy.retry_backoff_max_seconds,\n                    policy.retry_backoff_base_seconds * (2 ** (retry - 1)),\n                )\n                if backoff_seconds > 0:\n                    await self._sleep(backoff_seconds)\n            try:\n''',
+              '        self._mission_costs: dict[str, dict[str, Decimal]] = {}\n        self._lock = asyncio.Lock()\n',
+              '        self._mission_costs: dict[str, dict[str, Decimal]] = {}\n        self._sleep = sleep\n        self._lock = asyncio.Lock()\n',
           )
-
+          replace_once(
+              'app/search_gateway/gateway.py',
+              '                if retry_blocked:\n                    error_reason = retry_blocked\n                    break\n            try:\n',
+              '                if retry_blocked:\n                    error_reason = retry_blocked\n                    break\n                backoff_seconds = min(\n                    policy.retry_backoff_max_seconds,\n                    policy.retry_backoff_base_seconds * (2 ** (retry - 1)),\n                )\n                if backoff_seconds > 0:\n                    await self._sleep(backoff_seconds)\n            try:\n',
+          )
           replace_once(
               '.env.example',
-              '''SEARCH_TIMEOUT_SECONDS=15\nSEARCH_RETRIES=1\nSEARCH_CACHE_TTL_SECONDS=900\n''',
-              '''SEARCH_TIMEOUT_SECONDS=15\nSEARCH_RETRIES=1\nSEARCH_RETRY_BACKOFF_BASE_SECONDS=0.5\nSEARCH_RETRY_BACKOFF_MAX_SECONDS=4.0\nSEARCH_CACHE_TTL_SECONDS=900\n''',
+              'SEARCH_TIMEOUT_SECONDS=15\nSEARCH_RETRIES=1\nSEARCH_CACHE_TTL_SECONDS=900\n',
+              'SEARCH_TIMEOUT_SECONDS=15\nSEARCH_RETRIES=1\nSEARCH_RETRY_BACKOFF_BASE_SECONDS=0.5\nSEARCH_RETRY_BACKOFF_MAX_SECONDS=4.0\nSEARCH_CACHE_TTL_SECONDS=900\n',
           )
-
-          Path('tests/test_search_retry_backoff.py').write_text(r'''from __future__ import annotations
-
-from decimal import Decimal
-
-import pytest
-
-from app.search_gateway.factory import search_policy_from_env
-from app.search_gateway.gateway import SearchGateway
-from app.search_gateway.models import FallbackReason, SearchItem, SearchPolicy, SearchRequest
-from app.search_gateway.providers import ProviderError, SearchProvider
-
-
-class _FlakyProvider(SearchProvider):
-    name = "searxng"
-    paid = False
-    cost_amount = Decimal("0")
-    cost_currency = "USD"
-
-    def __init__(
-        self,
-        *,
-        failures: int,
-        reason: FallbackReason = FallbackReason.PROVIDER_ERROR,
-        retryable: bool = True,
-    ) -> None:
-        self.failures = failures
-        self.reason = reason
-        self.retryable = retryable
-        self.calls = 0
-
-    @property
-    def configured(self) -> bool:
-        return True
-
-    async def search(self, request: SearchRequest, *, timeout_seconds: float) -> list[SearchItem]:
-        self.calls += 1
-        if self.calls <= self.failures:
-            raise ProviderError(
-                "synthetic provider failure",
-                retryable=self.retryable,
-                reason=self.reason,
-            )
-        return [
-            SearchItem(
-                url="https://example.org/",
-                title="Example",
-                snippet="Recovered after a bounded retry",
-                provider=self.name,
-            )
-        ]
-
-
-def _request() -> SearchRequest:
-    return SearchRequest(
-        query="example company",
-        limit=10,
-        mission_id="mission-backoff",
-        correlation_id="corr-backoff",
-    )
-
-
-def _policy(**updates) -> SearchPolicy:
-    policy = SearchPolicy(
-        provider_order=("searxng",),
-        allowed_providers=frozenset({"searxng"}),
-        retries=3,
-        retry_backoff_base_seconds=0.5,
-        retry_backoff_max_seconds=1.25,
-        cache_ttl_seconds=0,
-    )
-    return policy.model_copy(update=updates)
-
-
-@pytest.mark.asyncio
-async def test_retryable_failures_use_bounded_exponential_backoff() -> None:
-    provider = _FlakyProvider(failures=3)
-    delays: list[float] = []
-
-    async def record_sleep(delay: float) -> None:
-        delays.append(delay)
-
-    gateway = SearchGateway([provider], sleep=record_sleep)
-    response = await gateway.search(_request(), _policy())
-
-    assert provider.calls == 4
-    assert delays == [0.5, 1.0, 1.25]
-    assert len(response.results) == 1
-
-
-@pytest.mark.asyncio
-async def test_hard_antibot_failure_is_not_retried_or_delayed() -> None:
-    provider = _FlakyProvider(
-        failures=10,
-        reason=FallbackReason.CAPTCHA,
-        retryable=False,
-    )
-    delays: list[float] = []
-
-    async def record_sleep(delay: float) -> None:
-        delays.append(delay)
-
-    gateway = SearchGateway([provider], sleep=record_sleep)
-    response = await gateway.search(_request(), _policy())
-
-    assert provider.calls == 1
-    assert delays == []
-    assert response.diagnostics.attempts[0].reason == FallbackReason.CAPTCHA
-    assert gateway.health(_policy())[0].circuit_state == "open"
-
-
-def test_search_policy_from_env_exposes_retry_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SEARCH_RETRY_BACKOFF_BASE_SECONDS", "0.75")
-    monkeypatch.setenv("SEARCH_RETRY_BACKOFF_MAX_SECONDS", "6")
-
-    policy = search_policy_from_env()
-
-    assert policy.retry_backoff_base_seconds == 0.75
-    assert policy.retry_backoff_max_seconds == 6.0
-''', encoding='utf-8')
           PY
 
           python -m py_compile app/search_gateway/models.py app/search_gateway/factory.py app/search_gateway/gateway.py tests/test_search_retry_backoff.py
@@ -199,6 +75,6 @@ def test_search_policy_from_env_exposes_retry_backoff(monkeypatch: pytest.Monkey
 
           git config user.name 'AIMETON Search Hardening'
           git config user.email '127470701+Dimar4713@users.noreply.github.com'
-          git add app/search_gateway/models.py app/search_gateway/factory.py app/search_gateway/gateway.py .env.example tests/test_search_retry_backoff.py
+          git add app/search_gateway/models.py app/search_gateway/factory.py app/search_gateway/gateway.py .env.example
           git commit -m 'Add bounded search retry backoff [search-backoff-patched]'
           git push origin HEAD:fix/search-retry-backoff-441
