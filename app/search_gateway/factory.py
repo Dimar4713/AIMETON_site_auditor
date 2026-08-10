@@ -4,6 +4,7 @@ import os
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 
+from app.search_gateway.cache import SQLiteSearchCache, SearchCache
 from app.search_gateway.factory_helpers import first_nonempty_env
 from app.search_gateway.models import SearchPolicy, SearchStrategy
 from app.search_gateway.providers import SearxngProvider, TavilyProvider, YandexProvider
@@ -161,6 +162,18 @@ def identity_search_policy_from_env() -> SearchPolicy:
     )
 
 
+def _search_cache_from_env() -> SearchCache | None:
+    path = os.getenv("SEARCH_CACHE_DB_PATH", "").strip()
+    if not path:
+        return None
+    return SQLiteSearchCache(
+        path,
+        max_entries=_int_env(
+            "SEARCH_CACHE_MAX_ENTRIES", 4096, minimum=128, maximum=100000
+        ),
+    )
+
+
 @lru_cache(maxsize=1)
 def get_search_gateway() -> TracedSearchGateway:
     debug = search_effectiveness_debug_enabled()
@@ -202,7 +215,11 @@ def get_search_gateway() -> TracedSearchGateway:
         jitter_max_env="SEARCH_JITTER_TAVILY_MAX_SECONDS", jitter_max_default=0.0,
     )
 
-    return TracedSearchGateway([yandex, searxng, tavily], global_quotas=quotas)
+    return TracedSearchGateway(
+        [yandex, searxng, tavily],
+        global_quotas=quotas,
+        cache=_search_cache_from_env(),
+    )
 
 
 def reset_search_gateway() -> None:

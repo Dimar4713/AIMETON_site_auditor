@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from app.search_gateway.cache import MemorySearchCache
+from app.search_gateway.cache import MemorySearchCache, SearchCache
 from app.search_gateway.models import (
     AttemptState,
     FallbackReason,
@@ -107,7 +107,7 @@ class SearchGateway:
         self,
         providers: list[SearchProvider],
         *,
-        cache: MemorySearchCache | None = None,
+        cache: SearchCache | None = None,
         failure_threshold: int = 3,
         recovery_seconds: float = 60.0,
         global_quotas: dict[str, int] | None = None,
@@ -125,6 +125,20 @@ class SearchGateway:
         self._inflight: dict[str, asyncio.Task[SearchResponse]] = {}
         self._sleep = sleep
         self._lock = asyncio.Lock()
+
+    async def _cache_get(self, key: str) -> list[SearchItem] | None:
+        try:
+            return await self._cache.get(key)
+        except Exception:
+            return None
+
+    async def _cache_set(
+        self, key: str, results: list[SearchItem], ttl_seconds: int
+    ) -> None:
+        try:
+            await self._cache.set(key, results, ttl_seconds)
+        except Exception:
+            return
 
     def _circuit_state(self, provider: str) -> str:
         circuit = self._circuits[provider]
@@ -554,7 +568,7 @@ class SearchGateway:
         cache_key = f"{fingerprint}:{policy_cache_suffix(policy)}"
         use_cache = strategy is not SearchStrategy.SHADOW_COMPARE
         if use_cache:
-            cached = await self._cache.get(cache_key)
+            cached = await self._cache_get(cache_key)
             if cached is not None:
                 attempt = ProviderAttempt(
                     provider="cache",
@@ -613,7 +627,7 @@ class SearchGateway:
                 fallback_used=False,
             )
             if use_cache and response.results:
-                await self._cache.set(cache_key, response.results, policy.cache_ttl_seconds)
+                await self._cache_set(cache_key, response.results, policy.cache_ttl_seconds)
             return response
 
         if strategy in {SearchStrategy.PARALLEL_UNION, SearchStrategy.CONSENSUS_UNION}:
@@ -634,7 +648,7 @@ class SearchGateway:
                 fallback_used=sum(execution.called for execution in executions) > 1,
             )
             if response.results:
-                await self._cache.set(cache_key, response.results, policy.cache_ttl_seconds)
+                await self._cache_set(cache_key, response.results, policy.cache_ttl_seconds)
             return response
 
         if strategy is SearchStrategy.SHADOW_COMPARE:
@@ -720,7 +734,7 @@ class SearchGateway:
                         fallback_used=executed > 1,
                         state=GatewayState.DEGRADED if executed > 1 else GatewayState.SUCCESS,
                     )
-                    await self._cache.set(cache_key, response.results, policy.cache_ttl_seconds)
+                    await self._cache_set(cache_key, response.results, policy.cache_ttl_seconds)
                     return response
                 if strategy is SearchStrategy.PRIMARY_ONLY and execution.called:
                     break
@@ -744,7 +758,7 @@ class SearchGateway:
                 selected_providers=successful_providers,
                 fallback_used=executed > 1,
             )
-            await self._cache.set(cache_key, response.results, policy.cache_ttl_seconds)
+            await self._cache_set(cache_key, response.results, policy.cache_ttl_seconds)
             return response
 
         return self._response(
