@@ -72,13 +72,14 @@ jobs:
 
           report="$RUNNER_TEMP/runtime-persistence-reconcile.md"
           backup="$RUNTIME_COMPOSE.before-persistence.$(date -u +%Y%m%dT%H%M%SZ).bak"
+          expected_volume='./data/runtime-core:/app/data'
+          expected_source="$(readlink -f "$DATA_DIR")"
           : > "$report"
 
           echo "## Runtime persistence reconcile evidence" >> "$report"
           echo >> "$report"
           echo "- workflow run: $GITHUB_RUN_ID" >> "$report"
           echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$report"
-          echo "- mode: controlled apply" >> "$report"
           echo >> "$report"
 
           test -f docker-compose.yml
@@ -87,10 +88,56 @@ jobs:
 
           mkdir -p "$DATA_DIR"
           chmod 700 "$DATA_DIR"
-          cp -a "$RUNTIME_COMPOSE" "$backup"
 
-          if ! grep -Fq '/app/data' "$RUNTIME_COMPOSE"; then
-            printf '%s\n' '    volumes:' '      - ./data/runtime-core:/app/data' >> "$RUNTIME_COMPOSE"
+          compose_correct=no
+          if grep -Fq "$expected_volume" "$RUNTIME_COMPOSE"; then
+            compose_correct=yes
+          fi
+
+          live_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}' 2>/dev/null || true)"
+          live_source=''
+          live_destination=''
+          if [[ -n "$live_mount" ]]; then
+            IFS='|' read -r _ live_source live_destination <<< "$live_mount"
+          fi
+
+          mount_correct=no
+          if [[ "$live_destination" == '/app/data' && "$(readlink -f "${live_source:-/nonexistent}" 2>/dev/null || true)" == "$expected_source" ]]; then
+            mount_correct=yes
+          fi
+
+          mutation_required=no
+          mode='verify-only / no mutation required'
+          backup_state='not required'
+          if [[ "$compose_correct" != yes || "$mount_correct" != yes ]]; then
+            mutation_required=yes
+            mode='controlled repair'
+            cp -a "$RUNTIME_COMPOSE" "$backup"
+            backup_state="created: $backup"
+
+            if [[ "$compose_correct" != yes ]]; then
+              python3 - "$RUNTIME_COMPOSE" "$expected_volume" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+expected = sys.argv[2]
+text = path.read_text(encoding='utf-8')
+lines = text.splitlines()
+replaced = False
+for index, line in enumerate(lines):
+    if '/app/data' in line:
+        indent = line[: len(line) - len(line.lstrip())]
+        lines[index] = f'{indent}- {expected}'
+        replaced = True
+        break
+if not replaced:
+    if lines and lines[-1].strip():
+        lines.append('')
+    lines.extend(['    volumes:', f'      - {expected}'])
+path.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
+PY
+            fi
           fi
 
           docker compose \
@@ -98,10 +145,12 @@ jobs:
             -f docker-compose.runtime-secrets.yml \
             config --quiet
 
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.runtime-secrets.yml \
-            up -d --force-recreate "$SERVICE"
+          if [[ "$mutation_required" == yes ]]; then
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.runtime-secrets.yml \
+              up -d --force-recreate "$SERVICE"
+          fi
 
           deadline=$((SECONDS + 180))
           while (( SECONDS < deadline )); do
@@ -121,7 +170,9 @@ jobs:
 
           mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
           [[ -n "$mount" ]]
-          [[ "${mount##*|}" == '/app/data' ]]
+          IFS='|' read -r mount_type mount_source mount_destination <<< "$mount"
+          [[ "$mount_destination" == '/app/data' ]]
+          [[ "$(readlink -f "$mount_source")" == "$expected_source" ]]
 
           health="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/health")"
           python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p.get("status")=="ok", p' "$health"
@@ -136,6 +187,10 @@ jobs:
             [[ "$integrity" == ok ]]
           fi
 
+          echo "- mode: \`$mode\`" >> "$report"
+          echo "- mutation required: \`$mutation_required\`" >> "$report"
+          echo "- compose persistence invariant before reconcile: \`$compose_correct\`" >> "$report"
+          echo "- live mount invariant before reconcile: \`$mount_correct\`" >> "$report"
           echo "- persistent directory: ✅ present" >> "$report"
           echo "- compose validation: ✅" >> "$report"
           echo "- container health: \`$status\`" >> "$report"
@@ -144,13 +199,18 @@ jobs:
           echo "- runtime DB exists: \`$db_exists\`" >> "$report"
           echo "- SQLite integrity: \`$integrity\`" >> "$report"
           echo "- tables: \`$tables\`" >> "$report"
-          echo "- rollback compose backup: ✅ created" >> "$report"
+          echo "- rollback compose backup: \`$backup_state\`" >> "$report"
           echo >> "$report"
           echo "### Verdict" >> "$report"
-          echo "✅ Runtime persistence is reconciled and verified." >> "$report"
+          if [[ "$mutation_required" == yes ]]; then
+            echo "✅ Runtime persistence required controlled repair and is verified." >> "$report"
+          else
+            echo "✅ Runtime persistence was already correct; verify-only path completed with zero container recreation." >> "$report"
+          fi
 
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
           echo "report=$report" >> "$GITHUB_OUTPUT"
+          echo "mutation_required=$mutation_required" >> "$GITHUB_OUTPUT"
 
       - name: Upload reconcile evidence
         uses: actions/upload-artifact@v4
