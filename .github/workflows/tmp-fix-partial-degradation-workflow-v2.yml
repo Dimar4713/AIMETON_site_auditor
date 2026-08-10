@@ -1,0 +1,41 @@
+name: Temporary Fix Partial Degradation Workflow V2
+
+on:
+  push:
+    branches:
+      - fix/searxng-partial-degradation-441
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/searxng-partial-degradation-441
+          fetch-depth: 1
+      - name: Repair trace metadata replacement and self-delete
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/tmp-patch-searxng-partial-degradation-441.yml')
+          text = path.read_text(encoding='utf-8')
+          needle = "              '''            \"cost_currency\": row[\"cost\"][\"currency\"],\\n            \"degraded_upstreams\": row.get(\"degraded_upstreams\", []),\\n            \"partial_degradation_reason\": row.get(\"reason\") if row.get(\"degraded_upstreams\") else None,\\n        }\\n''',"
+          replacement = "              '''            \"cost_currency\": row[\"cost\"][\"currency\"],\\n        }\\n        if row.get(\"degraded_upstreams\"):\\n            common_metadata[\"degraded_upstreams\"] = row[\"degraded_upstreams\"]\\n            common_metadata[\"partial_degradation_reason\"] = row.get(\"reason\")\\n''',"
+          count = text.count(needle)
+          if count != 1:
+              raise SystemExit(f'expected one metadata replacement literal, found {count}')
+          path.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/tmp-fix-partial-degradation-workflow-v2.yml
+          git config user.name 'AIMETON Search Hardening'
+          git config user.email '127470701+Dimar4713@users.noreply.github.com'
+          git add .github/workflows/tmp-patch-searxng-partial-degradation-441.yml
+          git add -u .github/workflows/tmp-fix-partial-degradation-workflow-v2.yml
+          git commit -m 'Fix partial degradation trace compatibility gate'
+          git push origin HEAD:fix/searxng-partial-degradation-441
