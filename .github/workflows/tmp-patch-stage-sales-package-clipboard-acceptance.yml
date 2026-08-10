@@ -1,0 +1,57 @@
+name: Temporary Patch Stage Sales Package Clipboard Acceptance
+
+on:
+  push:
+    branches:
+      - fix/stage-sales-package-clipboard-acceptance
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[clipboard-acceptance-patched]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/stage-sales-package-clipboard-acceptance
+          fetch-depth: 1
+
+      - name: Apply guarded Stage acceptance patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/accept-service-catalog-stage.yml')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  """              'Блокеры выпуска:',\n          )\n""",
+                  """              'Блокеры выпуска:',\n              'function companySalesPackageMarkdown(data)',\n              'function appendSalesPackageCopyAction(output, data, status)',\n              \"button.textContent = 'Скопировать sales-пакет'\",\n              'navigator.clipboard.writeText(packageText)',\n              'Первое сообщение — черновик — не отправлено',\n              'Никакое сообщение не отправлено и никакое внешнее действие не выполнено.',\n              'Не удалось скопировать sales-пакет:',\n          )\n""",
+              ),
+              (
+                  """          for forbidden_call in ('postJson(', 'requestSubmit(', '.submit('):\n              assert forbidden_call not in handoff_body, f'handoff performs forbidden automatic action: {forbidden_call}'\n\n          auto_call_tokens = ('postJson(\\'/api/company-intelligence\\'', 'postJson(\\'/api/hunt\\'')\n""",
+                  """          for forbidden_call in ('postJson(', 'requestSubmit(', '.submit('):\n              assert forbidden_call not in handoff_body, f'handoff performs forbidden automatic action: {forbidden_call}'\n\n          clipboard_body = catalog.split(\n              'function appendSalesPackageCopyAction(output, data, status) {', 1\n          )[1].split(\"const companyForm = document.querySelector('#companyIntelligenceForm');\", 1)[0]\n          assert 'navigator.clipboard.writeText(packageText)' in clipboard_body, 'clipboard export does not use local clipboard API'\n          for forbidden_call in ('fetch(', 'postJson(', 'requestSubmit(', '.submit(', 'sendEmail', 'sendMessage'):\n              assert forbidden_call not in clipboard_body, f'clipboard export performs forbidden external action: {forbidden_call}'\n\n          auto_call_tokens = ('postJson(\\'/api/company-intelligence\\'', 'postJson(\\'/api/hunt\\'')\n""",
+              ),
+              (
+                  """            echo '- preliminary readiness/release blockers visible: ✅'\n            echo '- handoff performs no automatic submit/outreach: ✅'\n            echo '- explicit submit-only provider boundary: ✅'\n""",
+                  """            echo '- preliminary readiness/release blockers visible: ✅'\n            echo '- handoff performs no automatic submit/outreach: ✅'\n            echo '- local sales-package clipboard export with draft/review labels: ✅'\n            echo '- clipboard export performs no network/submit/outreach: ✅'\n            echo '- explicit submit-only provider boundary: ✅'\n""",
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one clipboard acceptance replacement, found {count}: {old[:180]!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git config user.name 'AIMETON Clipboard Acceptance'
+          git config user.email '127470701+Dimar4713@users.noreply.github.com'
+          git add .github/workflows/accept-service-catalog-stage.yml
+          git commit -m 'Enforce sales package clipboard contract on Stage [clipboard-acceptance-patched]'
+          git push origin HEAD:fix/stage-sales-package-clipboard-acceptance
