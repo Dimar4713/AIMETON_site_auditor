@@ -73,7 +73,6 @@ jobs:
           report="$RUNNER_TEMP/runtime-persistence-reconcile.md"
           backup="$RUNTIME_COMPOSE.before-persistence.$(date -u +%Y%m%dT%H%M%SZ).bak"
           expected_volume='./data/runtime-core:/app/data'
-          expected_source="$(readlink -f "$DATA_DIR")"
           : > "$report"
 
           echo "## Runtime persistence reconcile evidence" >> "$report"
@@ -88,6 +87,7 @@ jobs:
 
           mkdir -p "$DATA_DIR"
           chmod 700 "$DATA_DIR"
+          expected_source="$(readlink -f "$DATA_DIR")"
 
           compose_correct=no
           if grep -Fq "$expected_volume" "$RUNTIME_COMPOSE"; then
@@ -95,14 +95,15 @@ jobs:
           fi
 
           live_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}' 2>/dev/null || true)"
+          live_type=''
           live_source=''
           live_destination=''
           if [[ -n "$live_mount" ]]; then
-            IFS='|' read -r _ live_source live_destination <<< "$live_mount"
+            IFS='|' read -r live_type live_source live_destination <<< "$live_mount"
           fi
 
           mount_correct=no
-          if [[ "$live_destination" == '/app/data' && "$(readlink -f "${live_source:-/nonexistent}" 2>/dev/null || true)" == "$expected_source" ]]; then
+          if [[ "$live_type" == bind && "$live_destination" == '/app/data' && "$(readlink -f "${live_source:-/nonexistent}" 2>/dev/null || true)" == "$expected_source" ]]; then
             mount_correct=yes
           fi
 
@@ -122,8 +123,7 @@ import sys
 
 path = Path(sys.argv[1])
 expected = sys.argv[2]
-text = path.read_text(encoding='utf-8')
-lines = text.splitlines()
+lines = path.read_text(encoding='utf-8').splitlines()
 replaced = False
 for index, line in enumerate(lines):
     if '/app/data' in line:
@@ -171,6 +171,7 @@ PY
           mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
           [[ -n "$mount" ]]
           IFS='|' read -r mount_type mount_source mount_destination <<< "$mount"
+          [[ "$mount_type" == bind ]]
           [[ "$mount_destination" == '/app/data' ]]
           [[ "$(readlink -f "$mount_source")" == "$expected_source" ]]
 
@@ -184,8 +185,12 @@ PY
             db_exists=yes
             integrity="$(docker exec "$CONTAINER" python -c 'import sqlite3; c=sqlite3.connect("file:/app/data/runtime-core.sqlite3?mode=ro", uri=True); print(c.execute("PRAGMA integrity_check").fetchone()[0]); c.close()')"
             tables="$(docker exec "$CONTAINER" python -c 'import sqlite3; c=sqlite3.connect("file:/app/data/runtime-core.sqlite3?mode=ro", uri=True); print(",".join(r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type=\"table\" AND name NOT LIKE \"sqlite_%\" ORDER BY name"))); c.close()')"
-            [[ "$integrity" == ok ]]
           fi
+          [[ "$db_exists" == yes ]]
+          [[ "$integrity" == ok ]]
+          for required_table in runtime_meta runtime_records runtime_tasks; do
+            [[ ",$tables," == *",$required_table,"* ]]
+          done
 
           echo "- mode: \`$mode\`" >> "$report"
           echo "- mutation required: \`$mutation_required\`" >> "$report"
