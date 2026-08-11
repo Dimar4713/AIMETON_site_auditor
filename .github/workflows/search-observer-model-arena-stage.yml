@@ -1,0 +1,137 @@
+name: Search Observer Model Arena Replay Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed commit SHA that owns the Arena code
+        required: true
+        type: string
+      replay_run_id:
+        description: Successful replay-population workflow run id
+        required: true
+        type: string
+      profiles:
+        description: Optional comma-separated Observer profile names; blank means all registered profiles
+        required: false
+        default: ""
+        type: string
+      allow_paid_llm_calls:
+        description: Explicit owner authorization for bounded LLM-only replay calls
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: search-observer-model-arena-stage
+  cancel-in-progress: false
+
+jobs:
+  arena:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 20
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+      QWEN_BASE_URL: ${{ vars.QWEN_BASE_URL }}
+      QWEN_OBSERVER_MODEL: ${{ vars.QWEN_OBSERVER_MODEL }}
+      GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+      GLM_BASE_URL: ${{ vars.GLM_BASE_URL }}
+      GLM_OBSERVER_MODEL: ${{ vars.GLM_OBSERVER_MODEL }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL }}
+      DEEPSEEK_OBSERVER_MODEL: ${{ vars.DEEPSEEK_OBSERVER_MODEL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_OPENAI_BASE_URL: ${{ vars.GEMINI_OPENAI_BASE_URL }}
+      GEMINI_OBSERVER_MODEL: ${{ vars.GEMINI_OBSERVER_MODEL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+      OPENAI_OBSERVER_MODEL: ${{ vars.OPENAI_OBSERVER_MODEL }}
+    steps:
+      - name: Require exact SHA and explicit LLM-cost authorization
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          replay_run='${{ inputs.replay_run_id }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$replay_run" =~ ^[0-9]+$ ]]
+          [[ '${{ inputs.allow_paid_llm_calls }}' == 'true' ]]
+          cd "$STACK_DIR"
+          [[ "$(cat app-source-sha.txt)" == "$expected" ]]
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$status" == healthy ]]
+
+      - name: Download immutable replay corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: search-observer-replay-${{ inputs.expected_sha }}
+          path: ${{ runner.temp }}/search-observer-arena-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.replay_run_id }}
+
+      - name: Validate replay corpus and execute bounded LLM-only Arena
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(find "$RUNNER_TEMP/search-observer-arena-input" -type f -name '*.json' | wc -l)" -eq 4
+          docker exec "$CONTAINER" sh -lc 'rm -rf /tmp/search-observer-arena-input /tmp/search-observer-arena-output && mkdir -p /tmp/search-observer-arena-input /tmp/search-observer-arena-output'
+          docker cp "$RUNNER_TEMP/search-observer-arena-input/." "$CONTAINER:/tmp/search-observer-arena-input"
+          docker exec \
+            -e QWEN_API_KEY="$QWEN_API_KEY" \
+            -e QWEN_BASE_URL="$QWEN_BASE_URL" \
+            -e QWEN_OBSERVER_MODEL="$QWEN_OBSERVER_MODEL" \
+            -e GLM_API_KEY="$GLM_API_KEY" \
+            -e GLM_BASE_URL="$GLM_BASE_URL" \
+            -e GLM_OBSERVER_MODEL="$GLM_OBSERVER_MODEL" \
+            -e DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+            -e DEEPSEEK_BASE_URL="$DEEPSEEK_BASE_URL" \
+            -e DEEPSEEK_OBSERVER_MODEL="$DEEPSEEK_OBSERVER_MODEL" \
+            -e GEMINI_API_KEY="$GEMINI_API_KEY" \
+            -e GEMINI_OPENAI_BASE_URL="$GEMINI_OPENAI_BASE_URL" \
+            -e GEMINI_OBSERVER_MODEL="$GEMINI_OBSERVER_MODEL" \
+            -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+            -e OPENAI_BASE_URL="$OPENAI_BASE_URL" \
+            -e OPENAI_OBSERVER_MODEL="$OPENAI_OBSERVER_MODEL" \
+            -i "$CONTAINER" python scripts/search_observer_model_arena_replay.py \
+              --input-dir /tmp/search-observer-arena-input \
+              --output /tmp/search-observer-arena-output/result.json \
+              --profiles '${{ inputs.profiles }}' \
+              --max-model-calls 24
+          rm -rf "$RUNNER_TEMP/search-observer-arena-output"
+          mkdir -p "$RUNNER_TEMP/search-observer-arena-output"
+          docker cp "$CONTAINER:/tmp/search-observer-arena-output/result.json" "$RUNNER_TEMP/search-observer-arena-output/result.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'search-observer-arena-output' / 'result.json'
+          payload = json.loads(path.read_text(encoding='utf-8'))
+          assert payload['replay_only'] is True
+          assert payload['search_calls'] == 0
+          assert payload['case_count'] == 4
+          assert payload['planned_model_calls'] <= 24
+          assert payload['routing_changed_any'] is False
+          print(json.dumps({
+              'case_count': payload['case_count'],
+              'profile_count': payload['profile_count'],
+              'configured_profile_count': payload['configured_profile_count'],
+              'planned_model_calls': payload['planned_model_calls'],
+              'routing_changed_any': payload['routing_changed_any'],
+              'summary': payload['summary'],
+          }, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Upload Model Arena evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-observer-model-arena-${{ inputs.expected_sha }}-${{ inputs.replay_run_id }}
+          path: ${{ runner.temp }}/search-observer-arena-output/result.json
+          if-no-files-found: error
+          retention-days: 14
