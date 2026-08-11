@@ -315,8 +315,9 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
     search_diagnostics: list[SearchDiagnostics] = []
     gateway = get_search_gateway()
     policy = search_policy_from_env()
-    for query in queries:
-        response = await gateway.search(
+
+    async def search_query(query: str):
+        return await gateway.search(
             SearchRequest(
                 query=query,
                 limit=req.results_per_query,
@@ -325,6 +326,9 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             ),
             policy,
         )
+
+    responses = await asyncio.gather(*(search_query(query) for query in queries))
+    for response in responses:
         search_diagnostics.append(response.diagnostics)
         raw_results.extend(item.as_legacy_dict() for item in response.results)
     aggregate = SearchDiagnostics.aggregate(search_diagnostics)
