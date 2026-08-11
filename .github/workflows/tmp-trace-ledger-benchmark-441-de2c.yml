@@ -1,0 +1,65 @@
+name: Temporary Trace Ledger Benchmark 441 DE2C
+
+on:
+  push:
+    branches:
+      - diag/provider-contribution-441-de2c
+    paths:
+      - .github/workflows/tmp-trace-ledger-benchmark-441-de2c.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: de2cab423a99777bc3244c1b8899eaf59960f6f9
+
+    steps:
+      - name: Benchmark trace append on isolated temporary DB
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$(cat "$STACK_DIR/app-source-sha.txt")" == "$EXPECTED_SHA" ]]
+          [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == healthy ]]
+          docker exec -i "$CONTAINER" python - <<'PY'
+          import json, os, tempfile, time
+          from pathlib import Path
+          from app.trace_ledger import SQLiteTraceLedger, TraceEventCreate, TraceState
+
+          with tempfile.TemporaryDirectory() as td:
+              path = Path(td) / 'trace-bench.sqlite3'
+              ledger = SQLiteTraceLedger(path)
+              samples = []
+              n = 300
+              started = time.perf_counter()
+              for i in range(n):
+                  t0 = time.perf_counter()
+                  ledger.append(TraceEventCreate(
+                      mission_id='bench', attempt_id='bench', component='bench',
+                      operation='append', state=TraceState.SUCCEEDED,
+                      reason_code='bench', summary='bench',
+                      counters={'i': i}, metadata={'i': i}, event_key=f'bench:{i}'
+                  ))
+                  samples.append((time.perf_counter()-t0)*1000)
+              elapsed = time.perf_counter()-started
+              ordered = sorted(samples)
+              def pct(p):
+                  idx = min(len(ordered)-1, max(0, int(round((len(ordered)-1)*p))))
+                  return round(ordered[idx], 3)
+              print(json.dumps({
+                  'append_count': n,
+                  'elapsed_seconds': round(elapsed, 3),
+                  'append_per_second': round(n/elapsed, 2),
+                  'latency_ms_avg': round(sum(samples)/n, 3),
+                  'latency_ms_p50': pct(.5), 'latency_ms_p95': pct(.95),
+                  'latency_ms_max': round(max(samples), 3),
+                  'estimated_1931_event_seconds_at_avg': round(1931*(sum(samples)/n)/1000, 3),
+                  'provider_calls': 0,
+              }, sort_keys=True))
+          PY
