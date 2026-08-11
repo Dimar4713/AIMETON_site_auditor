@@ -1,0 +1,113 @@
+name: Temporary accept Search Observer Shadow Live Stage 544
+
+on:
+  push:
+    branches:
+      - evidence/search-observer-shadow-stage-544
+
+permissions:
+  contents: read
+
+jobs:
+  accept-live-shadow:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: 4de947d5919f9b645c29ac60c7dcc4c677f325fb
+    steps:
+      - name: Verify exact Stage SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          [[ "$(cat app-source-sha.txt)" == "$EXPECTED_SHA" ]]
+
+      - name: Execute bounded real Hunter shadow integration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec \
+            -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=true \
+            -i "$CONTAINER" python - <<'PY'
+          import asyncio
+          import json
+          import os
+          import sqlite3
+
+          from app.discovery import run_hunt
+          from app.models import HuntRequest
+
+          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          db = sqlite3.connect(db_path, timeout=30)
+          try:
+              before = db.execute('SELECT COALESCE(MAX(rowid), 0) FROM mission_trace_events').fetchone()[0]
+          finally:
+              db.close()
+
+          request = HuntRequest(
+              region='Красноярск',
+              industries=['Стоматология'],
+              max_queries=2,
+              results_per_query=5,
+              max_candidates=25,
+              output_limit=10,
+              concurrency=2,
+          )
+          result = asyncio.run(run_hunt(request))
+
+          db = sqlite3.connect(db_path, timeout=30)
+          db.row_factory = sqlite3.Row
+          try:
+              shadow = db.execute(
+                  '''
+                  SELECT mission_id, attempt_id, counters_json, metadata_json
+                  FROM mission_trace_events
+                  WHERE rowid > ?
+                    AND component = 'hunter'
+                    AND operation = 'hunt_search_wave_shadow_observer'
+                  ORDER BY rowid DESC
+                  LIMIT 1
+                  ''',
+                  (before,),
+              ).fetchone()
+              funnel = db.execute(
+                  '''
+                  SELECT mission_id, counters_json
+                  FROM mission_trace_events
+                  WHERE rowid > ?
+                    AND component = 'hunter'
+                    AND operation = 'hunt_funnel_complete'
+                  ORDER BY rowid DESC
+                  LIMIT 1
+                  ''',
+                  (before,),
+              ).fetchone()
+          finally:
+              db.close()
+
+          assert shadow is not None, 'shadow observer trace not emitted by real run_hunt'
+          assert funnel is not None, 'real run_hunt did not complete funnel'
+          assert shadow['mission_id'] == funnel['mission_id'], (shadow['mission_id'], funnel['mission_id'])
+          metadata = json.loads(shadow['metadata_json'])
+          counters = json.loads(shadow['counters_json'])
+          assert metadata.get('observer_mode') == 'shadow', metadata
+          assert metadata.get('routing_changed') is False, metadata
+          assert counters.get('recommendation_count', 0) >= 0, counters
+
+          print(json.dumps({
+              'mission_id': shadow['mission_id'],
+              'attempt_id': shadow['attempt_id'],
+              'observer_mode': metadata.get('observer_mode'),
+              'routing_changed': metadata.get('routing_changed'),
+              'sufficient_evidence': metadata.get('sufficient_evidence'),
+              'action_counts': metadata.get('action_counts'),
+              'recommendation_count': counters.get('recommendation_count'),
+              'funnel': json.loads(funnel['counters_json']),
+              'returned_candidates': len(result.candidates),
+              'query_count': len(result.queries),
+              'search_cost': {k: str(v) for k, v in result.search.total_cost_by_currency.items()},
+          }, ensure_ascii=False, sort_keys=True))
+          PY
