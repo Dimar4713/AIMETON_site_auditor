@@ -90,6 +90,8 @@ jobs:
           docker exec "$CONTAINER" sh -lc 'rm -rf /tmp/search-observer-arena-input /tmp/search-observer-arena-output && mkdir -p /tmp/search-observer-arena-input /tmp/search-observer-arena-output'
           docker cp "$RUNNER_TEMP/search-observer-arena-input/." "$CONTAINER:/tmp/search-observer-arena-input"
           docker exec \
+            -w /app \
+            -e PYTHONPATH=/app \
             -e QWEN_API_KEY="$QWEN_API_KEY" \
             -e QWEN_BASE_URL="$QWEN_BASE_URL" \
             -e QWEN_OBSERVER_MODEL="$QWEN_OBSERVER_MODEL" \
@@ -105,7 +107,7 @@ jobs:
             -e OPENAI_API_KEY="$OPENAI_API_KEY" \
             -e OPENAI_BASE_URL="$OPENAI_BASE_URL" \
             -e OPENAI_OBSERVER_MODEL="$OPENAI_OBSERVER_MODEL" \
-            -i "$CONTAINER" python scripts/search_observer_model_arena_replay.py \
+            -i "$CONTAINER" python -m scripts.search_observer_model_arena_replay \
               --input-dir /tmp/search-observer-arena-input \
               --output /tmp/search-observer-arena-output/result.json \
               --profiles '${{ inputs.profiles }}' \
