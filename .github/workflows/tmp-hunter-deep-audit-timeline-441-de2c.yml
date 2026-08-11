@@ -1,0 +1,136 @@
+name: Temporary Hunter Deep Audit Timeline 441 DE2C
+
+on:
+  push:
+    branches:
+      - diag/provider-contribution-441-de2c
+    paths:
+      - .github/workflows/tmp-hunter-deep-audit-timeline-441-de2c.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: de2cab423a99777bc3244c1b8899eaf59960f6f9
+      MISSION_ID: hunt-d6a50188-ec6b-47e2-99ea-e852b1bdb5dd
+      ATTEMPT_ID: corr-8eb3ffa7-05c3-4e43-b2c5-bc21895ee684
+
+    steps:
+      - name: Derive deep-audit timeline without provider calls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deployed="$(cat "$STACK_DIR/app-source-sha.txt")"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$status" == "healthy" ]]
+          docker exec \
+            -e TRACE_MISSION_ID="$MISSION_ID" \
+            -e TRACE_ATTEMPT_ID="$ATTEMPT_ID" \
+            -i "$CONTAINER" python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from collections import Counter
+          from datetime import datetime
+
+          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          db = sqlite3.connect(db_path, timeout=30)
+          db.row_factory = sqlite3.Row
+          rows = db.execute(
+              '''SELECT event_key, operation, state, reason_code, created_at, metadata_json, counters_json
+                 FROM mission_trace_events
+                 WHERE mission_id = ? AND attempt_id = ?
+                   AND operation IN ('candidate_deep_audit_started','candidate_deep_audit_completed','candidate_deep_audit_failed')
+                 ORDER BY sequence''',
+              (os.environ['TRACE_MISSION_ID'], os.environ['TRACE_ATTEMPT_ID']),
+          ).fetchall()
+          db.close()
+          assert rows, 'deep audit trace events not found'
+
+          def ts(value):
+              return datetime.fromisoformat(value)
+
+          def metadata(row):
+              return json.loads(row['metadata_json'] or '{}')
+
+          samples = []
+          for row in rows[:12]:
+              md = metadata(row)
+              samples.append({
+                  'operation': row['operation'],
+                  'event_key': row['event_key'],
+                  'created_at': row['created_at'],
+                  'metadata_keys': sorted(md.keys()),
+                  'metadata_identity': {k: md[k] for k in ('candidate_index','candidate_rank','candidate_key','domain','host') if k in md},
+              })
+
+          starts = {}
+          terminals = {}
+          for row in rows:
+              md = metadata(row)
+              identity = None
+              for key in ('candidate_key','candidate_index','candidate_rank','domain','host'):
+                  if key in md:
+                      identity = f'{key}:{md[key]}'
+                      break
+              if identity is None:
+                  # Event key is sanitized and deterministic; normalize terminal suffixes when possible.
+                  ek = row['event_key']
+                  for suffix in (':deep_audit_started', ':deep_audit_completed', ':deep_audit_failed'):
+                      if ek.endswith(suffix):
+                          ek = ek[:-len(suffix)]
+                  identity = f'event:{ek}'
+              if row['operation'] == 'candidate_deep_audit_started':
+                  starts[identity] = row
+              else:
+                  terminals[identity] = row
+
+          paired = []
+          for identity, start in starts.items():
+              terminal = terminals.get(identity)
+              if terminal is None:
+                  continue
+              elapsed = (ts(terminal['created_at']) - ts(start['created_at'])).total_seconds()
+              paired.append({
+                  'identity': identity,
+                  'terminal': terminal['operation'],
+                  'reason': terminal['reason_code'],
+                  'elapsed_seconds': round(elapsed, 3),
+              })
+
+          values = sorted(item['elapsed_seconds'] for item in paired)
+          def pct(p):
+              if not values:
+                  return None
+              idx = min(len(values)-1, max(0, int(round((len(values)-1)*p))))
+              return values[idx]
+
+          all_ts = [ts(row['created_at']) for row in rows]
+          result = {
+              'event_count': len(rows),
+              'starts': len(starts),
+              'terminals': len(terminals),
+              'paired': len(paired),
+              'terminal_counts': dict(Counter(item['terminal'] for item in paired)),
+              'elapsed_seconds': {
+                  'sum': round(sum(values), 3),
+                  'avg': round(sum(values)/len(values), 3) if values else None,
+                  'p50': pct(0.50),
+                  'p95': pct(0.95),
+                  'max': max(values) if values else None,
+              },
+              'deep_audit_wall_span_seconds': round((max(all_ts)-min(all_ts)).total_seconds(), 3) if all_ts else None,
+              'slowest': sorted(paired, key=lambda x: x['elapsed_seconds'], reverse=True)[:10],
+              'samples': samples,
+              'provider_calls': 0,
+          }
+          print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+          PY
