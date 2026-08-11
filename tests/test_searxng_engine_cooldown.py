@@ -69,6 +69,7 @@ async def test_partial_captcha_temporarily_removes_only_failed_engine() -> None:
         transport=httpx.MockTransport(handler),
     )
 
+    # Degradation records are request-scoped so the same request must consume them.
     first_request = _request("first query")
     await provider.search(first_request, timeout_seconds=1)
     first_degradation = provider.consume_degradation(first_request)
