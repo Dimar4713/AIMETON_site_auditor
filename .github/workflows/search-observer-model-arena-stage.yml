@@ -11,6 +11,10 @@ on:
         description: Successful replay-population workflow run id
         required: true
         type: string
+      replay_sha:
+        description: Exact SHA used to create the immutable replay corpus
+        required: true
+        type: string
       profiles:
         description: Optional comma-separated Observer profile names; blank means all registered profiles
         required: false
@@ -59,8 +63,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           expected='${{ inputs.expected_sha }}'
+          replay_sha='${{ inputs.replay_sha }}'
           replay_run='${{ inputs.replay_run_id }}'
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$replay_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$replay_run" =~ ^[0-9]+$ ]]
           [[ '${{ inputs.allow_paid_llm_calls }}' == 'true' ]]
           cd "$STACK_DIR"
@@ -71,7 +77,7 @@ jobs:
       - name: Download immutable replay corpus
         uses: actions/download-artifact@v4
         with:
-          name: search-observer-replay-${{ inputs.expected_sha }}
+          name: search-observer-replay-${{ inputs.replay_sha }}
           path: ${{ runner.temp }}/search-observer-arena-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.replay_run_id }}
