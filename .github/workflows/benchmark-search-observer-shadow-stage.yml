@@ -45,6 +45,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          docker exec "$CONTAINER" sh -lc 'rm -rf /tmp/search-observer-replay && mkdir -p /tmp/search-observer-replay'
           docker exec \
             -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=true \
             -i "$CONTAINER" python - <<'PY'
@@ -54,8 +55,10 @@ jobs:
           import sqlite3
           from decimal import Decimal
 
+          import app.discovery as discovery
           from app.discovery import run_hunt
           from app.models import HuntRequest
+          from app.search_observer import write_search_wave_snapshot
           from scripts.search_observer_shadow_benchmark import (
               MAX_BENCHMARK_SEARCH_COST_RUB,
               SCENARIOS,
@@ -70,10 +73,26 @@ jobs:
           db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
           outputs = []
           actual_rub = Decimal('0')
+          current_scenario = ''
+          original_builder = discovery.build_search_wave_telemetry
+
+          def capture_builder(queries, responses):
+              telemetry = original_builder(queries, responses)
+              assert current_scenario, 'snapshot scenario is not set'
+              write_search_wave_snapshot(
+                  telemetry,
+                  directory='/tmp/search-observer-replay',
+                  mission_id=current_scenario,
+                  attempt_id='wave-1',
+              )
+              return telemetry
+
+          discovery.build_search_wave_telemetry = capture_builder
 
           async def execute():
-              global actual_rub
+              global actual_rub, current_scenario
               for scenario in SCENARIOS:
+                  current_scenario = scenario.slug
                   db = sqlite3.connect(db_path, timeout=30)
                   try:
                       before = db.execute('SELECT COALESCE(MAX(rowid), 0) FROM mission_trace_events').fetchone()[0]
@@ -161,3 +180,14 @@ jobs:
               'scenarios': outputs,
           }, ensure_ascii=False, sort_keys=True))
           PY
+          rm -rf "$RUNNER_TEMP/search-observer-replay"
+          docker cp "$CONTAINER:/tmp/search-observer-replay" "$RUNNER_TEMP/search-observer-replay"
+          test "$(find "$RUNNER_TEMP/search-observer-replay" -type f -name '*.json' | wc -l)" -eq 4
+
+      - name: Upload replay-complete observer telemetry
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-observer-replay-${{ inputs.expected_sha }}
+          path: ${{ runner.temp }}/search-observer-replay/*.json
+          if-no-files-found: error
+          retention-days: 14
