@@ -1,0 +1,163 @@
+name: Benchmark Search Observer Shadow Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed commit SHA
+        required: true
+        type: string
+      allow_paid_calls:
+        description: Explicit owner authorization for bounded live search and observer calls
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-observer-shadow-stage
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 30
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+    steps:
+      - name: Require exact SHA and explicit live-cost authorization
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ '${{ inputs.allow_paid_calls }}' == 'true' ]]
+          cd "$STACK_DIR"
+          [[ "$(cat app-source-sha.txt)" == "$expected" ]]
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$status" == healthy ]]
+
+      - name: Execute bounded heterogeneous shadow benchmark
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec \
+            -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=true \
+            -i "$CONTAINER" python - <<'PY'
+          import asyncio
+          import json
+          import os
+          import sqlite3
+          from decimal import Decimal
+
+          from app.discovery import run_hunt
+          from app.models import HuntRequest
+          from scripts.search_observer_shadow_benchmark import (
+              MAX_BENCHMARK_SEARCH_COST_RUB,
+              SCENARIOS,
+              estimated_search_cost_rub,
+              validate_benchmark_contract,
+          )
+
+          validate_benchmark_contract()
+          estimated = estimated_search_cost_rub()
+          assert estimated <= MAX_BENCHMARK_SEARCH_COST_RUB, (estimated, MAX_BENCHMARK_SEARCH_COST_RUB)
+
+          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          outputs = []
+          actual_rub = Decimal('0')
+
+          async def execute():
+              nonlocal actual_rub
+              for scenario in SCENARIOS:
+                  db = sqlite3.connect(db_path, timeout=30)
+                  try:
+                      before = db.execute('SELECT COALESCE(MAX(rowid), 0) FROM mission_trace_events').fetchone()[0]
+                  finally:
+                      db.close()
+
+                  result = await run_hunt(HuntRequest(
+                      region=scenario.region,
+                      industries=[scenario.industry],
+                      max_queries=scenario.max_queries,
+                      results_per_query=scenario.results_per_query,
+                      max_candidates=scenario.max_candidates,
+                      output_limit=scenario.output_limit,
+                      concurrency=2,
+                  ))
+
+                  db = sqlite3.connect(db_path, timeout=30)
+                  db.row_factory = sqlite3.Row
+                  try:
+                      shadow = db.execute(
+                          '''
+                          SELECT mission_id, attempt_id, counters_json, metadata_json
+                          FROM mission_trace_events
+                          WHERE rowid > ?
+                            AND component = 'hunter'
+                            AND operation = 'hunt_search_wave_shadow_observer'
+                          ORDER BY rowid DESC
+                          LIMIT 1
+                          ''',
+                          (before,),
+                      ).fetchone()
+                      funnel = db.execute(
+                          '''
+                          SELECT mission_id, counters_json
+                          FROM mission_trace_events
+                          WHERE rowid > ?
+                            AND component = 'hunter'
+                            AND operation = 'hunt_funnel_complete'
+                          ORDER BY rowid DESC
+                          LIMIT 1
+                          ''',
+                          (before,),
+                      ).fetchone()
+                  finally:
+                      db.close()
+
+                  assert shadow is not None, f'{scenario.slug}: shadow trace missing'
+                  assert funnel is not None, f'{scenario.slug}: funnel trace missing'
+                  assert shadow['mission_id'] == funnel['mission_id'], scenario.slug
+                  metadata = json.loads(shadow['metadata_json'])
+                  counters = json.loads(shadow['counters_json'])
+                  assert metadata.get('observer_mode') == 'shadow', (scenario.slug, metadata)
+                  assert metadata.get('routing_changed') is False, (scenario.slug, metadata)
+
+                  rub = Decimal(str(result.search.total_cost_by_currency.get('RUB', 0)))
+                  actual_rub += rub
+                  outputs.append({
+                      'slug': scenario.slug,
+                      'region': scenario.region,
+                      'industry': scenario.industry,
+                      'mission_id': shadow['mission_id'],
+                      'attempt_id': shadow['attempt_id'],
+                      'query_count': len(result.queries),
+                      'returned_candidates': len(result.candidates),
+                      'funnel': json.loads(funnel['counters_json']),
+                      'observer_mode': metadata.get('observer_mode'),
+                      'routing_changed': metadata.get('routing_changed'),
+                      'sufficient_evidence': metadata.get('sufficient_evidence'),
+                      'action_counts': metadata.get('action_counts'),
+                      'recommendation_count': counters.get('recommendation_count'),
+                      'search_cost_rub': str(rub),
+                  })
+
+          asyncio.run(execute())
+          assert actual_rub <= MAX_BENCHMARK_SEARCH_COST_RUB, {
+              'actual_rub': str(actual_rub),
+              'hard_cap_rub': str(MAX_BENCHMARK_SEARCH_COST_RUB),
+          }
+          print(json.dumps({
+              'scenario_count': len(outputs),
+              'estimated_search_cost_rub': str(estimated),
+              'actual_search_cost_rub': str(actual_rub),
+              'hard_cap_search_cost_rub': str(MAX_BENCHMARK_SEARCH_COST_RUB),
+              'routing_changed_any': any(item['routing_changed'] for item in outputs),
+              'scenarios': outputs,
+          }, ensure_ascii=False, sort_keys=True))
+          PY
