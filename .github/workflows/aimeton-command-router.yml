@@ -31,7 +31,7 @@ jobs:
           script: |
             const body = (process.env.COMMENT_BODY || '').trim();
             const issueNumber = Number(process.env.ISSUE_NUMBER || '0');
-            const match = body.match(/^\/(deploy-stage|accept-admin-trace-stage|accept-aimeton-self-audit-stage|accept-checkpoint-stage|accept-mobile-ui-stage|accept-service-catalog-stage|accept-hunter-runtime-stage|accept-logging-pressure-stage|accept-live-analysis-stage|accept-interface-audit-stage|accept-ui-stage|accept-user-workspace-stage|accept-admin-workspace-stage|accept-mission-stage-v2|accept-integrated-stage-continuity|accept-integrated-stage-core|audit-server-architecture|accept-integrated-stage-companies-bootstrap|audit-auth-persistence|diagnose-mission-stage|reconcile-stage-data-mount|repair-admin-stage|accept-auth-stage|benchmark-searxng-concurrency-stage)\s+([0-9a-f]{40})$/);
+            const match = body.match(/^\/(deploy-stage|accept-admin-trace-stage|accept-aimeton-self-audit-stage|accept-checkpoint-stage|accept-mobile-ui-stage|accept-service-catalog-stage|accept-hunter-runtime-stage|accept-logging-pressure-stage|accept-live-analysis-stage|accept-interface-audit-stage|accept-ui-stage|accept-user-workspace-stage|accept-admin-workspace-stage|accept-mission-stage-v2|accept-integrated-stage-continuity|accept-integrated-stage-core|audit-server-architecture|accept-integrated-stage-companies-bootstrap|audit-auth-persistence|diagnose-mission-stage|reconcile-stage-data-mount|repair-admin-stage|accept-auth-stage|benchmark-searxng-concurrency-stage|accept-hunter-real-e2e-stage)\s+([0-9a-f]{40})$/);
 
             if (!match) {
               core.notice('Ignored unsupported slash command; no downstream workflow dispatched.');
@@ -167,6 +167,19 @@ jobs:
                 issue_number: 441,
                 workflow_id: 'benchmark-searxng-concurrency-stage.yml',
                 inputs: {expected_sha: sha, allow_live_calls: 'true'},
+              },
+              'accept-hunter-real-e2e-stage': {
+                issue_number: 441,
+                workflow_id: 'accept-hunter-real-e2e-stage.yml',
+                inputs: {
+                  expected_sha: sha,
+                  region: 'Красноярск',
+                  industry: 'Стоматология',
+                  expected_providers: 'searxng,yandex',
+                  minimum_returned: '10',
+                  minimum_direct_returned: '10',
+                  allow_paid_calls: 'true',
+                },
               },
             };
 
