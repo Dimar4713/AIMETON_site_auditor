@@ -20,11 +20,12 @@ jobs:
       - name: Apply command router patch
         run: python scripts/patch_search_observer_shadow_benchmark_route_544.py
       - name: Validate workflow text
-        run: python - <<'PY'
+        run: |
+          python - <<'PY'
           from pathlib import Path
           text = Path('.github/workflows/aimeton-command-router.yml').read_text(encoding='utf-8')
           assert 'benchmark-search-observer-shadow-stage' in text
-          assert "issue_number: 544" in text
+          assert 'issue_number: 544' in text
           assert "workflow_id: 'benchmark-search-observer-shadow-stage.yml'" in text
           PY
       - name: Commit router change
