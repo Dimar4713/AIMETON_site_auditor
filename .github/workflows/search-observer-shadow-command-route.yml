@@ -1,0 +1,65 @@
+name: Search Observer Shadow Command Route
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+concurrency:
+  group: search-observer-shadow-command-route-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  route:
+    if: >-
+      github.event.comment.user.login == 'Dimar4713' &&
+      github.event.issue.number == 544 &&
+      startsWith(github.event.comment.body, '/benchmark-search-observer-shadow-stage ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Parse, authorize and dispatch bounded shadow benchmark
+        uses: actions/github-script@v7
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const body = (process.env.COMMENT_BODY || '').trim();
+            const match = body.match(/^\/benchmark-search-observer-shadow-stage\s+([0-9a-f]{40})$/);
+            if (!match) {
+              core.setFailed('Invalid benchmark command syntax.');
+              return;
+            }
+            const sha = match[1];
+            await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+            });
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'benchmark-search-observer-shadow-stage.yml',
+              ref: 'main',
+              inputs: {
+                expected_sha: sha,
+                allow_paid_calls: 'true',
+              },
+            });
+            await core.summary
+              .addHeading('AIMETON Search Observer command dispatch')
+              .addList([
+                'command: benchmark-search-observer-shadow-stage',
+                'issue: 544',
+                `actor: ${context.actor}`,
+                `exact_sha: ${sha}`,
+                'live_cost_authorization: explicit_owner_command',
+                'hard_search_cost_cap_rub: 0.08',
+                'result: dispatched',
+              ])
+              .write();
