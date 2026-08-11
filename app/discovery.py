@@ -15,6 +15,7 @@ from app.hunter_query_intelligence import generate_hunter_query_plan
 from app.hunter_source_role import classify_source_role, role_rank
 from app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
+from app.search_observer import build_search_wave_telemetry
 from app.search_gateway import (
     SearchDiagnostics,
     SearchRequest,
@@ -328,6 +329,31 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         )
 
     responses = await asyncio.gather(*(search_query(query) for query in queries))
+    wave_telemetry = build_search_wave_telemetry(queries, responses)
+    trace.append(
+        "hunt_search_wave_observed",
+        state=TraceState.SUCCEEDED,
+        reason_code="hunter_search_wave_observed",
+        summary="Hunter search wave yield telemetry captured for shadow observer",
+        counters={
+            "query_count": wave_telemetry.query_count,
+            "result_count": wave_telemetry.result_count,
+            "unique_domain_count": wave_telemetry.unique_domain_count,
+            "degraded_attempts": wave_telemetry.degraded_attempts,
+            "latency_ms_total": wave_telemetry.latency_ms_total,
+        },
+        metadata={
+            "observer_mode": "telemetry_only",
+            "routing_changed": False,
+            "duplicate_domain_ratio": wave_telemetry.duplicate_domain_ratio,
+            "provider_result_counts": wave_telemetry.provider_result_counts,
+            "attempt_states": wave_telemetry.attempt_states,
+            "total_cost_by_currency": {
+                key: str(value) for key, value in wave_telemetry.total_cost_by_currency.items()
+            },
+            "directions": [item.model_dump(mode="json") for item in wave_telemetry.directions],
+        },
+    )
     for response in responses:
         search_diagnostics.append(response.diagnostics)
         raw_results.extend(item.as_legacy_dict() for item in response.results)
