@@ -1,0 +1,80 @@
+name: Temporary Hunter Phase Timeline 441 DE2C
+
+on:
+  push:
+    branches:
+      - diag/provider-contribution-441-de2c
+    paths:
+      - .github/workflows/tmp-hunter-phase-timeline-441-de2c.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: de2cab423a99777bc3244c1b8899eaf59960f6f9
+      MISSION_ID: hunt-d6a50188-ec6b-47e2-99ea-e852b1bdb5dd
+      ATTEMPT_ID: corr-8eb3ffa7-05c3-4e43-b2c5-bc21895ee684
+
+    steps:
+      - name: Derive Hunter phase timeline without provider calls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$(cat "$STACK_DIR/app-source-sha.txt")" == "$EXPECTED_SHA" ]]
+          [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" == healthy ]]
+          docker exec -e TRACE_MISSION_ID="$MISSION_ID" -e TRACE_ATTEMPT_ID="$ATTEMPT_ID" -i "$CONTAINER" python - <<'PY'
+          import json, os, sqlite3
+          from collections import defaultdict
+          from datetime import datetime
+
+          db = sqlite3.connect(os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3'), timeout=30)
+          db.row_factory = sqlite3.Row
+          rows = db.execute('''
+            SELECT component, operation, state, reason_code, created_at, duration_ms, provider
+            FROM mission_trace_events
+            WHERE mission_id=? AND attempt_id=?
+            ORDER BY sequence
+          ''', (os.environ['TRACE_MISSION_ID'], os.environ['TRACE_ATTEMPT_ID'])).fetchall()
+          db.close()
+          assert rows
+          def dt(v): return datetime.fromisoformat(v)
+          overall_start, overall_end = dt(rows[0]['created_at']), dt(rows[-1]['created_at'])
+          groups = defaultdict(list)
+          for r in rows:
+              groups[f"{r['component']}::{r['operation']}"].append(r)
+          focus = [
+            'hunter::hunt_plan', 'search_gateway::query_planned',
+            'search_gateway::request_started', 'search_gateway::response_received',
+            'search_gateway::result_item', 'hunter::candidate_excluded',
+            'hunter::candidate_deduplicated', 'hunter::candidate_dedupe_retained',
+            'hunter::candidate_pre_scored', 'hunter::candidate_rejected',
+            'hunter::candidate_deep_audit_started', 'hunter::candidate_deep_audit_completed',
+            'hunter::candidate_deep_audit_failed', 'hunter::candidate_returned',
+            'hunter::hunt_funnel_complete'
+          ]
+          timeline = {}
+          for key in focus:
+              items = groups.get(key, [])
+              if not items: continue
+              first, last = dt(items[0]['created_at']), dt(items[-1]['created_at'])
+              timeline[key] = {
+                  'count': len(items),
+                  'first_offset_s': round((first-overall_start).total_seconds(), 3),
+                  'last_offset_s': round((last-overall_start).total_seconds(), 3),
+                  'span_s': round((last-first).total_seconds(), 3),
+                  'duration_ms_sum': sum(int(x['duration_ms'] or 0) for x in items),
+              }
+          print(json.dumps({
+              'event_count': len(rows),
+              'trace_wall_span_s': round((overall_end-overall_start).total_seconds(), 3),
+              'trace_first': rows[0]['created_at'], 'trace_last': rows[-1]['created_at'],
+              'timeline': timeline, 'provider_calls': 0
+          }, ensure_ascii=False, sort_keys=True))
+          PY
