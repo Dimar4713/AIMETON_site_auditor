@@ -1,13 +1,13 @@
 from decimal import Decimal
 
 from app.search_gateway import (
-    AttemptState,
     GatewayState,
     ProviderAttempt,
     SearchDiagnostics,
     SearchItem,
     SearchResponse,
 )
+from app.search_gateway.models import AttemptState
 from app.search_observer import build_search_wave_telemetry
 
 
