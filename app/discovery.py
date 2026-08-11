@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -16,6 +17,7 @@ from app.hunter_source_role import classify_source_role, role_rank
 from app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
 from app.search_observer import build_search_wave_telemetry
+from app.search_observer_llm import evaluate_search_wave_shadow
 from app.search_gateway import (
     SearchDiagnostics,
     SearchRequest,
@@ -362,6 +364,41 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             ],
         },
     )
+
+    shadow_observer_enabled = os.getenv("HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if shadow_observer_enabled:
+        shadow_recommendation = await evaluate_search_wave_shadow(wave_telemetry)
+        if shadow_recommendation is None:
+            trace.append(
+                "hunt_search_wave_shadow_observer",
+                state=TraceState.SKIPPED,
+                reason_code="hunter_shadow_observer_unavailable",
+                summary="Shadow Search Observer produced no valid advisory recommendation",
+                counters={"recommendation_count": 0},
+                metadata={"observer_mode": "shadow", "routing_changed": False},
+            )
+        else:
+            action_counts: dict[str, int] = {}
+            for item in shadow_recommendation.recommendations:
+                action = str(item.action)
+                action_counts[action] = action_counts.get(action, 0) + 1
+            trace.append(
+                "hunt_search_wave_shadow_observer",
+                state=TraceState.SUCCEEDED,
+                reason_code="hunter_shadow_observer_advisory_captured",
+                summary="Shadow Search Observer advisory captured without execution",
+                counters={"recommendation_count": len(shadow_recommendation.recommendations)},
+                metadata={
+                    "observer_mode": "shadow",
+                    "routing_changed": False,
+                    "sufficient_evidence": shadow_recommendation.sufficient_evidence,
+                    "action_counts": action_counts,
+                    "summary": shadow_recommendation.summary,
+                },
+            )
+
     for response in responses:
         search_diagnostics.append(response.diagnostics)
         raw_results.extend(item.as_legacy_dict() for item in response.results)
