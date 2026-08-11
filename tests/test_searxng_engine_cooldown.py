@@ -69,13 +69,17 @@ async def test_partial_captcha_temporarily_removes_only_failed_engine() -> None:
         transport=httpx.MockTransport(handler),
     )
 
-    await provider.search(_request("first query"), timeout_seconds=1)
-    first_degradation = provider.consume_degradation(_request("unrelated"))
-    assert first_degradation is None
+    # Degradation records are request-scoped so the same request must consume them.
+    first_request = _request("first query")
+    await provider.search(first_request, timeout_seconds=1)
+    first_degradation = provider.consume_degradation(first_request)
+    assert first_degradation is not None
+    assert first_degradation.reason is FallbackReason.CAPTCHA
+    assert blocked_engine is not None
+    assert blocked_engine in first_degradation.upstreams
 
     await provider.search(_request("second query"), timeout_seconds=1)
 
-    assert blocked_engine is not None
     assert blocked_engine in calls[0]
     assert blocked_engine not in calls[1]
     assert len(calls[1]) == 2
