@@ -1,0 +1,95 @@
+name: Temporary accept Search Observer Shadow Stage 544
+
+on:
+  push:
+    branches:
+      - evidence/search-observer-shadow-stage-544
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: 4de947d5919f9b645c29ac60c7dcc4c677f325fb
+    steps:
+      - name: Verify exact Stage SHA and default-off shadow flag
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          [[ "$(cat app-source-sha.txt)" == "$EXPECTED_SHA" ]]
+          flag="$(docker exec "$CONTAINER" sh -lc 'printf %s "${HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED:-}"')"
+          case "${flag,,}" in
+            ""|0|false|no|off) ;;
+            *) echo "shadow flag unexpectedly enabled: $flag" >&2; exit 1 ;;
+          esac
+
+      - name: Execute one bounded advisory-only shadow evaluation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i "$CONTAINER" python - <<'PY'
+          import asyncio
+          import json
+          from decimal import Decimal
+
+          from app.search_observer import QueryYieldTelemetry, SearchWaveTelemetry
+          from app.search_observer_llm import evaluate_search_wave_shadow
+
+          telemetry = SearchWaveTelemetry(
+              query_count=2,
+              result_count=16,
+              unique_domain_count=11,
+              duplicate_domain_ratio=0.3125,
+              provider_result_counts={'searxng': 10, 'yandex': 6},
+              attempt_states={'succeeded': 4},
+              latency_ms_total=2100,
+              degraded_attempts=0,
+              total_cost_by_currency={'RUB': Decimal('0.01'), 'USD': Decimal('0')},
+              directions=[
+                  QueryYieldTelemetry(
+                      query='стоматология Красноярск официальный сайт',
+                      result_count=10,
+                      unique_domain_count=8,
+                      duplicate_domain_ratio=0.2,
+                      provider_result_counts={'searxng': 6, 'yandex': 4},
+                      attempt_states={'succeeded': 2},
+                      latency_ms_total=1100,
+                      degraded_attempts=0,
+                      cache_hit=False,
+                      total_cost_by_currency={'RUB': Decimal('0.01')},
+                  ),
+                  QueryYieldTelemetry(
+                      query='стоматологическая клиника Красноярск компания',
+                      result_count=6,
+                      unique_domain_count=3,
+                      duplicate_domain_ratio=0.5,
+                      provider_result_counts={'searxng': 4, 'yandex': 2},
+                      attempt_states={'succeeded': 2},
+                      latency_ms_total=1000,
+                      degraded_attempts=0,
+                      cache_hit=False,
+                      total_cost_by_currency={'RUB': Decimal('0')},
+                  ),
+              ],
+          )
+          result = asyncio.run(evaluate_search_wave_shadow(telemetry))
+          assert result is not None, 'shadow observer returned no valid recommendation'
+          assert result.observer_mode == 'shadow', result
+          assert result.routing_changed is False, result
+          assert all(item.direction_index in {0, 1} for item in result.recommendations), result
+          print(json.dumps({
+              'observer_mode': result.observer_mode,
+              'routing_changed': result.routing_changed,
+              'sufficient_evidence': result.sufficient_evidence,
+              'recommendation_count': len(result.recommendations),
+              'actions': [str(item.action) for item in result.recommendations],
+              'summary': result.summary,
+          }, ensure_ascii=False, sort_keys=True))
+          PY
