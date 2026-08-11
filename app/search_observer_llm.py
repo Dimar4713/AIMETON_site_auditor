@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.llm import BASE_URL, MODEL
 from app.search_observer import SearchWaveTelemetry
+from app.search_observer_models import ResolvedObserverModel
 
 
 class ObserverAction(StrEnum):
@@ -65,17 +66,32 @@ def _bounded_telemetry_payload(telemetry: SearchWaveTelemetry) -> dict:
     }
 
 
-async def evaluate_search_wave_shadow(
-    telemetry: SearchWaveTelemetry,
-) -> SearchObserverRecommendation | None:
-    """Ask the LLM for advisory search-steering recommendations only.
-
-    The returned object has no execution capability. Any future application of
-    recommendations must pass a separate deterministic policy gate. Fail closed
-    to None on missing config, transport failure or schema violation.
-    """
+def _legacy_model() -> ResolvedObserverModel | None:
     key = os.getenv("ROUTERAI_API_KEY")
     if not key:
+        return None
+    return ResolvedObserverModel(
+        profile_name="routerai-current",
+        provider="routerai",
+        base_url=BASE_URL.rstrip("/"),
+        api_key=key,
+        model=MODEL,
+        tier="O2",
+        configured=True,
+    )
+
+
+async def evaluate_search_wave_shadow_with_model(
+    telemetry: SearchWaveTelemetry,
+    model: ResolvedObserverModel,
+) -> SearchObserverRecommendation | None:
+    """Evaluate one completed wave using one explicitly resolved advisory model.
+
+    The model has no routing authority. Missing/incomplete configuration,
+    transport failures and schema violations all fail open to deterministic
+    Hunter behavior by returning None.
+    """
+    if not model.configured or not model.base_url or not model.api_key or not model.model:
         return None
 
     schema = SearchObserverRecommendation.model_json_schema()
@@ -102,7 +118,7 @@ JSON schema:
 {json.dumps(schema, ensure_ascii=False)}
 """
     payload = {
-        "model": MODEL,
+        "model": model.model,
         "temperature": 0.0,
         "messages": [
             {
@@ -116,8 +132,8 @@ JSON schema:
     try:
         async with httpx.AsyncClient(timeout=25) as client:
             response = await client.post(
-                f"{BASE_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {key}"},
+                f"{model.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {model.api_key}"},
                 json=payload,
             )
             response.raise_for_status()
@@ -132,3 +148,13 @@ JSON schema:
     if any(item.direction_index > max_index for item in recommendation.recommendations):
         return None
     return recommendation
+
+
+async def evaluate_search_wave_shadow(
+    telemetry: SearchWaveTelemetry,
+) -> SearchObserverRecommendation | None:
+    """Backward-compatible current RouterAI shadow evaluator."""
+    model = _legacy_model()
+    if model is None:
+        return None
+    return await evaluate_search_wave_shadow_with_model(telemetry, model)
