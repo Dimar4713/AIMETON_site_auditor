@@ -351,7 +351,15 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             "total_cost_by_currency": {
                 key: str(value) for key, value in wave_telemetry.total_cost_by_currency.items()
             },
-            "directions": [item.model_dump(mode="json") for item in wave_telemetry.directions],
+            "direction_count": len(wave_telemetry.directions),
+            "direction_yield_preview": [
+                (
+                    f"{index}:results={item.result_count};domains={item.unique_domain_count};"
+                    f"dup={item.duplicate_domain_ratio};latency_ms={item.latency_ms_total};"
+                    f"degraded={item.degraded_attempts};cache={str(item.cache_hit).lower()}"
+                )
+                for index, item in enumerate(wave_telemetry.directions)
+            ],
         },
     )
     for response in responses:
