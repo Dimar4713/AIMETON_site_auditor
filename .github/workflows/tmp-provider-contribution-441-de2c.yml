@@ -1,0 +1,113 @@
+name: Temporary Provider Contribution 441 DE2C
+
+on:
+  push:
+    branches:
+      - diag/provider-contribution-441-de2c
+    paths:
+      - .github/workflows/tmp-provider-contribution-441-de2c.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: de2cab423a99777bc3244c1b8899eaf59960f6f9
+      MISSION_ID: hunt-d6a50188-ec6b-47e2-99ea-e852b1bdb5dd
+      ATTEMPT_ID: corr-8eb3ffa7-05c3-4e43-b2c5-bc21895ee684
+
+    steps:
+      - name: Verify exact Stage and analyze persisted trace without provider calls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deployed="$(cat "$STACK_DIR/app-source-sha.txt")"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$status" == "healthy" ]]
+          docker exec \
+            -e TRACE_MISSION_ID="$MISSION_ID" \
+            -e TRACE_ATTEMPT_ID="$ATTEMPT_ID" \
+            -i "$CONTAINER" python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from collections import Counter, defaultdict
+
+          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          db = sqlite3.connect(db_path, timeout=30)
+          db.row_factory = sqlite3.Row
+          rows = db.execute(
+              '''SELECT provider, operation, state, reason_code, duration_ms,
+                        counters_json, metadata_json, deployed_sha
+                 FROM mission_trace_events
+                 WHERE mission_id = ? AND attempt_id = ?
+                 ORDER BY sequence''',
+              (os.environ['TRACE_MISSION_ID'], os.environ['TRACE_ATTEMPT_ID']),
+          ).fetchall()
+          db.close()
+          assert rows, 'trace attempt not found'
+
+          responses = defaultdict(lambda: {'calls': 0, 'latencies_ms': [], 'results_received': 0, 'states': Counter(), 'reasons': Counter()})
+          primary_items = Counter()
+          corroborated_items = Counter()
+          deployed_shas = set()
+          for row in rows:
+              if row['deployed_sha']:
+                  deployed_shas.add(row['deployed_sha'])
+              provider = row['provider'] or ''
+              if row['operation'] == 'response_received' and provider:
+                  rec = responses[provider]
+                  rec['calls'] += 1
+                  if row['duration_ms'] is not None:
+                      rec['latencies_ms'].append(int(row['duration_ms']))
+                  counters = json.loads(row['counters_json'] or '{}')
+                  rec['results_received'] += int(counters.get('results_received', 0))
+                  rec['states'][row['state']] += 1
+                  rec['reasons'][row['reason_code']] += 1
+              elif row['operation'] == 'result_item' and provider:
+                  primary_items[provider] += 1
+                  metadata = json.loads(row['metadata_json'] or '{}')
+                  for item in metadata.get('corroborated_by') or []:
+                      corroborated_items[str(item)] += 1
+
+          def percentile(values, p):
+              if not values:
+                  return None
+              ordered = sorted(values)
+              index = min(len(ordered) - 1, max(0, int(round((len(ordered) - 1) * p))))
+              return ordered[index]
+
+          provider_summary = {}
+          for provider, rec in sorted(responses.items()):
+              lat = rec['latencies_ms']
+              provider_summary[provider] = {
+                  'calls': rec['calls'],
+                  'results_received_sum': rec['results_received'],
+                  'latency_ms_sum': sum(lat),
+                  'latency_ms_avg': round(sum(lat) / len(lat), 1) if lat else None,
+                  'latency_ms_p50': percentile(lat, 0.50),
+                  'latency_ms_p95': percentile(lat, 0.95),
+                  'latency_ms_max': max(lat) if lat else None,
+                  'states': dict(rec['states']),
+                  'reasons': dict(rec['reasons']),
+                  'primary_result_items': primary_items.get(provider, 0),
+                  'corroborated_result_items': corroborated_items.get(provider, 0),
+              }
+
+          safe = {
+              'mission_id': os.environ['TRACE_MISSION_ID'],
+              'attempt_id': os.environ['TRACE_ATTEMPT_ID'],
+              'event_count': len(rows),
+              'trace_deployed_shas': sorted(deployed_shas),
+              'providers': provider_summary,
+              'provider_calls': 0,
+          }
+          print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          PY
