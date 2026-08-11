@@ -1,0 +1,93 @@
+name: Temporary Hunter Duration Breakdown 441 DE2C
+
+on:
+  push:
+    branches:
+      - diag/provider-contribution-441-de2c
+    paths:
+      - .github/workflows/tmp-hunter-duration-breakdown-441-de2c.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: de2cab423a99777bc3244c1b8899eaf59960f6f9
+      MISSION_ID: hunt-d6a50188-ec6b-47e2-99ea-e852b1bdb5dd
+      ATTEMPT_ID: corr-8eb3ffa7-05c3-4e43-b2c5-bc21895ee684
+
+    steps:
+      - name: Aggregate trace durations without provider calls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deployed="$(cat "$STACK_DIR/app-source-sha.txt")"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$status" == "healthy" ]]
+          docker exec \
+            -e TRACE_MISSION_ID="$MISSION_ID" \
+            -e TRACE_ATTEMPT_ID="$ATTEMPT_ID" \
+            -i "$CONTAINER" python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from collections import Counter, defaultdict
+
+          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          db = sqlite3.connect(db_path, timeout=30)
+          db.row_factory = sqlite3.Row
+          rows = db.execute(
+              '''SELECT component, operation, state, reason_code, provider, duration_ms, counters_json
+                 FROM mission_trace_events
+                 WHERE mission_id = ? AND attempt_id = ?
+                 ORDER BY sequence''',
+              (os.environ['TRACE_MISSION_ID'], os.environ['TRACE_ATTEMPT_ID']),
+          ).fetchall()
+          db.close()
+          assert rows, 'trace attempt not found'
+
+          groups = defaultdict(lambda: {'count': 0, 'durations': [], 'states': Counter(), 'reasons': Counter()})
+          for row in rows:
+              key = f"{row['component']}::{row['operation']}"
+              rec = groups[key]
+              rec['count'] += 1
+              if row['duration_ms'] is not None:
+                  rec['durations'].append(int(row['duration_ms']))
+              rec['states'][row['state']] += 1
+              rec['reasons'][row['reason_code']] += 1
+
+          summary = {}
+          for key, rec in groups.items():
+              d = rec['durations']
+              summary[key] = {
+                  'count': rec['count'],
+                  'duration_count': len(d),
+                  'duration_ms_sum': sum(d),
+                  'duration_ms_avg': round(sum(d)/len(d), 1) if d else None,
+                  'duration_ms_max': max(d) if d else None,
+                  'states': dict(rec['states']),
+                  'top_reasons': dict(rec['reasons'].most_common(5)),
+              }
+
+          ranked = sorted(
+              summary.items(),
+              key=lambda item: (item[1]['duration_ms_sum'], item[1]['count']),
+              reverse=True,
+          )
+          safe = {
+              'mission_id': os.environ['TRACE_MISSION_ID'],
+              'attempt_id': os.environ['TRACE_ATTEMPT_ID'],
+              'event_count': len(rows),
+              'top_by_duration': ranked[:25],
+              'top_by_count': sorted(summary.items(), key=lambda item: item[1]['count'], reverse=True)[:25],
+              'provider_calls': 0,
+          }
+          print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          PY
