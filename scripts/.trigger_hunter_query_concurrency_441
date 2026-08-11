@@ -1,0 +1,1 @@
+retry canonical CI handoff after hosted runner lacked pytest
