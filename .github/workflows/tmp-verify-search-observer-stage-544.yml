@@ -16,8 +16,8 @@ jobs:
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       CONTAINER: aimeton-auditor
-      MISSION_ID: hunt-81e46a94-5056-45a9-8447-8dae742b508b
-      EXPECTED_SHA: ee1c0dceb50dc976427c85ade1842d51e837dfd3
+      MISSION_ID: hunt-3c6fd7a5-5449-4dc3-996e-bf14e22050b1
+      EXPECTED_SHA: 6a061ee39b76a1511ecde39baa6491a4211049c4
     steps:
       - name: Verify exact Stage SHA
         shell: bash
@@ -26,7 +26,7 @@ jobs:
           cd "$STACK_DIR"
           [[ "$(cat app-source-sha.txt)" == "$EXPECTED_SHA" ]]
 
-      - name: Verify observer trace evidence without new search
+      - name: Verify compact observer trace evidence without new search
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -59,20 +59,23 @@ jobs:
           assert row is not None, 'hunt_search_wave_observed trace event not found'
           counters = json.loads(row['counters_json'])
           metadata = json.loads(row['metadata_json'])
+          assert metadata.get('truncated') is not True, metadata
           assert metadata.get('observer_mode') == 'telemetry_only', metadata
           assert metadata.get('routing_changed') is False, metadata
-          directions = metadata.get('directions') or []
-          assert counters.get('query_count') == len(directions) == 20, (counters, len(directions))
+          assert counters.get('query_count') == 20, counters
+          assert metadata.get('direction_count') == 20, metadata
+          preview = metadata.get('direction_yield_preview') or []
+          assert len(preview) == 20, (metadata, len(preview))
           assert counters.get('result_count', 0) > 0, counters
           assert counters.get('unique_domain_count', 0) > 0, counters
-          assert isinstance(metadata.get('provider_result_counts'), dict), metadata
-          assert isinstance(metadata.get('attempt_states'), dict), metadata
           print(json.dumps({
               'mission_id': row['mission_id'],
               'attempt_id': row['attempt_id'],
               'observer_mode': metadata.get('observer_mode'),
               'routing_changed': metadata.get('routing_changed'),
               'query_count': counters.get('query_count'),
+              'direction_count': metadata.get('direction_count'),
+              'preview_count': len(preview),
               'result_count': counters.get('result_count'),
               'unique_domain_count': counters.get('unique_domain_count'),
               'degraded_attempts': counters.get('degraded_attempts'),
