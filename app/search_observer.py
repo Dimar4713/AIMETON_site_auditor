@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from decimal import Decimal
+from pathlib import Path
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -113,3 +115,32 @@ def build_search_wave_telemetry(
         total_cost_by_currency=wave_costs,
         directions=directions,
     )
+
+
+def write_search_wave_snapshot(
+    telemetry: SearchWaveTelemetry,
+    *,
+    directory: str,
+    mission_id: str,
+    attempt_id: str,
+) -> Path:
+    """Persist replay-complete observer telemetry outside the bounded trace ledger.
+
+    The caller must explicitly provide a directory. Normal runtime does not call
+    this function unless the snapshot sink is enabled by a benchmark/test path.
+    """
+    root = Path(directory)
+    root.mkdir(parents=True, exist_ok=True)
+    safe_mission = "".join(ch for ch in mission_id if ch.isalnum() or ch in {"-", "_"})[:120]
+    safe_attempt = "".join(ch for ch in attempt_id if ch.isalnum() or ch in {"-", "_"})[:120]
+    if not safe_mission or not safe_attempt:
+        raise ValueError("invalid_snapshot_identity")
+    path = root / f"{safe_mission}__{safe_attempt}.json"
+    payload = {
+        "schema_version": 1,
+        "mission_id": mission_id,
+        "attempt_id": attempt_id,
+        "telemetry": telemetry.model_dump(mode="json"),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    return path
