@@ -11,6 +11,8 @@ from app.search_observer_llm import (
     _legacy_model,
     _observer_timeout_seconds,
     evaluate_search_wave_shadow,
+    get_last_shadow_observer_evidence,
+    shadow_observer_runtime_descriptor,
 )
 from app.search_observer_models import ResolvedObserverModel
 
@@ -105,6 +107,26 @@ def test_shadow_observer_model_can_be_overridden(monkeypatch) -> None:
     assert model.model == "qwen/qwen3.5-9b"
 
 
+def test_shadow_observer_runtime_descriptor_exposes_no_secret(monkeypatch) -> None:
+    monkeypatch.setenv("ROUTERAI_API_KEY", "do-not-leak")
+    monkeypatch.setenv("HUNTER_SEARCH_OBSERVER_MODEL", "deepseek/deepseek-v3.2")
+    monkeypatch.setenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", "12")
+
+    descriptor = shadow_observer_runtime_descriptor()
+
+    assert descriptor == {
+        "profile_name": "routerai-shadow-observer",
+        "provider": "routerai",
+        "model": "deepseek/deepseek-v3.2",
+        "tier": "O1",
+        "configured": True,
+        "timeout_seconds": 12.0,
+    }
+    assert "api_key" not in descriptor
+    assert "base_url" not in descriptor
+    assert "do-not-leak" not in str(descriptor)
+
+
 def test_shadow_observer_timeout_is_bounded(monkeypatch) -> None:
     monkeypatch.delenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", raising=False)
     assert _observer_timeout_seconds() == DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS
@@ -122,7 +144,7 @@ def test_shadow_observer_timeout_is_bounded(monkeypatch) -> None:
     assert _observer_timeout_seconds() == 12.5
 
 
-def test_shadow_observer_timeout_fails_open(monkeypatch) -> None:
+def test_shadow_observer_timeout_fails_open_and_records_evidence(monkeypatch) -> None:
     from app import search_observer_llm as observer
 
     model = ResolvedObserverModel(
@@ -140,7 +162,25 @@ def test_shadow_observer_timeout_fails_open(monkeypatch) -> None:
         raise AssertionError("wall-clock guard should fire first")
 
     monkeypatch.setattr(observer, "_legacy_model", lambda: model)
+    monkeypatch.setattr(
+        observer,
+        "shadow_observer_runtime_descriptor",
+        lambda: {
+            "profile_name": "test-shadow",
+            "provider": "routerai",
+            "model": "test/model",
+            "tier": "O1",
+            "configured": True,
+            "timeout_seconds": 0.01,
+        },
+    )
     monkeypatch.setattr(observer, "_observer_timeout_seconds", lambda: 0.01)
     monkeypatch.setattr(observer, "evaluate_search_wave_shadow_with_model", slow_evaluator)
 
     assert asyncio.run(evaluate_search_wave_shadow(_telemetry())) is None
+    evidence = get_last_shadow_observer_evidence()
+    assert evidence["observer_outcome"] == "timeout"
+    assert evidence["schema_valid"] is False
+    assert evidence["observer_recommendation_count"] == 0
+    assert evidence["model"] == "test/model"
+    assert evidence["observer_latency_ms"] >= 9
