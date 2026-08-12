@@ -1,11 +1,18 @@
+import asyncio
 from decimal import Decimal
 
 from app.search_observer import QueryYieldTelemetry, SearchWaveTelemetry
 from app.search_observer_llm import (
+    DEFAULT_SEARCH_OBSERVER_MODEL,
+    DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS,
     ObserverAction,
     SearchObserverRecommendation,
     _bounded_telemetry_payload,
+    _legacy_model,
+    _observer_timeout_seconds,
+    evaluate_search_wave_shadow,
 )
+from app.search_observer_models import ResolvedObserverModel
 
 
 def _telemetry() -> SearchWaveTelemetry:
@@ -74,3 +81,66 @@ def test_bounded_payload_preserves_direction_evidence() -> None:
     assert len(payload["directions"]) == 2
     assert payload["directions"][0]["unique_domain_count"] == 8
     assert payload["directions"][1]["duplicate_domain_ratio"] == 0.6
+
+
+def test_shadow_observer_uses_dedicated_default_model(monkeypatch) -> None:
+    monkeypatch.setenv("ROUTERAI_API_KEY", "secret")
+    monkeypatch.delenv("HUNTER_SEARCH_OBSERVER_MODEL", raising=False)
+
+    model = _legacy_model()
+
+    assert model is not None
+    assert model.model == DEFAULT_SEARCH_OBSERVER_MODEL
+    assert model.profile_name == "routerai-shadow-observer"
+    assert model.tier == "O1"
+
+
+def test_shadow_observer_model_can_be_overridden(monkeypatch) -> None:
+    monkeypatch.setenv("ROUTERAI_API_KEY", "secret")
+    monkeypatch.setenv("HUNTER_SEARCH_OBSERVER_MODEL", "qwen/qwen3.5-9b")
+
+    model = _legacy_model()
+
+    assert model is not None
+    assert model.model == "qwen/qwen3.5-9b"
+
+
+def test_shadow_observer_timeout_is_bounded(monkeypatch) -> None:
+    monkeypatch.delenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", raising=False)
+    assert _observer_timeout_seconds() == DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS
+
+    monkeypatch.setenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", "invalid")
+    assert _observer_timeout_seconds() == DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS
+
+    monkeypatch.setenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", "-5")
+    assert _observer_timeout_seconds() == 1.0
+
+    monkeypatch.setenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", "99")
+    assert _observer_timeout_seconds() == 30.0
+
+    monkeypatch.setenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", "12.5")
+    assert _observer_timeout_seconds() == 12.5
+
+
+def test_shadow_observer_timeout_fails_open(monkeypatch) -> None:
+    from app import search_observer_llm as observer
+
+    model = ResolvedObserverModel(
+        profile_name="test-shadow",
+        provider="routerai",
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="test/model",
+        tier="O1",
+        configured=True,
+    )
+
+    async def slow_evaluator(telemetry, resolved_model):
+        await asyncio.sleep(0.05)
+        raise AssertionError("wall-clock guard should fire first")
+
+    monkeypatch.setattr(observer, "_legacy_model", lambda: model)
+    monkeypatch.setattr(observer, "_observer_timeout_seconds", lambda: 0.01)
+    monkeypatch.setattr(observer, "evaluate_search_wave_shadow_with_model", slow_evaluator)
+
+    assert asyncio.run(evaluate_search_wave_shadow(_telemetry())) is None
