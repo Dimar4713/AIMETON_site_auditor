@@ -59,7 +59,7 @@ jobs:
           [[ "$(cat app-source-sha.txt)" == "$expected" ]]
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
           [[ "$status" == healthy ]]
-          BUDGET="$budget" python3 -c 'import os; from decimal import Decimal, InvalidOperation; raw=os.environ["BUDGET"]; value=Decimal(raw); assert value > 0; assert value <= Decimal("100"); print(f"authorized_budget_rub={value}")'
+          BUDGET="$budget" python3 -c 'import os; from decimal import Decimal; value=Decimal(os.environ["BUDGET"]); (Decimal("0") < value <= Decimal("100")) or (_ for _ in ()).throw(SystemExit("authorized_budget_outside_owner_cap")); print(f"authorized_budget_rub={value}")'
 
       - name: Execute bounded live shadow counterfactual validation
         shell: bash
