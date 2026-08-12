@@ -3,7 +3,10 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.search_observer_llm import ObserverAction
-from app.search_observer_multiwave import WaveOutcomeSnapshot, derive_later_marginal_yield
+from app.search_observer_multiwave import (
+    DirectionWaveOutcomeSnapshot,
+    derive_later_direction_marginal_yield,
+)
 from app.search_observer_scoring import (
     OfflineRecommendationEvidence,
     ObserverRuntimeEvidence,
@@ -32,13 +35,14 @@ class PersistedRecommendationEvidence(TraceLinkModel):
 def build_offline_recommendation_evidence(
     *,
     recommendation: PersistedRecommendationEvidence,
-    source_wave: WaveOutcomeSnapshot,
-    later_wave: WaveOutcomeSnapshot,
+    source_wave: DirectionWaveOutcomeSnapshot,
+    later_wave: DirectionWaveOutcomeSnapshot,
 ) -> OfflineRecommendationEvidence:
-    """Link a persisted recommendation to a genuinely later stored wave.
+    """Link one direction-level recommendation to that direction's later wave.
 
-    Read-only and causal-guarded: it never executes search/LLM work or changes routing.
-    The recommendation must originate from the exact source wave being compared.
+    Attempt-level/global wave totals are deliberately not accepted here. This
+    prevents global later yield from being over-attributed to every persisted
+    direction recommendation.
     """
     if recommendation.routing_changed:
         raise ValueError("trace_link_requires_shadow_routing_unchanged")
@@ -49,8 +53,12 @@ def build_offline_recommendation_evidence(
         raise ValueError("recommendation_source_wave_identity_mismatch")
     if recommendation.source_wave_index != source_wave.wave_index:
         raise ValueError("recommendation_source_wave_index_mismatch")
+    if recommendation.direction_index != source_wave.direction_index:
+        raise ValueError("recommendation_source_direction_mismatch")
+    if recommendation.direction_index != later_wave.direction_index:
+        raise ValueError("recommendation_later_direction_mismatch")
 
-    outcome = derive_later_marginal_yield(source_wave, later_wave)
+    outcome = derive_later_direction_marginal_yield(source_wave, later_wave)
     return OfflineRecommendationEvidence(
         mission_id=recommendation.mission_id,
         attempt_id=recommendation.attempt_id,
@@ -65,10 +73,10 @@ def build_offline_recommendation_evidence(
 def score_trace_linked_recommendation(
     *,
     recommendation: PersistedRecommendationEvidence,
-    source_wave: WaveOutcomeSnapshot,
-    later_wave: WaveOutcomeSnapshot,
+    source_wave: DirectionWaveOutcomeSnapshot,
+    later_wave: DirectionWaveOutcomeSnapshot,
 ) -> RecommendationOutcome:
-    """Build and score trace-linked offline evidence with no runtime side effects."""
+    """Build and score direction-lineaged evidence with no runtime side effects."""
     evidence = build_offline_recommendation_evidence(
         recommendation=recommendation,
         source_wave=source_wave,

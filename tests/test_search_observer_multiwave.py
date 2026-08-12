@@ -1,6 +1,11 @@
 import pytest
 
-from app.search_observer_multiwave import WaveOutcomeSnapshot, derive_later_marginal_yield
+from app.search_observer_multiwave import (
+    DirectionWaveOutcomeSnapshot,
+    WaveOutcomeSnapshot,
+    derive_later_direction_marginal_yield,
+    derive_later_marginal_yield,
+)
 
 
 def snapshot(**overrides):
@@ -21,6 +26,13 @@ def snapshot(**overrides):
     }
     values.update(overrides)
     return WaveOutcomeSnapshot(**values)
+
+
+def direction_snapshot(**overrides):
+    values = snapshot().model_dump()
+    values["direction_index"] = 0
+    values.update(overrides)
+    return DirectionWaveOutcomeSnapshot(**values)
 
 
 def test_derives_strictly_later_marginal_yield():
@@ -47,6 +59,34 @@ def test_derives_strictly_later_marginal_yield():
     assert observed.excluded_results == 3
     assert observed.latency_ms == 900
     assert observed.cost_rub == 0.02
+
+
+def test_derives_direction_scoped_later_marginal_yield():
+    observed = derive_later_direction_marginal_yield(
+        direction_snapshot(),
+        direction_snapshot(
+            wave_index=2,
+            query_count=4,
+            raw_results=34,
+            unique_domains=16,
+            qualified_candidates=7,
+            direct_or_official_candidates=5,
+            duplicate_results=4,
+            excluded_results=8,
+            latency_ms=2100,
+            cost_rub=0.04,
+        ),
+    )
+    assert observed.added_queries == 2
+    assert observed.added_qualified_candidates == 3
+
+
+def test_rejects_direction_lineage_mismatch():
+    with pytest.raises(ValueError, match="multiwave_direction_mismatch"):
+        derive_later_direction_marginal_yield(
+            direction_snapshot(),
+            direction_snapshot(wave_index=2, direction_index=1),
+        )
 
 
 def test_rejects_same_wave_as_false_causal_evidence():

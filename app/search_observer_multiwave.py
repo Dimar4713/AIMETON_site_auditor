@@ -12,8 +12,9 @@ class MultiWaveModel(BaseModel):
 class WaveOutcomeSnapshot(MultiWaveModel):
     """Cumulative, stored observation for one bounded search wave.
 
-    This is evidence only. It cannot execute searches, call providers, or change
-    routing. `wave_index` must increase for causal marginal-yield comparison.
+    This is attempt-level evidence only. It cannot execute searches, call
+    providers, or change routing. `wave_index` must increase for causal
+    marginal-yield comparison.
     """
 
     mission_id: str = Field(min_length=1, max_length=120)
@@ -31,17 +32,22 @@ class WaveOutcomeSnapshot(MultiWaveModel):
     routing_changed: bool = False
 
 
+class DirectionWaveOutcomeSnapshot(WaveOutcomeSnapshot):
+    """Cumulative wave evidence scoped to exactly one Observer direction.
+
+    Direction lineage is mandatory for scoring a direction-level recommendation.
+    Attempt-level wave totals must not be reused as if they represented one
+    direction's later marginal yield.
+    """
+
+    direction_index: int = Field(ge=0)
+
+
 def derive_later_marginal_yield(
     earlier: WaveOutcomeSnapshot,
     later: WaveOutcomeSnapshot,
 ) -> ObservedMarginalYield:
-    """Derive a strictly-later marginal yield from two stored snapshots.
-
-    The function is deliberately strict: same-wave comparisons, identity
-    mismatches, routing changes, and any negative cumulative delta are rejected
-    instead of being normalized. This prevents same-wave funnel data from being
-    misrepresented as causal evidence for an Observer recommendation.
-    """
+    """Derive a strictly-later marginal yield from two stored snapshots."""
     if earlier.mission_id != later.mission_id or earlier.attempt_id != later.attempt_id:
         raise ValueError("multiwave_identity_mismatch")
     if later.wave_index <= earlier.wave_index:
@@ -65,3 +71,13 @@ def derive_later_marginal_yield(
     if any(value < 0 for value in fields.values()):
         raise ValueError("multiwave_cumulative_counter_regression")
     return ObservedMarginalYield(**fields)
+
+
+def derive_later_direction_marginal_yield(
+    earlier: DirectionWaveOutcomeSnapshot,
+    later: DirectionWaveOutcomeSnapshot,
+) -> ObservedMarginalYield:
+    """Derive causal marginal yield for one exact direction lineage."""
+    if earlier.direction_index != later.direction_index:
+        raise ValueError("multiwave_direction_mismatch")
+    return derive_later_marginal_yield(earlier, later)
