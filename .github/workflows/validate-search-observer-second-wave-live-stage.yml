@@ -1,0 +1,132 @@
+name: Validate Search Observer Second-Wave Live Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed commit SHA
+        required: true
+        type: string
+      allow_paid_calls:
+        description: Explicit owner authorization for bounded live provider calls
+        required: true
+        default: false
+        type: boolean
+      owner_spend_authorized:
+        description: Owner explicitly authorized this bounded spend mission
+        required: true
+        default: false
+        type: boolean
+      max_budget_rub:
+        description: Hard total measured search budget cap, never above 100 RUB
+        required: true
+        default: '100'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-observer-live-second-wave-stage
+  cancel-in-progress: false
+
+jobs:
+  live-second-wave:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 30
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EVIDENCE_DIR: /tmp/search-observer-live-second-wave
+    steps:
+      - name: Require exact SHA and owner spend authorization
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          budget='${{ inputs.max_budget_rub }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ '${{ inputs.allow_paid_calls }}' == 'true' ]]
+          [[ '${{ inputs.owner_spend_authorized }}' == 'true' ]]
+          cd "$STACK_DIR"
+          [[ "$(cat app-source-sha.txt)" == "$expected" ]]
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$status" == healthy ]]
+          docker exec -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
+          import os
+          from scripts.search_observer_live_second_wave import parse_budget_rub
+          value = parse_budget_rub(os.environ['BUDGET'])
+          assert value <= 100
+          print(f'authorized_budget_rub={value}')
+          PY
+
+      - name: Execute bounded live shadow counterfactual validation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          budget='${{ inputs.max_budget_rub }}'
+          docker exec "$CONTAINER" sh -lc "rm -rf '$EVIDENCE_DIR' && mkdir -p '$EVIDENCE_DIR'"
+          docker exec \
+            -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=true \
+            "$CONTAINER" \
+            python scripts/search_observer_live_second_wave.py \
+              --budget-rub "$budget" \
+              --output "$EVIDENCE_DIR/evidence.json"
+
+      - name: Verify scored evidence and budget invariants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          budget='${{ inputs.max_budget_rub }}'
+          docker exec -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
+          import json
+          import os
+          from decimal import Decimal
+          from pathlib import Path
+
+          path = Path('/tmp/search-observer-live-second-wave/evidence.json')
+          evidence = json.loads(path.read_text(encoding='utf-8'))
+          authorized = Decimal(os.environ['BUDGET'])
+          actual = Decimal(evidence['measured_search_cost_rub'])
+          assert authorized <= Decimal('100')
+          assert actual <= authorized
+          assert evidence['max_incremental_queries'] <= 4
+          assert evidence['observer_routing_authority'] is False
+          assert evidence['premium_escalation'] is False
+          assert evidence['routing_changed_any'] is False
+          assert evidence['validation_state'] == 'scored', evidence
+          outcomes = [
+              outcome
+              for scenario in evidence['scenarios']
+              for outcome in scenario.get('outcomes', [])
+          ]
+          assert 1 <= len(outcomes) <= 4, evidence
+          assert all(item['score']['routing_changed'] is False for item in outcomes)
+          print(json.dumps({
+              'validation_state': evidence['validation_state'],
+              'outcome_count': len(outcomes),
+              'actual_search_cost_rub': str(actual),
+              'authorized_budget_rub': str(authorized),
+          }, sort_keys=True))
+          PY
+
+      - name: Collect live evidence
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf "$RUNNER_TEMP/search-observer-live-second-wave"
+          mkdir -p "$RUNNER_TEMP/search-observer-live-second-wave"
+          if docker exec "$CONTAINER" test -f "$EVIDENCE_DIR/evidence.json"; then
+            docker cp "$CONTAINER:$EVIDENCE_DIR/evidence.json" "$RUNNER_TEMP/search-observer-live-second-wave/evidence.json"
+          fi
+
+      - name: Upload live second-wave evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-observer-live-second-wave-${{ inputs.expected_sha }}
+          path: ${{ runner.temp }}/search-observer-live-second-wave/evidence.json
+          if-no-files-found: warn
+          retention-days: 30
