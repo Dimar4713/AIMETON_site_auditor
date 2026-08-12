@@ -63,7 +63,7 @@ jobs:
           echo "container_status=$status"
           echo "batch_budget_rub=$budget"
 
-      - name: Execute heterogeneous shadow causal batch
+      - name: Execute heterogeneous shadow causal rotation batch
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -74,6 +74,7 @@ jobs:
             -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=true \
             "$CONTAINER" \
             python -m scripts.search_observer_heterogeneous_batch \
+              --rotation \
               --budget-rub "$budget" \
               --output "$EVIDENCE_DIR/evidence.json"
 
@@ -95,10 +96,17 @@ jobs:
               for outcome in scenario.get('outcomes', [])
               if isinstance(outcome, dict)
           ]
+          expected_rotation = {
+              'construction-moscow',
+              'it-services-samara',
+              'logistics-rostov-on-don',
+              'education-perm',
+          }
           checks = {
               'batch_kind': evidence.get('batch_kind') == 'heterogeneous_shadow_causal',
-              'scenario_count': 2 <= len(selected) <= 4,
+              'scenario_count': len(selected) == 4,
               'scenario_uniqueness': len(selected) == len(set(selected)),
+              'rotation_set_exact': set(selected) == expected_rotation,
               'actual_cost_within_batch_cap': actual <= Decimal('1'),
               'observer_has_no_routing_authority': evidence.get('observer_routing_authority') is False,
               'premium_escalation_disabled': evidence.get('premium_escalation') is False,

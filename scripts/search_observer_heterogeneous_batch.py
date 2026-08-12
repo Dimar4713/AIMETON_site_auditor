@@ -17,6 +17,35 @@ DEFAULT_SCENARIO_SLUGS = (
     "accounting-novosibirsk",
     "industrial-equipment-kazan",
 )
+ROTATION_SCENARIO_SLUGS = (
+    "construction-moscow",
+    "it-services-samara",
+    "logistics-rostov-on-don",
+    "education-perm",
+)
+ROTATION_SCENARIOS: tuple[ShadowBenchmarkScenario, ...] = (
+    ShadowBenchmarkScenario(
+        slug="construction-moscow",
+        region="Москва",
+        industry="Строительные компании",
+    ),
+    ShadowBenchmarkScenario(
+        slug="it-services-samara",
+        region="Самара",
+        industry="ИТ-услуги",
+    ),
+    ShadowBenchmarkScenario(
+        slug="logistics-rostov-on-don",
+        region="Ростов-на-Дону",
+        industry="Логистические компании",
+    ),
+    ShadowBenchmarkScenario(
+        slug="education-perm",
+        region="Пермь",
+        industry="Образовательные услуги",
+    ),
+)
+ALL_BATCH_SCENARIOS = SCENARIOS + ROTATION_SCENARIOS
 MAX_BATCH_SCENARIOS = 4
 
 
@@ -36,7 +65,7 @@ def select_scenarios(slugs: tuple[str, ...]) -> tuple[ShadowBenchmarkScenario, .
         raise ValueError("heterogeneous_batch_requires_2_to_4_scenarios")
     if len(set(requested)) != len(requested):
         raise ValueError("heterogeneous_batch_scenarios_must_be_unique")
-    by_slug = {item.slug: item for item in SCENARIOS}
+    by_slug = {item.slug: item for item in ALL_BATCH_SCENARIOS}
     try:
         selected = tuple(by_slug[slug] for slug in requested)
     except KeyError as exc:
@@ -123,9 +152,15 @@ def main() -> int:
     parser.add_argument("--budget-rub", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--scenario", action="append", default=[])
+    parser.add_argument("--rotation", action="store_true")
     args = parser.parse_args()
     budget = parse_budget_rub(args.budget_rub)
-    scenarios = select_scenarios(tuple(args.scenario))
+    requested = tuple(args.scenario)
+    if args.rotation:
+        if requested:
+            raise ValueError("heterogeneous_batch_rotation_conflicts_with_explicit_scenarios")
+        requested = ROTATION_SCENARIO_SLUGS
+    scenarios = select_scenarios(requested)
     evidence = asyncio.run(run_batch(budget_rub=budget, scenarios=scenarios, output=Path(args.output)))
     print(json.dumps(evidence, ensure_ascii=False, sort_keys=True))
     return 0
