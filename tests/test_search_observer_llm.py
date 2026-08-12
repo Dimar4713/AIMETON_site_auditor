@@ -177,8 +177,12 @@ def test_shadow_observer_timeout_fails_open_and_records_evidence(monkeypatch) ->
     monkeypatch.setattr(observer, "_observer_timeout_seconds", lambda: 0.01)
     monkeypatch.setattr(observer, "evaluate_search_wave_shadow_with_model", slow_evaluator)
 
-    assert asyncio.run(evaluate_search_wave_shadow(_telemetry())) is None
-    evidence = get_last_shadow_observer_evidence()
+    async def exercise():
+        recommendation = await evaluate_search_wave_shadow(_telemetry())
+        return recommendation, get_last_shadow_observer_evidence()
+
+    recommendation, evidence = asyncio.run(exercise())
+    assert recommendation is None
     assert evidence["observer_outcome"] == "timeout"
     assert evidence["schema_valid"] is False
     assert evidence["observer_recommendation_count"] == 0
