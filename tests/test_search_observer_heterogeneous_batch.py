@@ -5,6 +5,7 @@ import pytest
 from scripts.search_observer_heterogeneous_batch import (
     DEFAULT_SCENARIO_SLUGS,
     ROTATION_SCENARIO_SLUGS,
+    THIRD_ROTATION_SCENARIO_SLUGS,
     parse_budget_rub,
     select_scenarios,
 )
@@ -23,6 +24,15 @@ def test_rotation_batch_is_independent_and_heterogeneous() -> None:
     assert len(scenarios) == 4
     assert set(ROTATION_SCENARIO_SLUGS).isdisjoint(DEFAULT_SCENARIO_SLUGS)
     assert "dentistry-krasnoyarsk" not in ROTATION_SCENARIO_SLUGS
+    assert len({item.region for item in scenarios}) == len(scenarios)
+    assert len({item.industry for item in scenarios}) == len(scenarios)
+
+
+def test_third_rotation_is_independent_from_prior_live_batches() -> None:
+    scenarios = select_scenarios(THIRD_ROTATION_SCENARIO_SLUGS)
+    prior = set(DEFAULT_SCENARIO_SLUGS) | set(ROTATION_SCENARIO_SLUGS) | {"dentistry-krasnoyarsk"}
+    assert len(scenarios) == 4
+    assert set(THIRD_ROTATION_SCENARIO_SLUGS).isdisjoint(prior)
     assert len({item.region for item in scenarios}) == len(scenarios)
     assert len({item.industry for item in scenarios}) == len(scenarios)
 
