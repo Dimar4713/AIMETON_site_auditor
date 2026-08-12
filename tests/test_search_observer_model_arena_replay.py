@@ -66,7 +66,7 @@ def test_run_arena_rejects_unsafe_bounds() -> None:
     with pytest.raises(ValueError, match="concurrency_out_of_range"):
         asyncio.run(run_arena([], [], max_concurrency=0))
     with pytest.raises(ValueError, match="call_timeout_out_of_range"):
-        asyncio.run(run_arena([], [], call_timeout_seconds=4.9))
+        asyncio.run(run_arena([], [], call_timeout_seconds=0.009))
 
 
 def test_run_arena_records_timeout_without_aborting(monkeypatch) -> None:
