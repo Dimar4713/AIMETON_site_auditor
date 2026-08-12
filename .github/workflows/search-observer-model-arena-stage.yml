@@ -115,7 +115,7 @@ jobs:
           rm -rf "$RUNNER_TEMP/search-observer-arena-output"
           mkdir -p "$RUNNER_TEMP/search-observer-arena-output"
           docker cp "$CONTAINER:/tmp/search-observer-arena-output/result.json" "$RUNNER_TEMP/search-observer-arena-output/result.json"
-          python - <<'PY'
+          python3 - <<'PY'
           import json
           import os
           from pathlib import Path

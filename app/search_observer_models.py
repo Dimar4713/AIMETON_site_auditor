@@ -72,7 +72,8 @@ class ResolvedObserverModel(BaseModel):
 
 
 # Model identifiers remain environment-overridable because provider catalogs evolve.
-# The registry intentionally includes Chinese candidates as first-class peers.
+# Direct-provider profiles remain available, while RouterAI-backed peers let AIMETON
+# compare Chinese O1 candidates with the already configured RouterAI credential.
 OBSERVER_MODEL_PROFILES: tuple[ObserverModelProfile, ...] = (
     ObserverModelProfile(
         name="routerai-current",
@@ -83,6 +84,36 @@ OBSERVER_MODEL_PROFILES: tuple[ObserverModelProfile, ...] = (
         default_base_url="https://api.routerai.ru/v1",
         tier="O2",
         enabled_by_default=True,
+    ),
+    ObserverModelProfile(
+        name="routerai-qwen35-9b",
+        provider=ObserverProvider.ROUTERAI,
+        base_url_env="ROUTERAI_BASE_URL",
+        api_key_env="ROUTERAI_API_KEY",
+        model_env="ROUTERAI_QWEN_OBSERVER_MODEL",
+        default_base_url="https://api.routerai.ru/v1",
+        default_model="qwen/qwen3.5-9b",
+        tier="O1",
+    ),
+    ObserverModelProfile(
+        name="routerai-glm47-flash",
+        provider=ObserverProvider.ROUTERAI,
+        base_url_env="ROUTERAI_BASE_URL",
+        api_key_env="ROUTERAI_API_KEY",
+        model_env="ROUTERAI_GLM_OBSERVER_MODEL",
+        default_base_url="https://api.routerai.ru/v1",
+        default_model="z-ai/glm-4.7-flash",
+        tier="O1",
+    ),
+    ObserverModelProfile(
+        name="routerai-deepseek-v32",
+        provider=ObserverProvider.ROUTERAI,
+        base_url_env="ROUTERAI_BASE_URL",
+        api_key_env="ROUTERAI_API_KEY",
+        model_env="ROUTERAI_DEEPSEEK_OBSERVER_MODEL",
+        default_base_url="https://api.routerai.ru/v1",
+        default_model="deepseek/deepseek-v3.2",
+        tier="O1",
     ),
     ObserverModelProfile(
         name="qwen-flash",
