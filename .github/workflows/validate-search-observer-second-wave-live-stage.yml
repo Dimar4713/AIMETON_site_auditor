@@ -55,9 +55,11 @@ jobs:
           [[ "$status" == healthy ]]
           docker exec -w /app -e PYTHONPATH=/app -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
           import os
+          from decimal import Decimal
           from scripts.search_observer_live_second_wave import parse_budget_rub
           value = parse_budget_rub(os.environ['BUDGET'])
-          assert value <= 100
+          if value > Decimal('100'):
+              raise SystemExit('authorized_budget_exceeds_owner_cap')
           print(f'authorized_budget_rub={value}')
           PY
 
@@ -76,6 +78,53 @@ jobs:
               --budget-rub "$budget" \
               --output "$EVIDENCE_DIR/evidence.json"
 
+      - name: Capture sanitized Observer diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -w /app -e PYTHONPATH=/app "$CONTAINER" python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          db_path = os.getenv('AIMETON_RUNTIME_DB', 'data/runtime-core.sqlite3')
+          db = sqlite3.connect(db_path, timeout=30)
+          db.row_factory = sqlite3.Row
+          try:
+              rows = db.execute(
+                  '''
+                  SELECT mission_id, attempt_id, metadata_json
+                  FROM mission_trace_events
+                  WHERE component = 'hunter'
+                    AND operation = 'hunt_search_wave_shadow_observer'
+                  ORDER BY rowid DESC
+                  LIMIT 2
+                  '''
+              ).fetchall()
+          finally:
+              db.close()
+
+          keys = (
+              'observer_outcome', 'schema_valid', 'observer_recommendation_count',
+              'action_counts', 'recommendations', 'sufficient_evidence',
+              'observer_latency_ms', 'profile_name', 'provider', 'model', 'tier',
+              'routing_changed', 'later_observation_state',
+          )
+          payload = []
+          for row in rows:
+              metadata = json.loads(row['metadata_json'])
+              payload.append({
+                  'mission_id': row['mission_id'],
+                  'attempt_id': row['attempt_id'],
+                  **{key: metadata.get(key) for key in keys},
+              })
+          path = Path('/tmp/search-observer-live-second-wave/observer-diagnostics.json')
+          path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2), encoding='utf-8')
+          print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+          PY
+
       - name: Verify scored evidence and budget invariants
         shell: bash
         run: |
@@ -91,26 +140,37 @@ jobs:
           evidence = json.loads(path.read_text(encoding='utf-8'))
           authorized = Decimal(os.environ['BUDGET'])
           actual = Decimal(evidence['measured_search_cost_rub'])
-          assert authorized <= Decimal('100')
-          assert actual <= authorized
-          assert evidence['max_incremental_queries'] <= 4
-          assert evidence['observer_routing_authority'] is False
-          assert evidence['premium_escalation'] is False
-          assert evidence['routing_changed_any'] is False
-          assert evidence['validation_state'] == 'scored', evidence
+
+          checks = {
+              'authorized_budget_within_owner_cap': authorized <= Decimal('100'),
+              'actual_cost_within_authorized_budget': actual <= authorized,
+              'incremental_query_bound': evidence.get('max_incremental_queries', 999) <= 4,
+              'observer_has_no_routing_authority': evidence.get('observer_routing_authority') is False,
+              'premium_escalation_disabled': evidence.get('premium_escalation') is False,
+              'routing_unchanged': evidence.get('routing_changed_any') is False,
+              'validation_scored': evidence.get('validation_state') == 'scored',
+          }
           outcomes = [
               outcome
-              for scenario in evidence['scenarios']
+              for scenario in evidence.get('scenarios', [])
               for outcome in scenario.get('outcomes', [])
           ]
-          assert 1 <= len(outcomes) <= 4, evidence
-          assert all(item['score']['routing_changed'] is False for item in outcomes)
-          print(json.dumps({
-              'validation_state': evidence['validation_state'],
+          checks['outcome_count_bounded'] = 1 <= len(outcomes) <= 4
+          checks['all_outcomes_routing_unchanged'] = all(
+              item.get('score', {}).get('routing_changed') is False for item in outcomes
+          )
+
+          failed = [name for name, ok in checks.items() if not ok]
+          summary = {
+              'validation_state': evidence.get('validation_state'),
               'outcome_count': len(outcomes),
               'actual_search_cost_rub': str(actual),
               'authorized_budget_rub': str(authorized),
-          }, sort_keys=True))
+              'failed_checks': failed,
+          }
+          print(json.dumps(summary, sort_keys=True))
+          if failed:
+              raise SystemExit('live_validation_fail_closed:' + ','.join(failed))
           PY
 
       - name: Collect live evidence
@@ -120,15 +180,17 @@ jobs:
           set -Eeuo pipefail
           rm -rf "$RUNNER_TEMP/search-observer-live-second-wave"
           mkdir -p "$RUNNER_TEMP/search-observer-live-second-wave"
-          if docker exec "$CONTAINER" test -f "$EVIDENCE_DIR/evidence.json"; then
-            docker cp "$CONTAINER:$EVIDENCE_DIR/evidence.json" "$RUNNER_TEMP/search-observer-live-second-wave/evidence.json"
-          fi
+          for name in evidence.json observer-diagnostics.json; do
+            if docker exec "$CONTAINER" test -f "$EVIDENCE_DIR/$name"; then
+              docker cp "$CONTAINER:$EVIDENCE_DIR/$name" "$RUNNER_TEMP/search-observer-live-second-wave/$name"
+            fi
+          done
 
       - name: Upload live second-wave evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: search-observer-live-second-wave-${{ inputs.expected_sha }}
-          path: ${{ runner.temp }}/search-observer-live-second-wave/evidence.json
+          path: ${{ runner.temp }}/search-observer-live-second-wave/*.json
           if-no-files-found: warn
           retention-days: 30
