@@ -1,0 +1,58 @@
+name: Search Observer Zero-Cost Command Router
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+jobs:
+  route:
+    if: >-
+      github.event.issue.number == 573 &&
+      github.event.comment.user.login == 'Dimar4713' &&
+      startsWith(github.event.comment.body, '/validate-search-observer-second-wave-zero-cost ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Parse, authorize and dispatch zero-cost preflight
+        uses: actions/github-script@v7
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const body = (process.env.COMMENT_BODY || '').trim();
+            const match = body.match(/^\/validate-search-observer-second-wave-zero-cost\s+([0-9a-f]{40})$/);
+            if (!match) {
+              core.setFailed('Invalid zero-cost preflight command or SHA.');
+              return;
+            }
+            const sha = match[1];
+            await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+            });
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'validate-search-observer-second-wave-zero-cost.yml',
+              ref: 'main',
+              inputs: { expected_sha: sha },
+            });
+            await core.summary
+              .addHeading('Search Observer zero-cost dispatch ledger')
+              .addList([
+                'issue: 573',
+                `actor: ${context.actor}`,
+                `exact_sha: ${sha}`,
+                'allow_paid_calls: false',
+                'max_incremental_cost_rub: 0',
+                'provider_execution: disabled',
+                'result: dispatched',
+              ])
+              .write();
