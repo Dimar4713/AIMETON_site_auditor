@@ -45,7 +45,35 @@ ROTATION_SCENARIOS: tuple[ShadowBenchmarkScenario, ...] = (
         industry="Образовательные услуги",
     ),
 )
-ALL_BATCH_SCENARIOS = SCENARIOS + ROTATION_SCENARIOS
+THIRD_ROTATION_SCENARIO_SLUGS = (
+    "legal-chelyabinsk",
+    "auto-service-omsk",
+    "medical-labs-ufa",
+    "retail-electronics-voronezh",
+)
+THIRD_ROTATION_SCENARIOS: tuple[ShadowBenchmarkScenario, ...] = (
+    ShadowBenchmarkScenario(
+        slug="legal-chelyabinsk",
+        region="Челябинск",
+        industry="Юридические услуги",
+    ),
+    ShadowBenchmarkScenario(
+        slug="auto-service-omsk",
+        region="Омск",
+        industry="Автосервис",
+    ),
+    ShadowBenchmarkScenario(
+        slug="medical-labs-ufa",
+        region="Уфа",
+        industry="Медицинские лаборатории",
+    ),
+    ShadowBenchmarkScenario(
+        slug="retail-electronics-voronezh",
+        region="Воронеж",
+        industry="Розничная электроника",
+    ),
+)
+ALL_BATCH_SCENARIOS = SCENARIOS + ROTATION_SCENARIOS + THIRD_ROTATION_SCENARIOS
 MAX_BATCH_SCENARIOS = 4
 
 
@@ -153,13 +181,20 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--scenario", action="append", default=[])
     parser.add_argument("--rotation", action="store_true")
+    parser.add_argument("--third-rotation", action="store_true")
     args = parser.parse_args()
     budget = parse_budget_rub(args.budget_rub)
     requested = tuple(args.scenario)
+    if args.rotation and args.third_rotation:
+        raise ValueError("heterogeneous_batch_rotation_modes_conflict")
     if args.rotation:
         if requested:
             raise ValueError("heterogeneous_batch_rotation_conflicts_with_explicit_scenarios")
         requested = ROTATION_SCENARIO_SLUGS
+    if args.third_rotation:
+        if requested:
+            raise ValueError("heterogeneous_batch_third_rotation_conflicts_with_explicit_scenarios")
+        requested = THIRD_ROTATION_SCENARIO_SLUGS
     scenarios = select_scenarios(requested)
     evidence = asyncio.run(run_batch(budget_rub=budget, scenarios=scenarios, output=Path(args.output)))
     print(json.dumps(evidence, ensure_ascii=False, sort_keys=True))
