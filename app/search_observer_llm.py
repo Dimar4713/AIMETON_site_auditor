@@ -100,6 +100,23 @@ def _legacy_model() -> ResolvedObserverModel | None:
     )
 
 
+def shadow_observer_runtime_descriptor() -> dict[str, str | bool | float]:
+    """Return secret-free runtime identity for durable shadow evidence."""
+    model = _legacy_model()
+    if model is None:
+        return {
+            "profile_name": "routerai-shadow-observer",
+            "provider": "routerai",
+            "model": os.getenv("HUNTER_SEARCH_OBSERVER_MODEL", DEFAULT_SEARCH_OBSERVER_MODEL).strip()
+            or DEFAULT_SEARCH_OBSERVER_MODEL,
+            "tier": "O1",
+            "configured": False,
+            "timeout_seconds": _observer_timeout_seconds(),
+        }
+    descriptor = model.safe_descriptor()
+    return {**descriptor, "timeout_seconds": _observer_timeout_seconds()}
+
+
 async def evaluate_search_wave_shadow_with_model(
     telemetry: SearchWaveTelemetry,
     model: ResolvedObserverModel,
