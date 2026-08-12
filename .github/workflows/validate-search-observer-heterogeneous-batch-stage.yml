@@ -1,0 +1,138 @@
+name: Validate Search Observer Heterogeneous Batch Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed commit SHA
+        required: true
+        type: string
+      allow_paid_calls:
+        description: Standing owner authorization allows bounded paid validation
+        required: true
+        default: false
+        type: boolean
+      owner_spend_authorized:
+        description: Owner standing 100 RUB app-improvement budget is recorded
+        required: true
+        default: false
+        type: boolean
+      max_batch_budget_rub:
+        description: Per-batch hard cap; must be 1 RUB
+        required: true
+        default: '1'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-observer-heterogeneous-batch-stage
+  cancel-in-progress: false
+
+jobs:
+  heterogeneous-batch:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 30
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EVIDENCE_DIR: /tmp/search-observer-heterogeneous-batch
+    steps:
+      - name: Prepare evidence directory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec "$CONTAINER" sh -lc "rm -rf '$EVIDENCE_DIR' && mkdir -p '$EVIDENCE_DIR'"
+
+      - name: Require exact SHA and bounded spend authorization
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          budget='${{ inputs.max_batch_budget_rub }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ '${{ inputs.allow_paid_calls }}' == 'true' ]]
+          [[ '${{ inputs.owner_spend_authorized }}' == 'true' ]]
+          [[ "$budget" == '1' ]]
+          cd "$STACK_DIR"
+          [[ "$(cat app-source-sha.txt)" == "$expected" ]]
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$status" == healthy || "$status" == running ]]
+          echo "container_status=$status"
+          echo "batch_budget_rub=$budget"
+
+      - name: Execute heterogeneous shadow causal batch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          budget='${{ inputs.max_batch_budget_rub }}'
+          docker exec \
+            -w /app \
+            -e PYTHONPATH=/app \
+            -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=true \
+            "$CONTAINER" \
+            python -m scripts.search_observer_heterogeneous_batch \
+              --budget-rub "$budget" \
+              --output "$EVIDENCE_DIR/evidence.json"
+
+      - name: Verify heterogeneous evidence and safety invariants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i -w /app -e PYTHONPATH=/app "$CONTAINER" python - <<'PY'
+          import json
+          from decimal import Decimal
+          from pathlib import Path
+
+          evidence = json.loads(Path('/tmp/search-observer-heterogeneous-batch/evidence.json').read_text(encoding='utf-8'))
+          actual = Decimal(evidence['measured_search_cost_rub'])
+          selected = evidence.get('selected_scenarios', [])
+          outcomes = [
+              outcome
+              for scenario in evidence.get('scenarios', [])
+              for outcome in scenario.get('outcomes', [])
+              if isinstance(outcome, dict)
+          ]
+          checks = {
+              'batch_kind': evidence.get('batch_kind') == 'heterogeneous_shadow_causal',
+              'scenario_count': 2 <= len(selected) <= 4,
+              'scenario_uniqueness': len(selected) == len(set(selected)),
+              'actual_cost_within_batch_cap': actual <= Decimal('1'),
+              'observer_has_no_routing_authority': evidence.get('observer_routing_authority') is False,
+              'premium_escalation_disabled': evidence.get('premium_escalation') is False,
+              'routing_unchanged': evidence.get('routing_changed_any') is False,
+              'has_scorable_outcome': len(outcomes) >= 1,
+              'outcome_bound': len(outcomes) <= 16,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          print(json.dumps({
+              'actual_search_cost_rub': str(actual),
+              'selected_scenarios': selected,
+              'outcome_count': len(outcomes),
+              'failed_checks': failed,
+          }, sort_keys=True))
+          if failed:
+              raise SystemExit('heterogeneous_batch_fail_closed:' + ','.join(failed))
+          PY
+
+      - name: Collect evidence
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf "$RUNNER_TEMP/search-observer-heterogeneous-batch"
+          mkdir -p "$RUNNER_TEMP/search-observer-heterogeneous-batch"
+          if docker exec "$CONTAINER" test -f "$EVIDENCE_DIR/evidence.json"; then
+            docker cp "$CONTAINER:$EVIDENCE_DIR/evidence.json" "$RUNNER_TEMP/search-observer-heterogeneous-batch/evidence.json"
+          fi
+
+      - name: Upload heterogeneous batch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-observer-heterogeneous-batch-${{ inputs.expected_sha }}
+          path: ${{ runner.temp }}/search-observer-heterogeneous-batch/*.json
+          if-no-files-found: warn
+          retention-days: 30
