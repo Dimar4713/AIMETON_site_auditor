@@ -56,7 +56,7 @@ async def run_arena(
 ) -> list[ModelArenaObservation]:
     if not 1 <= max_concurrency <= 8:
         raise ValueError("model_arena_concurrency_out_of_range")
-    if not 5.0 <= call_timeout_seconds <= 120.0:
+    if not 0.01 <= call_timeout_seconds <= 120.0:
         raise ValueError("model_arena_call_timeout_out_of_range")
 
     semaphore = asyncio.Semaphore(max_concurrency)
