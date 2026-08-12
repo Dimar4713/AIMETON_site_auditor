@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -19,6 +20,27 @@ def diagnostic_url(value: str) -> str:
         return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))[:_URL_LIMIT]
     except Exception:
         return value[:_URL_LIMIT]
+
+
+def _compact_recommendation_controls_json(evidence: dict[str, object]) -> str:
+    raw = evidence.get("recommendations")
+    if not isinstance(raw, list):
+        return "[]"
+    controls: list[dict[str, object]] = []
+    for item in raw[:40]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            controls.append(
+                {
+                    "direction_index": int(item["direction_index"]),
+                    "action": str(item["action"]),
+                    "confidence": float(item["confidence"]),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return json.dumps(controls, ensure_ascii=False, separators=(",", ":"))
 
 
 class HunterForensicTrace:
@@ -64,7 +86,9 @@ class HunterForensicTrace:
             try:
                 from app.search_observer_llm import get_last_shadow_observer_evidence
 
-                safe_metadata.update(get_last_shadow_observer_evidence())
+                observer_evidence = get_last_shadow_observer_evidence()
+                safe_metadata.update(observer_evidence)
+                safe_metadata["recommendation_controls_json"] = _compact_recommendation_controls_json(observer_evidence)
             except Exception:
                 pass
         if url:
