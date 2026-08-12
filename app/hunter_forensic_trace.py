@@ -60,6 +60,13 @@ class HunterForensicTrace:
     ) -> None:
         self._counter += 1
         safe_metadata = dict(metadata or {})
+        if operation == "hunt_search_wave_shadow_observer":
+            try:
+                from app.search_observer_llm import get_last_shadow_observer_evidence
+
+                safe_metadata.update(get_last_shadow_observer_evidence())
+            except Exception:
+                pass
         if url:
             safe_metadata["candidate_url"] = diagnostic_url(url)
         if title:
