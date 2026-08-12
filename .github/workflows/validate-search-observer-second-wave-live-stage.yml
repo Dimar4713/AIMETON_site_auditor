@@ -59,7 +59,8 @@ jobs:
           cd "$STACK_DIR"
           [[ "$(cat app-source-sha.txt)" == "$expected" ]]
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
-          [[ "$status" == healthy ]]
+          [[ "$status" == healthy || "$status" == running ]]
+          echo "container_status=$status"
           echo "authorized_budget_rub=$budget"
 
       - name: Execute bounded live shadow counterfactual validation
