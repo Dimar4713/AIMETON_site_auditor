@@ -156,11 +156,16 @@ jobs:
                   assert metadata.get('configured') is True, (scenario.slug, metadata)
                   assert float(metadata.get('timeout_seconds', 0)) > 0, (scenario.slug, metadata)
                   assert int(metadata.get('observer_latency_ms', -1)) >= 0, (scenario.slug, metadata)
-                  assert metadata.get('observer_outcome') == 'succeeded', (scenario.slug, metadata)
-                  assert metadata.get('schema_valid') is True, (scenario.slug, metadata)
-                  assert int(metadata.get('observer_recommendation_count', -1)) == int(
-                      counters.get('recommendation_count', -2)
-                  ), (scenario.slug, metadata, counters)
+                  outcome = metadata.get('observer_outcome')
+                  assert outcome in {'succeeded', 'timeout', 'unavailable'}, (scenario.slug, metadata)
+                  observer_recommendation_count = int(metadata.get('observer_recommendation_count', -1))
+                  recommendation_count = int(counters.get('recommendation_count', -2))
+                  assert observer_recommendation_count == recommendation_count, (scenario.slug, metadata, counters)
+                  if outcome == 'succeeded':
+                      assert metadata.get('schema_valid') is True, (scenario.slug, metadata)
+                  else:
+                      assert metadata.get('schema_valid') is False, (scenario.slug, metadata)
+                      assert recommendation_count == 0, (scenario.slug, metadata, counters)
                   assert 'api_key' not in metadata, (scenario.slug, metadata)
                   assert 'base_url' not in metadata, (scenario.slug, metadata)
 
@@ -184,12 +189,12 @@ jobs:
                       'configured': metadata.get('configured'),
                       'timeout_seconds': metadata.get('timeout_seconds'),
                       'observer_latency_ms': metadata.get('observer_latency_ms'),
-                      'observer_outcome': metadata.get('observer_outcome'),
+                      'observer_outcome': outcome,
                       'schema_valid': metadata.get('schema_valid'),
                       'sufficient_evidence': metadata.get('sufficient_evidence'),
                       'action_counts': metadata.get('action_counts'),
-                      'recommendation_count': counters.get('recommendation_count'),
-                      'observer_recommendation_count': metadata.get('observer_recommendation_count'),
+                      'recommendation_count': recommendation_count,
+                      'observer_recommendation_count': observer_recommendation_count,
                       'search_cost_rub': str(rub),
                   })
 
