@@ -24,26 +24,10 @@ ROTATION_SCENARIO_SLUGS = (
     "education-perm",
 )
 ROTATION_SCENARIOS: tuple[ShadowBenchmarkScenario, ...] = (
-    ShadowBenchmarkScenario(
-        slug="construction-moscow",
-        region="Москва",
-        industry="Строительные компании",
-    ),
-    ShadowBenchmarkScenario(
-        slug="it-services-samara",
-        region="Самара",
-        industry="ИТ-услуги",
-    ),
-    ShadowBenchmarkScenario(
-        slug="logistics-rostov-on-don",
-        region="Ростов-на-Дону",
-        industry="Логистические компании",
-    ),
-    ShadowBenchmarkScenario(
-        slug="education-perm",
-        region="Пермь",
-        industry="Образовательные услуги",
-    ),
+    ShadowBenchmarkScenario(slug="construction-moscow", region="Москва", industry="Строительные компании"),
+    ShadowBenchmarkScenario(slug="it-services-samara", region="Самара", industry="ИТ-услуги"),
+    ShadowBenchmarkScenario(slug="logistics-rostov-on-don", region="Ростов-на-Дону", industry="Логистические компании"),
+    ShadowBenchmarkScenario(slug="education-perm", region="Пермь", industry="Образовательные услуги"),
 )
 THIRD_ROTATION_SCENARIO_SLUGS = (
     "legal-chelyabinsk",
@@ -52,28 +36,24 @@ THIRD_ROTATION_SCENARIO_SLUGS = (
     "retail-electronics-voronezh",
 )
 THIRD_ROTATION_SCENARIOS: tuple[ShadowBenchmarkScenario, ...] = (
-    ShadowBenchmarkScenario(
-        slug="legal-chelyabinsk",
-        region="Челябинск",
-        industry="Юридические услуги",
-    ),
-    ShadowBenchmarkScenario(
-        slug="auto-service-omsk",
-        region="Омск",
-        industry="Автосервис",
-    ),
-    ShadowBenchmarkScenario(
-        slug="medical-labs-ufa",
-        region="Уфа",
-        industry="Медицинские лаборатории",
-    ),
-    ShadowBenchmarkScenario(
-        slug="retail-electronics-voronezh",
-        region="Воронеж",
-        industry="Розничная электроника",
-    ),
+    ShadowBenchmarkScenario(slug="legal-chelyabinsk", region="Челябинск", industry="Юридические услуги"),
+    ShadowBenchmarkScenario(slug="auto-service-omsk", region="Омск", industry="Автосервис"),
+    ShadowBenchmarkScenario(slug="medical-labs-ufa", region="Уфа", industry="Медицинские лаборатории"),
+    ShadowBenchmarkScenario(slug="retail-electronics-voronezh", region="Воронеж", industry="Розничная электроника"),
 )
-ALL_BATCH_SCENARIOS = SCENARIOS + ROTATION_SCENARIOS + THIRD_ROTATION_SCENARIOS
+FOURTH_ROTATION_SCENARIO_SLUGS = (
+    "insurance-saratov",
+    "furniture-tyumen",
+    "veterinary-yaroslavl",
+    "security-nizhny-novgorod",
+)
+FOURTH_ROTATION_SCENARIOS: tuple[ShadowBenchmarkScenario, ...] = (
+    ShadowBenchmarkScenario(slug="insurance-saratov", region="Саратов", industry="Страховые компании"),
+    ShadowBenchmarkScenario(slug="furniture-tyumen", region="Тюмень", industry="Мебельные компании"),
+    ShadowBenchmarkScenario(slug="veterinary-yaroslavl", region="Ярославль", industry="Ветеринарные клиники"),
+    ShadowBenchmarkScenario(slug="security-nizhny-novgorod", region="Нижний Новгород", industry="Охранные предприятия"),
+)
+ALL_BATCH_SCENARIOS = SCENARIOS + ROTATION_SCENARIOS + THIRD_ROTATION_SCENARIOS + FOURTH_ROTATION_SCENARIOS
 MAX_BATCH_SCENARIOS = 4
 
 
@@ -105,18 +85,12 @@ def select_scenarios(slugs: tuple[str, ...]) -> tuple[ShadowBenchmarkScenario, .
     return selected
 
 
-async def run_batch(
-    *,
-    budget_rub: Decimal,
-    scenarios: tuple[ShadowBenchmarkScenario, ...],
-    output: Path,
-) -> dict[str, object]:
+async def run_batch(*, budget_rub: Decimal, scenarios: tuple[ShadowBenchmarkScenario, ...], output: Path) -> dict[str, object]:
     original_scenarios = target.SCENARIOS
     original_max_scenarios = target.MAX_SCENARIOS
     original_selector = target._scorable_recommendations
     total_actual = Decimal("0")
     collected: list[dict[str, object]] = []
-
     try:
         target._scorable_recommendations = scorable_recommendations_compat
         target.MAX_SCENARIOS = 1
@@ -127,10 +101,7 @@ async def run_batch(
             target.SCENARIOS = (scenario,)
             with tempfile.TemporaryDirectory(prefix="search-observer-batch-") as tmp:
                 scenario_output = Path(tmp) / "evidence.json"
-                evidence = await target.run_validation(
-                    budget_rub=remaining,
-                    output=scenario_output,
-                )
+                evidence = await target.run_validation(budget_rub=remaining, output=scenario_output)
             actual = Decimal(str(evidence.get("measured_search_cost_rub", "0")))
             total_actual += actual
             if total_actual > budget_rub:
@@ -145,12 +116,7 @@ async def run_batch(
         target.MAX_SCENARIOS = original_max_scenarios
         target._scorable_recommendations = original_selector
 
-    outcomes = [
-        outcome
-        for scenario in collected
-        for outcome in scenario.get("outcomes", [])
-        if isinstance(outcome, dict)
-    ]
+    outcomes = [outcome for scenario in collected for outcome in scenario.get("outcomes", []) if isinstance(outcome, dict)]
     result = {
         "schema_version": 1,
         "batch_kind": "heterogeneous_shadow_causal",
@@ -182,10 +148,12 @@ def main() -> int:
     parser.add_argument("--scenario", action="append", default=[])
     parser.add_argument("--rotation", action="store_true")
     parser.add_argument("--third-rotation", action="store_true")
+    parser.add_argument("--fourth-rotation", action="store_true")
     args = parser.parse_args()
     budget = parse_budget_rub(args.budget_rub)
     requested = tuple(args.scenario)
-    if args.rotation and args.third_rotation:
+    selected_modes = sum((args.rotation, args.third_rotation, args.fourth_rotation))
+    if selected_modes > 1:
         raise ValueError("heterogeneous_batch_rotation_modes_conflict")
     if args.rotation:
         if requested:
@@ -195,6 +163,10 @@ def main() -> int:
         if requested:
             raise ValueError("heterogeneous_batch_third_rotation_conflicts_with_explicit_scenarios")
         requested = THIRD_ROTATION_SCENARIO_SLUGS
+    if args.fourth_rotation:
+        if requested:
+            raise ValueError("heterogeneous_batch_fourth_rotation_conflicts_with_explicit_scenarios")
+        requested = FOURTH_ROTATION_SCENARIO_SLUGS
     scenarios = select_scenarios(requested)
     evidence = asyncio.run(run_batch(budget_rub=budget, scenarios=scenarios, output=Path(args.output)))
     print(json.dumps(evidence, ensure_ascii=False, sort_keys=True))
