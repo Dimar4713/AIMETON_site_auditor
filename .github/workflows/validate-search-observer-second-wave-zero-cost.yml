@@ -3,7 +3,7 @@ name: Validate Search Observer Second-Wave Zero-Cost Preflight
 on:
   workflow_dispatch:
     inputs:
-      target_sha:
+      expected_sha:
         description: Exact 40-character commit SHA to validate
         required: true
         type: string
@@ -19,24 +19,24 @@ jobs:
       - name: Validate exact SHA input
         shell: bash
         env:
-          TARGET_SHA: ${{ inputs.target_sha }}
+          TARGET_SHA: ${{ inputs.expected_sha }}
         run: |
           set -euo pipefail
           if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "target_sha must be an exact lowercase 40-character SHA" >&2
+            echo "expected_sha must be an exact lowercase 40-character SHA" >&2
             exit 1
           fi
 
       - name: Checkout exact target SHA
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target_sha }}
+          ref: ${{ inputs.expected_sha }}
           fetch-depth: 1
 
       - name: Verify checkout identity
         shell: bash
         env:
-          TARGET_SHA: ${{ inputs.target_sha }}
+          TARGET_SHA: ${{ inputs.expected_sha }}
         run: |
           set -euo pipefail
           ACTUAL_SHA="$(git rev-parse HEAD)"
