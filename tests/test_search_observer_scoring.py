@@ -1,8 +1,15 @@
+import pytest
+
 from app.search_observer_llm import ObserverAction
 from app.search_observer_scoring import (
     ObservedMarginalYield,
+    ObserverRuntimeEvidence,
+    ObserverRuntimeOutcome,
+    OfflineRecommendationEvidence,
     RecommendationVerdict,
+    score_offline_evidence,
     score_recommendation,
+    summarize_observer_runtime,
     summarize_recommendation_scores,
 )
 
@@ -21,6 +28,23 @@ def outcome(**overrides):
     }
     values.update(overrides)
     return ObservedMarginalYield(**values)
+
+
+def runtime(**overrides):
+    values = {
+        "profile_name": "routerai-shadow-observer",
+        "provider": "routerai",
+        "model": "deepseek/deepseek-v3.2",
+        "tier": "O1",
+        "timeout_seconds": 20.0,
+        "observer_latency_ms": 12000,
+        "observer_outcome": ObserverRuntimeOutcome.SUCCEEDED,
+        "schema_valid": True,
+        "observer_recommendation_count": 2,
+        "routing_changed": False,
+    }
+    values.update(overrides)
+    return ObserverRuntimeEvidence(**values)
 
 
 def score(action, observed, confidence=0.8):
@@ -114,4 +138,60 @@ def test_summary_reports_precision_and_never_routing_changes():
     assert summary["decided_count"] == 2
     assert summary["supported_count"] == 1
     assert summary["precision"] == 0.5
+    assert summary["routing_changed_count"] == 0
+
+
+def test_offline_evidence_scores_only_succeeded_shadow_runtime():
+    evidence = OfflineRecommendationEvidence(
+        mission_id="hunt-test",
+        attempt_id="corr-test",
+        direction_index=1,
+        action=ObserverAction.REFINE,
+        confidence=0.75,
+        runtime=runtime(),
+        outcome=outcome(duplicate_results=10, excluded_results=4, added_unique_domains=3,
+                        added_qualified_candidates=1, added_direct_or_official_candidates=0),
+    )
+    item = score_offline_evidence(evidence)
+    assert item.verdict == RecommendationVerdict.SUPPORTED
+    assert item.routing_changed is False
+
+
+def test_offline_evidence_rejects_timeout_as_recommendation_source():
+    evidence = OfflineRecommendationEvidence(
+        mission_id="hunt-test",
+        attempt_id="corr-test",
+        direction_index=0,
+        action=ObserverAction.CONTINUE,
+        confidence=0.8,
+        runtime=runtime(
+            observer_outcome=ObserverRuntimeOutcome.TIMEOUT,
+            observer_latency_ms=20003,
+            schema_valid=False,
+            observer_recommendation_count=0,
+        ),
+        outcome=outcome(),
+    )
+    with pytest.raises(ValueError, match="recommendation_requires_succeeded_observer_runtime"):
+        score_offline_evidence(evidence)
+
+
+def test_runtime_summary_keeps_timeout_as_measurable_fail_open():
+    summary = summarize_observer_runtime([
+        runtime(observer_latency_ms=17027),
+        runtime(observer_latency_ms=11965),
+        runtime(observer_latency_ms=10843),
+        runtime(
+            observer_outcome=ObserverRuntimeOutcome.TIMEOUT,
+            observer_latency_ms=20003,
+            schema_valid=False,
+            observer_recommendation_count=0,
+        ),
+    ])
+    assert summary["evaluation_count"] == 4
+    assert summary["succeeded_count"] == 3
+    assert summary["timeout_count"] == 1
+    assert summary["success_rate"] == 0.75
+    assert summary["timeout_rate"] == 0.25
+    assert summary["mean_observer_latency_ms"] == 14959.5
     assert summary["routing_changed_count"] == 0
