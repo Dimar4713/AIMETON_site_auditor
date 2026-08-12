@@ -127,6 +127,24 @@ def get_last_shadow_observer_evidence() -> dict[str, object]:
     return dict(_LAST_SHADOW_OBSERVER_EVIDENCE.get() or {})
 
 
+def _bounded_recommendation_evidence(
+    recommendation: SearchObserverRecommendation | None,
+) -> list[dict[str, object]]:
+    if recommendation is None:
+        return []
+    return [
+        {
+            "direction_index": item.direction_index,
+            "action": str(item.action),
+            "confidence": item.confidence,
+            "rationale": item.rationale[:300],
+            "refined_queries": item.refined_queries[:4],
+            "later_observation_state": "no_later_wave",
+        }
+        for item in recommendation.recommendations[:40]
+    ]
+
+
 def _record_shadow_observer_evidence(
     *,
     descriptor: dict[str, str | bool | float],
@@ -143,6 +161,8 @@ def _record_shadow_observer_evidence(
             "observer_recommendation_count": (
                 0 if recommendation is None else len(recommendation.recommendations)
             ),
+            "recommendations": _bounded_recommendation_evidence(recommendation),
+            "later_observation_state": "no_later_wave",
         }
     )
 
