@@ -40,6 +40,12 @@ jobs:
       CONTAINER: aimeton-auditor
       EVIDENCE_DIR: /tmp/search-observer-live-second-wave
     steps:
+      - name: Prepare live evidence directory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec "$CONTAINER" sh -lc "rm -rf '$EVIDENCE_DIR' && mkdir -p '$EVIDENCE_DIR'"
+
       - name: Require exact SHA and owner spend authorization
         shell: bash
         run: |
@@ -53,22 +59,13 @@ jobs:
           [[ "$(cat app-source-sha.txt)" == "$expected" ]]
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
           [[ "$status" == healthy ]]
-          docker exec -i -w /app -e PYTHONPATH=/app -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
-          import os
-          from decimal import Decimal
-          from scripts.search_observer_live_second_wave import parse_budget_rub
-          value = parse_budget_rub(os.environ['BUDGET'])
-          if value > Decimal('100'):
-              raise SystemExit('authorized_budget_exceeds_owner_cap')
-          print(f'authorized_budget_rub={value}')
-          PY
+          BUDGET="$budget" python3 -c 'import os; from decimal import Decimal, InvalidOperation; raw=os.environ["BUDGET"]; value=Decimal(raw); assert value > 0; assert value <= Decimal("100"); print(f"authorized_budget_rub={value}")'
 
       - name: Execute bounded live shadow counterfactual validation
         shell: bash
         run: |
           set -Eeuo pipefail
           budget='${{ inputs.max_budget_rub }}'
-          docker exec "$CONTAINER" sh -lc "rm -rf '$EVIDENCE_DIR' && mkdir -p '$EVIDENCE_DIR'"
           docker exec \
             -w /app \
             -e PYTHONPATH=/app \
@@ -121,6 +118,7 @@ jobs:
                   **{key: metadata.get(key) for key in keys},
               })
           path = Path('/tmp/search-observer-live-second-wave/observer-diagnostics.json')
+          path.parent.mkdir(parents=True, exist_ok=True)
           path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2), encoding='utf-8')
           print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
           PY
