@@ -1,0 +1,96 @@
+name: Validate Search Observer Second-Wave Zero-Cost Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact 40-character commit SHA to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  zero-cost-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate exact SHA input
+        shell: bash
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "target_sha must be an exact lowercase 40-character SHA" >&2
+            exit 1
+          fi
+
+      - name: Checkout exact target SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_sha }}
+          fetch-depth: 1
+
+      - name: Verify checkout identity
+        shell: bash
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$TARGET_SHA"
+          echo "validated_sha=$ACTUAL_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate fail-closed zero-cost contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from app.search_observer_live_validation import LiveSecondWaveValidationContract
+
+          contract = LiveSecondWaveValidationContract(
+              wave_count=2,
+              max_incremental_queries=4,
+              allow_paid_calls=False,
+              max_incremental_cost_rub=0.0,
+              owner_spend_authorized=False,
+              allow_premium_escalation=False,
+              routing_changed=False,
+              preserve_provider_policy=True,
+              preserve_concurrency_limits=True,
+              preserve_cooldown_and_circuits=True,
+          )
+          assert contract.zero_cost_only is True
+          assert contract.spend_gate_open is False
+          assert contract.wave_count == 2
+          assert contract.max_incremental_queries <= 4
+          print(contract.model_dump_json())
+          PY
+
+      - name: Run offline causal-chain tests
+        run: |
+          python -m pytest -q \
+            tests/test_search_observer_live_validation.py \
+            tests/test_search_observer_multiwave.py \
+            tests/test_search_observer_trace_link.py \
+            tests/test_search_observer_scoring.py
+
+      - name: Confirm no live execution authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "allow_paid_calls=false"
+          echo "max_incremental_cost_rub=0"
+          echo "owner_spend_authorized=false"
+          echo "provider_execution=disabled"
+          echo "routing_changed=false"
