@@ -18,6 +18,28 @@ class RecommendationVerdict(StrEnum):
     NOT_SCORABLE = "not_scorable"
 
 
+class ObserverRuntimeOutcome(StrEnum):
+    SUCCEEDED = "succeeded"
+    TIMEOUT = "timeout"
+    UNAVAILABLE = "unavailable"
+    NOT_CONFIGURED = "not_configured"
+
+
+class ObserverRuntimeEvidence(ScoringModel):
+    """Secret-free runtime evidence for one advisory Observer evaluation."""
+
+    profile_name: str = Field(min_length=1, max_length=120)
+    provider: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=200)
+    tier: str = Field(min_length=1, max_length=40)
+    timeout_seconds: float = Field(gt=0.0, le=30.0)
+    observer_latency_ms: int = Field(ge=0)
+    observer_outcome: ObserverRuntimeOutcome
+    schema_valid: bool
+    observer_recommendation_count: int = Field(ge=0)
+    routing_changed: bool = False
+
+
 class ObservedMarginalYield(ScoringModel):
     """Later observed evidence used to score an earlier shadow recommendation.
 
@@ -45,6 +67,18 @@ class ObservedMarginalYield(ScoringModel):
             return 0.0
         wasted = min(self.added_raw_results, self.duplicate_results + self.excluded_results)
         return round(wasted / self.added_raw_results, 6)
+
+
+class OfflineRecommendationEvidence(ScoringModel):
+    """Trace-linked, read-only input for scoring one shadow recommendation."""
+
+    mission_id: str = Field(min_length=1, max_length=120)
+    attempt_id: str = Field(min_length=1, max_length=120)
+    direction_index: int = Field(ge=0)
+    action: ObserverAction
+    confidence: float = Field(ge=0.0, le=1.0)
+    runtime: ObserverRuntimeEvidence
+    outcome: ObservedMarginalYield
 
 
 class RecommendationOutcome(ScoringModel):
@@ -130,13 +164,11 @@ def score_recommendation(
         reason_supported = "later_yield_supports_stop"
         reason_contradicted = "later_yield_contradicts_stop"
     elif action in {ObserverAction.REFINE, ObserverAction.SLOW}:
-        # Refine/slow is useful when there is some signal, but current marginal
-        # work is materially wasteful or weak. A strong clean yield contradicts it.
         supported = (outcome.useful_yield > 0 and high_waste) or (0.12 < value < 0.35)
         contradicted = productive and not high_waste
         reason_supported = "later_yield_supports_adjustment"
         reason_contradicted = "later_yield_does_not_need_adjustment"
-    else:  # defensive future-proofing for enum extension
+    else:
         supported = False
         contradicted = False
         reason_supported = "unsupported_action_family"
@@ -171,6 +203,26 @@ def score_recommendation(
     )
 
 
+def score_offline_evidence(evidence: OfflineRecommendationEvidence) -> RecommendationOutcome:
+    """Score already-recorded evidence only; never calls providers or changes routing."""
+    if evidence.runtime.routing_changed:
+        raise ValueError("offline_scoring_requires_shadow_routing_unchanged")
+    if evidence.runtime.observer_outcome != ObserverRuntimeOutcome.SUCCEEDED:
+        raise ValueError("recommendation_requires_succeeded_observer_runtime")
+    if not evidence.runtime.schema_valid:
+        raise ValueError("recommendation_requires_schema_valid_observer_runtime")
+    if evidence.runtime.observer_recommendation_count <= 0:
+        raise ValueError("recommendation_requires_recorded_observer_recommendation")
+    return score_recommendation(
+        mission_id=evidence.mission_id,
+        attempt_id=evidence.attempt_id,
+        direction_index=evidence.direction_index,
+        action=evidence.action,
+        confidence=evidence.confidence,
+        outcome=evidence.outcome,
+    )
+
+
 def summarize_recommendation_scores(
     outcomes: list[RecommendationOutcome],
 ) -> dict[str, float | int]:
@@ -189,4 +241,25 @@ def summarize_recommendation_scores(
         "precision": round(supported / len(decided), 6) if decided else 0.0,
         "mean_score": round(sum(item.score for item in scorable) / len(scorable), 6) if scorable else 0.0,
         "routing_changed_count": sum(item.routing_changed for item in outcomes),
+    }
+
+
+def summarize_observer_runtime(evidence: list[ObserverRuntimeEvidence]) -> dict[str, float | int]:
+    """Summarize advisory runtime reliability without treating fail-open as search failure."""
+    total = len(evidence)
+    succeeded = sum(item.observer_outcome == ObserverRuntimeOutcome.SUCCEEDED for item in evidence)
+    timed_out = sum(item.observer_outcome == ObserverRuntimeOutcome.TIMEOUT for item in evidence)
+    unavailable = sum(item.observer_outcome == ObserverRuntimeOutcome.UNAVAILABLE for item in evidence)
+    not_configured = sum(item.observer_outcome == ObserverRuntimeOutcome.NOT_CONFIGURED for item in evidence)
+    mean_latency = round(sum(item.observer_latency_ms for item in evidence) / total, 3) if total else 0.0
+    return {
+        "evaluation_count": total,
+        "succeeded_count": succeeded,
+        "timeout_count": timed_out,
+        "unavailable_count": unavailable,
+        "not_configured_count": not_configured,
+        "success_rate": round(succeeded / total, 6) if total else 0.0,
+        "timeout_rate": round(timed_out / total, 6) if total else 0.0,
+        "mean_observer_latency_ms": mean_latency,
+        "routing_changed_count": sum(item.routing_changed for item in evidence),
     }
