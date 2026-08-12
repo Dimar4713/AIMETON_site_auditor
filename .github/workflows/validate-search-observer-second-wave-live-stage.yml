@@ -53,7 +53,7 @@ jobs:
           [[ "$(cat app-source-sha.txt)" == "$expected" ]]
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
           [[ "$status" == healthy ]]
-          docker exec -w /app -e PYTHONPATH=/app -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
+          docker exec -i -w /app -e PYTHONPATH=/app -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
           import os
           from decimal import Decimal
           from scripts.search_observer_live_second_wave import parse_budget_rub
@@ -83,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker exec -w /app -e PYTHONPATH=/app "$CONTAINER" python - <<'PY'
+          docker exec -i -w /app -e PYTHONPATH=/app "$CONTAINER" python - <<'PY'
           import json
           import os
           import sqlite3
@@ -130,7 +130,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           budget='${{ inputs.max_budget_rub }}'
-          docker exec -w /app -e PYTHONPATH=/app -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
+          docker exec -i -w /app -e PYTHONPATH=/app -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
           import json
           import os
           from decimal import Decimal
