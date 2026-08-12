@@ -53,7 +53,7 @@ jobs:
           [[ "$(cat app-source-sha.txt)" == "$expected" ]]
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
           [[ "$status" == healthy ]]
-          docker exec -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
+          docker exec -w /app -e PYTHONPATH=/app -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
           import os
           from scripts.search_observer_live_second_wave import parse_budget_rub
           value = parse_budget_rub(os.environ['BUDGET'])
@@ -68,9 +68,11 @@ jobs:
           budget='${{ inputs.max_budget_rub }}'
           docker exec "$CONTAINER" sh -lc "rm -rf '$EVIDENCE_DIR' && mkdir -p '$EVIDENCE_DIR'"
           docker exec \
+            -w /app \
+            -e PYTHONPATH=/app \
             -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=true \
             "$CONTAINER" \
-            python scripts/search_observer_live_second_wave.py \
+            python -m scripts.search_observer_live_second_wave \
               --budget-rub "$budget" \
               --output "$EVIDENCE_DIR/evidence.json"
 
@@ -79,7 +81,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           budget='${{ inputs.max_budget_rub }}'
-          docker exec -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
+          docker exec -w /app -e PYTHONPATH=/app -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
           import json
           import os
           from decimal import Decimal
