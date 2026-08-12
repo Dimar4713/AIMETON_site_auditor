@@ -4,6 +4,8 @@ import asyncio
 import json
 import os
 import re
+import time
+from contextvars import ContextVar
 from enum import StrEnum
 
 import httpx
@@ -16,6 +18,9 @@ from app.search_observer_models import ResolvedObserverModel
 
 DEFAULT_SEARCH_OBSERVER_MODEL = "deepseek/deepseek-v3.2"
 DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS = 20.0
+_LAST_SHADOW_OBSERVER_EVIDENCE: ContextVar[dict[str, object] | None] = ContextVar(
+    "last_shadow_observer_evidence", default=None
+)
 
 
 class ObserverAction(StrEnum):
@@ -117,6 +122,31 @@ def shadow_observer_runtime_descriptor() -> dict[str, str | bool | float]:
     return {**descriptor, "timeout_seconds": _observer_timeout_seconds()}
 
 
+def get_last_shadow_observer_evidence() -> dict[str, object]:
+    """Return call-local, secret-free evidence for the immediately completed shadow evaluation."""
+    return dict(_LAST_SHADOW_OBSERVER_EVIDENCE.get() or {})
+
+
+def _record_shadow_observer_evidence(
+    *,
+    descriptor: dict[str, str | bool | float],
+    started: float,
+    outcome: str,
+    recommendation: SearchObserverRecommendation | None,
+) -> None:
+    _LAST_SHADOW_OBSERVER_EVIDENCE.set(
+        {
+            **descriptor,
+            "observer_latency_ms": max(0, int((time.perf_counter() - started) * 1000)),
+            "observer_outcome": outcome,
+            "schema_valid": recommendation is not None,
+            "observer_recommendation_count": (
+                0 if recommendation is None else len(recommendation.recommendations)
+            ),
+        }
+    )
+
+
 async def evaluate_search_wave_shadow_with_model(
     telemetry: SearchWaveTelemetry,
     model: ResolvedObserverModel,
@@ -190,13 +220,34 @@ async def evaluate_search_wave_shadow(
     telemetry: SearchWaveTelemetry,
 ) -> SearchObserverRecommendation | None:
     """Evaluate the advisory-only shadow Observer with its dedicated model/timeout."""
+    descriptor = shadow_observer_runtime_descriptor()
+    started = time.perf_counter()
     model = _legacy_model()
     if model is None:
+        _record_shadow_observer_evidence(
+            descriptor=descriptor,
+            started=started,
+            outcome="not_configured",
+            recommendation=None,
+        )
         return None
     try:
-        return await asyncio.wait_for(
+        recommendation = await asyncio.wait_for(
             evaluate_search_wave_shadow_with_model(telemetry, model),
             timeout=_observer_timeout_seconds(),
         )
     except TimeoutError:
+        _record_shadow_observer_evidence(
+            descriptor=descriptor,
+            started=started,
+            outcome="timeout",
+            recommendation=None,
+        )
         return None
+    _record_shadow_observer_evidence(
+        descriptor=descriptor,
+        started=started,
+        outcome="succeeded" if recommendation is not None else "unavailable",
+        recommendation=recommendation,
+    )
+    return recommendation
