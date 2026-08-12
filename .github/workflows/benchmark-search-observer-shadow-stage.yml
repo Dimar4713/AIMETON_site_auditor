@@ -147,6 +147,23 @@ jobs:
                   assert metadata.get('observer_mode') == 'shadow', (scenario.slug, metadata)
                   assert metadata.get('routing_changed') is False, (scenario.slug, metadata)
 
+                  # PR #564 acceptance: prove the durable trace identifies the exact,
+                  # bounded Observer runtime without persisting secret material.
+                  assert metadata.get('profile_name'), (scenario.slug, metadata)
+                  assert metadata.get('provider'), (scenario.slug, metadata)
+                  assert metadata.get('model'), (scenario.slug, metadata)
+                  assert metadata.get('tier'), (scenario.slug, metadata)
+                  assert metadata.get('configured') is True, (scenario.slug, metadata)
+                  assert float(metadata.get('timeout_seconds', 0)) > 0, (scenario.slug, metadata)
+                  assert int(metadata.get('observer_latency_ms', -1)) >= 0, (scenario.slug, metadata)
+                  assert metadata.get('observer_outcome') == 'succeeded', (scenario.slug, metadata)
+                  assert metadata.get('schema_valid') is True, (scenario.slug, metadata)
+                  assert int(metadata.get('observer_recommendation_count', -1)) == int(
+                      counters.get('recommendation_count', -2)
+                  ), (scenario.slug, metadata, counters)
+                  assert 'api_key' not in metadata, (scenario.slug, metadata)
+                  assert 'base_url' not in metadata, (scenario.slug, metadata)
+
                   rub = Decimal(str(result.search.total_cost_by_currency.get('RUB', 0)))
                   actual_rub += rub
                   outputs.append({
@@ -160,9 +177,19 @@ jobs:
                       'funnel': json.loads(funnel['counters_json']),
                       'observer_mode': metadata.get('observer_mode'),
                       'routing_changed': metadata.get('routing_changed'),
+                      'profile_name': metadata.get('profile_name'),
+                      'provider': metadata.get('provider'),
+                      'model': metadata.get('model'),
+                      'tier': metadata.get('tier'),
+                      'configured': metadata.get('configured'),
+                      'timeout_seconds': metadata.get('timeout_seconds'),
+                      'observer_latency_ms': metadata.get('observer_latency_ms'),
+                      'observer_outcome': metadata.get('observer_outcome'),
+                      'schema_valid': metadata.get('schema_valid'),
                       'sufficient_evidence': metadata.get('sufficient_evidence'),
                       'action_counts': metadata.get('action_counts'),
                       'recommendation_count': counters.get('recommendation_count'),
+                      'observer_recommendation_count': metadata.get('observer_recommendation_count'),
                       'search_cost_rub': str(rub),
                   })
 
