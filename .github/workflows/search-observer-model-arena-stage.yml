@@ -38,7 +38,7 @@ jobs:
   arena:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       CONTAINER: aimeton-auditor
@@ -111,7 +111,9 @@ jobs:
               --input-dir /tmp/search-observer-arena-input \
               --output /tmp/search-observer-arena-output/result.json \
               --profiles '${{ inputs.profiles }}' \
-              --max-model-calls 24
+              --max-model-calls 24 \
+              --max-concurrency 4 \
+              --call-timeout-seconds 45
           rm -rf "$RUNNER_TEMP/search-observer-arena-output"
           mkdir -p "$RUNNER_TEMP/search-observer-arena-output"
           docker cp "$CONTAINER:/tmp/search-observer-arena-output/result.json" "$RUNNER_TEMP/search-observer-arena-output/result.json"
@@ -125,12 +127,16 @@ jobs:
           assert payload['search_calls'] == 0
           assert payload['case_count'] == 4
           assert payload['planned_model_calls'] <= 24
+          assert payload['max_concurrency'] == 4
+          assert payload['call_timeout_seconds'] == 45.0
           assert payload['routing_changed_any'] is False
           print(json.dumps({
               'case_count': payload['case_count'],
               'profile_count': payload['profile_count'],
               'configured_profile_count': payload['configured_profile_count'],
               'planned_model_calls': payload['planned_model_calls'],
+              'max_concurrency': payload['max_concurrency'],
+              'call_timeout_seconds': payload['call_timeout_seconds'],
               'routing_changed_any': payload['routing_changed_any'],
               'summary': payload['summary'],
           }, ensure_ascii=False, sort_keys=True))
