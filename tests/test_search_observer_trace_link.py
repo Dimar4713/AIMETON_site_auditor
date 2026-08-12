@@ -1,7 +1,7 @@
 import pytest
 
 from app.search_observer_llm import ObserverAction
-from app.search_observer_multiwave import WaveOutcomeSnapshot
+from app.search_observer_multiwave import DirectionWaveOutcomeSnapshot
 from app.search_observer_scoring import ObserverRuntimeEvidence, ObserverRuntimeOutcome, RecommendationVerdict
 from app.search_observer_trace_link import (
     PersistedRecommendationEvidence,
@@ -25,11 +25,12 @@ def runtime() -> ObserverRuntimeEvidence:
     )
 
 
-def wave(index: int, **overrides) -> WaveOutcomeSnapshot:
+def wave(index: int, direction_index: int = 0, **overrides) -> DirectionWaveOutcomeSnapshot:
     values = {
         "mission_id": "hunt-1",
         "attempt_id": "corr-1",
         "wave_index": index,
+        "direction_index": direction_index,
         "query_count": 2 if index == 1 else 4,
         "raw_results": 20 if index == 1 else 36,
         "unique_domains": 10 if index == 1 else 18,
@@ -42,7 +43,7 @@ def wave(index: int, **overrides) -> WaveOutcomeSnapshot:
         "routing_changed": False,
     }
     values.update(overrides)
-    return WaveOutcomeSnapshot(**values)
+    return DirectionWaveOutcomeSnapshot(**values)
 
 
 def recommendation(**overrides) -> PersistedRecommendationEvidence:
@@ -60,12 +61,13 @@ def recommendation(**overrides) -> PersistedRecommendationEvidence:
     return PersistedRecommendationEvidence(**values)
 
 
-def test_trace_link_builds_genuinely_later_offline_evidence():
+def test_trace_link_builds_genuinely_later_direction_evidence():
     evidence = build_offline_recommendation_evidence(
         recommendation=recommendation(),
         source_wave=wave(1),
         later_wave=wave(2),
     )
+    assert evidence.direction_index == 0
     assert evidence.outcome.added_queries == 2
     assert evidence.outcome.added_qualified_candidates == 4
     assert evidence.outcome.added_direct_or_official_candidates == 3
@@ -101,6 +103,24 @@ def test_trace_link_rejects_recommendation_identity_mismatch():
             recommendation=recommendation(mission_id="hunt-other"),
             source_wave=wave(1),
             later_wave=wave(2),
+        )
+
+
+def test_trace_link_rejects_source_direction_mismatch():
+    with pytest.raises(ValueError, match="recommendation_source_direction_mismatch"):
+        build_offline_recommendation_evidence(
+            recommendation=recommendation(direction_index=1),
+            source_wave=wave(1, direction_index=0),
+            later_wave=wave(2, direction_index=1),
+        )
+
+
+def test_trace_link_rejects_later_direction_mismatch():
+    with pytest.raises(ValueError, match="recommendation_later_direction_mismatch"):
+        build_offline_recommendation_evidence(
+            recommendation=recommendation(),
+            source_wave=wave(1),
+            later_wave=wave(2, direction_index=1),
         )
 
 
