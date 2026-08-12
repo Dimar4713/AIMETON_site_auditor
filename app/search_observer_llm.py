@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -8,9 +9,13 @@ from enum import StrEnum
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.llm import BASE_URL, MODEL
+from app.llm import BASE_URL
 from app.search_observer import SearchWaveTelemetry
 from app.search_observer_models import ResolvedObserverModel
+
+
+DEFAULT_SEARCH_OBSERVER_MODEL = "deepseek/deepseek-v3.2"
+DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS = 20.0
 
 
 class ObserverAction(StrEnum):
@@ -66,17 +71,31 @@ def _bounded_telemetry_payload(telemetry: SearchWaveTelemetry) -> dict:
     }
 
 
+def _observer_timeout_seconds() -> float:
+    raw = os.getenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS
+    return min(30.0, max(1.0, value))
+
+
 def _legacy_model() -> ResolvedObserverModel | None:
     key = os.getenv("ROUTERAI_API_KEY")
     if not key:
         return None
+    model = os.getenv("HUNTER_SEARCH_OBSERVER_MODEL", DEFAULT_SEARCH_OBSERVER_MODEL).strip()
+    if not model:
+        model = DEFAULT_SEARCH_OBSERVER_MODEL
     return ResolvedObserverModel(
-        profile_name="routerai-current",
+        profile_name="routerai-shadow-observer",
         provider="routerai",
         base_url=BASE_URL.rstrip("/"),
         api_key=key,
-        model=MODEL,
-        tier="O2",
+        model=model,
+        tier="O1",
         configured=True,
     )
 
@@ -153,8 +172,14 @@ JSON schema:
 async def evaluate_search_wave_shadow(
     telemetry: SearchWaveTelemetry,
 ) -> SearchObserverRecommendation | None:
-    """Backward-compatible current RouterAI shadow evaluator."""
+    """Evaluate the advisory-only shadow Observer with its dedicated model/timeout."""
     model = _legacy_model()
     if model is None:
         return None
-    return await evaluate_search_wave_shadow_with_model(telemetry, model)
+    try:
+        return await asyncio.wait_for(
+            evaluate_search_wave_shadow_with_model(telemetry, model),
+            timeout=_observer_timeout_seconds(),
+        )
+    except TimeoutError:
+        return None
