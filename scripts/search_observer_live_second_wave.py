@@ -78,6 +78,14 @@ def _observe_direction(req: HuntRequest, response) -> dict[str, object]:
     }
 
 
+def _observer_input_telemetry(telemetry) -> dict[str, object]:
+    """Persist the bounded, secret-free input actually seen by the shadow Observer."""
+    return {
+        "telemetry": telemetry.model_dump(mode="json"),
+        "routing_changed": False,
+    }
+
+
 def _source_snapshot(*, mission_id: str, attempt_id: str, direction_index: int, observation: dict[str, object]) -> DirectionWaveOutcomeSnapshot:
     return DirectionWaveOutcomeSnapshot(
         mission_id=mission_id,
@@ -218,6 +226,7 @@ async def run_validation(*, budget_rub: Decimal, output: Path) -> dict[str, obje
                 telemetry = original_builder(queries, responses)
                 captured["queries"] = list(queries)
                 captured["responses"] = list(responses)
+                captured["telemetry"] = telemetry
                 return telemetry
 
             discovery.build_search_wave_telemetry = capture_builder
@@ -275,6 +284,7 @@ async def run_validation(*, budget_rub: Decimal, output: Path) -> dict[str, obje
 
             queries = list(captured["queries"])
             responses = list(captured["responses"])
+            observer_input = _observer_input_telemetry(captured["telemetry"])
             recommendations = _scorable_recommendations(metadata, len(queries))
             if not recommendations:
                 scenario_evidence.append({"slug": scenario.slug, "state": "no_scorable_recommendation", "wave1_cost_rub": str(wave1_rub)})
@@ -365,6 +375,7 @@ async def run_validation(*, budget_rub: Decimal, output: Path) -> dict[str, obje
                 "observer_model": metadata.get("model"),
                 "observer_tier": metadata.get("tier"),
                 "observer_latency_ms": metadata.get("observer_latency_ms"),
+                "observer_input_telemetry": observer_input,
                 "routing_changed": False,
                 "outcomes": outcomes,
             })
@@ -375,7 +386,7 @@ async def run_validation(*, budget_rub: Decimal, output: Path) -> dict[str, obje
         discovery.search_policy_from_env = original_policy_factory
 
     evidence = {
-        "schema_version": 1,
+        "schema_version": 2,
         "owner_authorized_budget_rub": str(budget_rub),
         "measured_search_cost_rub": str(total_actual_rub),
         "max_scenarios": MAX_SCENARIOS,
