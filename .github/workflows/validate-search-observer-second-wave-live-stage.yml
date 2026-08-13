@@ -62,6 +62,7 @@ jobs:
           [[ "$status" == healthy || "$status" == running ]]
           echo "container_status=$status"
           echo "authorized_budget_rub=$budget"
+          echo "workflow_run_number=$GITHUB_RUN_NUMBER"
 
       - name: Execute bounded live shadow counterfactual validation
         shell: bash
@@ -72,6 +73,7 @@ jobs:
             -w /app \
             -e PYTHONPATH=/app \
             -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=true \
+            -e GITHUB_RUN_NUMBER="$GITHUB_RUN_NUMBER" \
             "$CONTAINER" \
             python -m scripts.search_observer_live_second_wave_compat \
               --budget-rub "$budget" \
@@ -131,7 +133,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           budget='${{ inputs.max_budget_rub }}'
-          docker exec -i -w /app -e PYTHONPATH=/app -e BUDGET="$budget" "$CONTAINER" python - <<'PY'
+          docker exec -i -w /app -e PYTHONPATH=/app -e BUDGET="$budget" -e GITHUB_RUN_NUMBER="$GITHUB_RUN_NUMBER" "$CONTAINER" python - <<'PY'
           import json
           import os
           from decimal import Decimal
@@ -141,6 +143,7 @@ jobs:
           evidence = json.loads(path.read_text(encoding='utf-8'))
           authorized = Decimal(os.environ['BUDGET'])
           actual = Decimal(evidence['measured_search_cost_rub'])
+          workflow_run_number = int(os.environ['GITHUB_RUN_NUMBER'])
 
           checks = {
               'authorized_budget_within_owner_cap': authorized <= Decimal('100'),
@@ -150,6 +153,8 @@ jobs:
               'premium_escalation_disabled': evidence.get('premium_escalation') is False,
               'routing_unchanged': evidence.get('routing_changed_any') is False,
               'validation_scored': evidence.get('validation_state') == 'scored',
+              'rotation_run_number_matches_workflow': evidence.get('scenario_rotation_run_number') == workflow_run_number,
+              'rotation_start_slug_recorded': bool(evidence.get('scenario_rotation_start_slug')),
           }
           outcomes = [
               outcome
@@ -167,6 +172,8 @@ jobs:
               'outcome_count': len(outcomes),
               'actual_search_cost_rub': str(actual),
               'authorized_budget_rub': str(authorized),
+              'workflow_run_number': workflow_run_number,
+              'scenario_rotation_start_slug': evidence.get('scenario_rotation_start_slug'),
               'failed_checks': failed,
           }
           print(json.dumps(summary, sort_keys=True))
