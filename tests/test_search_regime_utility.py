@@ -92,3 +92,50 @@ def test_regime_utility_rejects_invalid_uncertainty_reduction():
             unique_evidence_items=1,
             uncertainty_reduction=1.1,
         )
+
+
+@pytest.mark.parametrize(
+    ("override", "reason"),
+    [
+        ({"unique_candidates": 11}, "unique_candidates_exceed_raw_results"),
+        ({"qualified_candidates": 7}, "qualified_candidates_exceed_unique_candidates"),
+        (
+            {"direct_or_official_candidates": 7},
+            "direct_or_official_candidates_exceed_qualified_candidates",
+        ),
+        (
+            {"duplicate_results": 8, "excluded_results": 3},
+            "duplicate_and_excluded_exceed_raw_results",
+        ),
+    ],
+)
+def test_regime_utility_rejects_impossible_funnel_counts(override, reason):
+    values = {
+        "raw_results": 10,
+        "unique_candidates": 6,
+        "qualified_candidates": 4,
+        "direct_or_official_candidates": 2,
+        "duplicate_results": 2,
+        "excluded_results": 1,
+    }
+    values.update(override)
+
+    with pytest.raises(ValueError, match=reason):
+        build_regime_utility_evidence("balanced", **values)
+
+
+def test_discovery_utility_rejects_novelty_counts_above_unique_candidates():
+    with pytest.raises(ValueError, match="novel_entities_exceed_unique_candidates"):
+        build_regime_utility_evidence(
+            "discovery",
+            raw_results=10,
+            unique_candidates=4,
+            qualified_candidates=2,
+            direct_or_official_candidates=1,
+            duplicate_results=2,
+            excluded_results=1,
+            novel_entities=5,
+            rare_hits=2,
+            unique_evidence_items=3,
+            uncertainty_reduction=0.2,
+        )
