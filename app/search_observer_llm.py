@@ -17,7 +17,7 @@ from app.search_observer_models import ResolvedObserverModel
 
 
 DEFAULT_SEARCH_OBSERVER_MODEL = "deepseek/deepseek-v3.2"
-DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS = 30.0
+DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS = 45.0
 _LAST_SHADOW_OBSERVER_EVIDENCE: ContextVar[dict[str, object] | None] = ContextVar(
     "last_shadow_observer_evidence", default=None
 )
@@ -87,7 +87,7 @@ def _observer_timeout_seconds() -> float:
         value = float(raw)
     except ValueError:
         return DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS
-    return min(30.0, max(1.0, value))
+    return min(45.0, max(1.0, value))
 
 
 def _observer_failure_reason(exc: Exception) -> str:
