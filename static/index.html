@@ -119,6 +119,15 @@
     <form id="hunterForm" class="service-form">
       <label>Регион<input id="hunterRegion" minlength="2" maxlength="160" required placeholder="Красноярск"></label>
       <label>Отрасль<input id="hunterIndustry" maxlength="160" placeholder="Стоматология"></label>
+      <label>Режим поиска
+        <select id="hunterSearchRegime" name="search_regime">
+          <option value="auto" selected>Авто — AIMETON определяет по контексту</option>
+          <option value="precision">Лучшее — меньше мусора, сильный shortlist</option>
+          <option value="balanced">Баланс — качество и покрытие</option>
+          <option value="discovery">Редкое / не упустить — просеивать глубже</option>
+        </select>
+      </label>
+      <p id="hunterSearchRegimeStatus" class="service-form__wide service-status" role="status" aria-live="polite">Режим: Авто. Сейчас это shadow-настройка: она фиксирует намерение пользователя, но не меняет production routing.</p>
       <button type="submit">Найти компании</button>
     </form>
     <p id="hunterStatus" class="service-status" role="status" aria-live="polite"></p>
