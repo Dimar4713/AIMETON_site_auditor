@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.search_observer_scoring import ObservedMarginalYield, assess_second_wav
 
 _original_scorable_recommendations = target._scorable_recommendations
 _original_run_validation = target.run_validation
+_original_scenarios = tuple(target.SCENARIOS)
 
 
 def _coerce_persisted_recommendation(item: object) -> dict[str, object] | None:
@@ -67,6 +69,29 @@ def scorable_recommendations_compat(
     )
 
 
+def rotated_scenarios_for_run(run_number: int, scenarios=None):
+    """Rotate the bounded scenario order so repeated live runs collect heterogeneous evidence.
+
+    Rotation changes only which pre-existing benchmark scenario is attempted first. It does not
+    increase MAX_SCENARIOS, query bounds, provider calls per scenario, budget, routing authority,
+    or premium policy.
+    """
+    items = tuple(_original_scenarios if scenarios is None else scenarios)
+    if not items:
+        return items
+    normalized_run = max(1, int(run_number))
+    offset = (normalized_run - 1) % len(items)
+    return items[offset:] + items[:offset]
+
+
+def _workflow_run_number() -> int:
+    raw = os.getenv("GITHUB_RUN_NUMBER", "1")
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return 1
+
+
 def attach_shadow_decisions(evidence: dict[str, Any]) -> dict[str, Any]:
     """Attach retrospective second-wave decisions to each scored live outcome.
 
@@ -93,6 +118,10 @@ def attach_shadow_decisions(evidence: dict[str, Any]) -> dict[str, Any]:
 async def run_validation_compat(*, budget_rub, output: Path) -> dict[str, object]:
     evidence = await _original_run_validation(budget_rub=budget_rub, output=output)
     attach_shadow_decisions(evidence)
+    run_number = _workflow_run_number()
+    rotated = rotated_scenarios_for_run(run_number)
+    evidence["scenario_rotation_run_number"] = run_number
+    evidence["scenario_rotation_start_slug"] = rotated[0].slug if rotated else None
     output.write_text(
         json.dumps(evidence, ensure_ascii=False, sort_keys=True, indent=2),
         encoding="utf-8",
@@ -101,6 +130,8 @@ async def run_validation_compat(*, budget_rub, output: Path) -> dict[str, object
 
 
 def main() -> int:
+    run_number = _workflow_run_number()
+    target.SCENARIOS = rotated_scenarios_for_run(run_number)
     target._scorable_recommendations = scorable_recommendations_compat
     target.run_validation = run_validation_compat
     return target.main()

@@ -1,6 +1,7 @@
 from scripts.search_observer_live_second_wave_compat import (
     _coerce_persisted_recommendation,
     attach_shadow_decisions,
+    rotated_scenarios_for_run,
     scorable_recommendations_compat,
 )
 
@@ -99,3 +100,21 @@ def test_attach_shadow_decisions_marks_no_gain_high_waste_as_skip_candidate():
     assert decision['high_waste'] is True
     assert decision['reason_code'] == 'shadow_skip_no_quality_gain_high_waste'
     assert decision['routing_changed'] is False
+
+
+def test_scenario_rotation_changes_first_scenario_without_changing_set_or_count():
+    scenarios = ('dentistry', 'metalworking', 'accounting', 'equipment')
+    run_1 = rotated_scenarios_for_run(1, scenarios)
+    run_2 = rotated_scenarios_for_run(2, scenarios)
+    run_5 = rotated_scenarios_for_run(5, scenarios)
+    assert run_1 == scenarios
+    assert run_2 == ('metalworking', 'accounting', 'equipment', 'dentistry')
+    assert run_5 == scenarios
+    assert set(run_2) == set(scenarios)
+    assert len(run_2) == len(scenarios)
+
+
+def test_scenario_rotation_fail_safe_for_bad_or_zero_run_number():
+    scenarios = ('a', 'b', 'c')
+    assert rotated_scenarios_for_run(0, scenarios) == scenarios
+    assert rotated_scenarios_for_run(-10, scenarios) == scenarios
