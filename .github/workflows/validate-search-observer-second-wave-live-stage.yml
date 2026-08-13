@@ -106,10 +106,11 @@ jobs:
               db.close()
 
           keys = (
-              'observer_outcome', 'schema_valid', 'observer_recommendation_count',
-              'action_counts', 'recommendations', 'sufficient_evidence',
-              'observer_latency_ms', 'profile_name', 'provider', 'model', 'tier',
-              'routing_changed', 'later_observation_state',
+              'observer_outcome', 'observer_failure_reason', 'schema_valid',
+              'observer_recommendation_count', 'action_counts', 'recommendations',
+              'sufficient_evidence', 'observer_latency_ms', 'profile_name',
+              'provider', 'model', 'tier', 'routing_changed',
+              'later_observation_state',
           )
           payload = []
           for row in rows:

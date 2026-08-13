@@ -1,5 +1,9 @@
 import asyncio
+import json
 from decimal import Decimal
+
+import httpx
+from pydantic import ValidationError
 
 from app.search_observer import QueryYieldTelemetry, SearchWaveTelemetry
 from app.search_observer_llm import (
@@ -9,6 +13,7 @@ from app.search_observer_llm import (
     SearchObserverRecommendation,
     _bounded_telemetry_payload,
     _legacy_model,
+    _observer_failure_reason,
     _observer_timeout_seconds,
     evaluate_search_wave_shadow,
     get_last_shadow_observer_evidence,
@@ -144,6 +149,51 @@ def test_shadow_observer_timeout_is_bounded(monkeypatch) -> None:
     assert _observer_timeout_seconds() == 12.5
 
 
+def test_shadow_observer_failure_reason_is_sanitized_and_specific() -> None:
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    response = httpx.Response(500, request=request)
+    http_status_error = httpx.HTTPStatusError(
+        "secret provider body must not leak", request=request, response=response
+    )
+    transport_timeout = httpx.ReadTimeout("secret timeout context", request=request)
+
+    invalid_payload = {
+        "sufficient_evidence": True,
+        "summary": "ok",
+        "recommendations": [{"direction_index": -1, "action": "boost", "confidence": 1, "rationale": "x"}],
+    }
+    try:
+        SearchObserverRecommendation.model_validate(invalid_payload)
+    except ValidationError as exc:
+        schema_error = exc
+    else:
+        raise AssertionError("expected validation error")
+
+    invalid_json = None
+    try:
+        json.loads("{not-json")
+    except json.JSONDecodeError as exc:
+        invalid_json = exc
+    assert invalid_json is not None
+
+    assert _observer_failure_reason(transport_timeout) == "transport_timeout"
+    assert _observer_failure_reason(http_status_error) == "http_status_error"
+    assert _observer_failure_reason(schema_error) == "schema_validation_error"
+    assert _observer_failure_reason(invalid_json) == "invalid_json"
+    assert _observer_failure_reason(KeyError("secret-key")) == "response_shape_error"
+
+    combined = " ".join(
+        [
+            _observer_failure_reason(transport_timeout),
+            _observer_failure_reason(http_status_error),
+            _observer_failure_reason(schema_error),
+            _observer_failure_reason(invalid_json),
+            _observer_failure_reason(KeyError("secret-key")),
+        ]
+    )
+    assert "secret" not in combined
+
+
 def test_shadow_observer_timeout_fails_open_and_records_evidence(monkeypatch) -> None:
     from app import search_observer_llm as observer
 
@@ -184,6 +234,7 @@ def test_shadow_observer_timeout_fails_open_and_records_evidence(monkeypatch) ->
     recommendation, evidence = asyncio.run(exercise())
     assert recommendation is None
     assert evidence["observer_outcome"] == "timeout"
+    assert evidence["observer_failure_reason"] == "wall_clock_timeout"
     assert evidence["schema_valid"] is False
     assert evidence["observer_recommendation_count"] == 0
     assert evidence["model"] == "test/model"

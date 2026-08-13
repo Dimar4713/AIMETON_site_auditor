@@ -21,6 +21,9 @@ DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS = 30.0
 _LAST_SHADOW_OBSERVER_EVIDENCE: ContextVar[dict[str, object] | None] = ContextVar(
     "last_shadow_observer_evidence", default=None
 )
+_LAST_SHADOW_OBSERVER_FAILURE_REASON: ContextVar[str | None] = ContextVar(
+    "last_shadow_observer_failure_reason", default=None
+)
 
 
 class ObserverAction(StrEnum):
@@ -87,6 +90,25 @@ def _observer_timeout_seconds() -> float:
     return min(30.0, max(1.0, value))
 
 
+def _observer_failure_reason(exc: Exception) -> str:
+    """Return a bounded, secret-free reason code for Observer failures."""
+    if isinstance(exc, httpx.TimeoutException):
+        return "transport_timeout"
+    if isinstance(exc, httpx.HTTPStatusError):
+        return "http_status_error"
+    if isinstance(exc, httpx.HTTPError):
+        return "http_error"
+    if isinstance(exc, ValidationError):
+        return "schema_validation_error"
+    if isinstance(exc, json.JSONDecodeError):
+        return "invalid_json"
+    if isinstance(exc, (KeyError, IndexError, TypeError)):
+        return "response_shape_error"
+    if isinstance(exc, ValueError):
+        return "value_error"
+    return "unclassified_error"
+
+
 def _legacy_model() -> ResolvedObserverModel | None:
     key = os.getenv("ROUTERAI_API_KEY")
     if not key:
@@ -151,12 +173,14 @@ def _record_shadow_observer_evidence(
     started: float,
     outcome: str,
     recommendation: SearchObserverRecommendation | None,
+    failure_reason: str | None = None,
 ) -> None:
     _LAST_SHADOW_OBSERVER_EVIDENCE.set(
         {
             **descriptor,
             "observer_latency_ms": max(0, int((time.perf_counter() - started) * 1000)),
             "observer_outcome": outcome,
+            "observer_failure_reason": failure_reason,
             "schema_valid": recommendation is not None,
             "observer_recommendation_count": (
                 0 if recommendation is None else len(recommendation.recommendations)
@@ -177,7 +201,9 @@ async def evaluate_search_wave_shadow_with_model(
     transport failures and schema violations all fail open to deterministic
     Hunter behavior by returning None.
     """
+    _LAST_SHADOW_OBSERVER_FAILURE_REASON.set(None)
     if not model.configured or not model.base_url or not model.api_key or not model.model:
+        _LAST_SHADOW_OBSERVER_FAILURE_REASON.set("model_not_configured")
         return None
 
     schema = SearchObserverRecommendation.model_json_schema()
@@ -225,13 +251,16 @@ JSON schema:
             response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
         recommendation = SearchObserverRecommendation.model_validate(_extract_json(content))
-    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, ValidationError, json.JSONDecodeError):
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+        _LAST_SHADOW_OBSERVER_FAILURE_REASON.set(_observer_failure_reason(exc))
         return None
 
     if recommendation.routing_changed:
+        _LAST_SHADOW_OBSERVER_FAILURE_REASON.set("routing_change_rejected")
         return None
     max_index = len(telemetry.directions) - 1
     if any(item.direction_index > max_index for item in recommendation.recommendations):
+        _LAST_SHADOW_OBSERVER_FAILURE_REASON.set("direction_index_out_of_range")
         return None
     return recommendation
 
@@ -249,6 +278,7 @@ async def evaluate_search_wave_shadow(
             started=started,
             outcome="not_configured",
             recommendation=None,
+            failure_reason="model_not_configured",
         )
         return None
     try:
@@ -262,6 +292,7 @@ async def evaluate_search_wave_shadow(
             started=started,
             outcome="timeout",
             recommendation=None,
+            failure_reason="wall_clock_timeout",
         )
         return None
     _record_shadow_observer_evidence(
@@ -269,5 +300,10 @@ async def evaluate_search_wave_shadow(
         started=started,
         outcome="succeeded" if recommendation is not None else "unavailable",
         recommendation=recommendation,
+        failure_reason=(
+            None
+            if recommendation is not None
+            else _LAST_SHADOW_OBSERVER_FAILURE_REASON.get() or "unclassified_unavailable"
+        ),
     )
     return recommendation
