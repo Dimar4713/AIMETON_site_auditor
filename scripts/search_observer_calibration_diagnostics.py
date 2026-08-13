@@ -134,6 +134,49 @@ def _mean_present(items: list[dict[str, Any]], key: str) -> float | None:
     return round(fmean(values), 6) if values else None
 
 
+def _confidence_calibration(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    comparable = [
+        row
+        for row in rows
+        if row.get("confidence") is not None
+        and row.get("deterministic_verdict") in {"supported", "contradicted"}
+    ]
+    if not comparable:
+        return {
+            "comparable_count": 0,
+            "observed_max_confidence": None,
+            "high_confidence_count": 0,
+            "high_confidence_contradicted_count": 0,
+            "high_confidence_contradiction_rate": None,
+            "lower_confidence_count": 0,
+            "lower_confidence_contradicted_count": 0,
+            "lower_confidence_contradiction_rate": None,
+            "high_confidence_not_worse": None,
+            "definition": "high_is_observed_max_confidence_no_policy_threshold",
+        }
+
+    observed_max = max(float(row["confidence"]) for row in comparable)
+    high = [row for row in comparable if float(row["confidence"]) == observed_max]
+    lower = [row for row in comparable if float(row["confidence"]) < observed_max]
+    high_contradicted = sum(row["deterministic_verdict"] == "contradicted" for row in high)
+    lower_contradicted = sum(row["deterministic_verdict"] == "contradicted" for row in lower)
+    high_rate = round(high_contradicted / len(high), 6) if high else None
+    lower_rate = round(lower_contradicted / len(lower), 6) if lower else None
+    not_worse = None if lower_rate is None or high_rate is None else high_rate <= lower_rate
+    return {
+        "comparable_count": len(comparable),
+        "observed_max_confidence": observed_max,
+        "high_confidence_count": len(high),
+        "high_confidence_contradicted_count": high_contradicted,
+        "high_confidence_contradiction_rate": high_rate,
+        "lower_confidence_count": len(lower),
+        "lower_confidence_contradicted_count": lower_contradicted,
+        "lower_confidence_contradiction_rate": lower_rate,
+        "high_confidence_not_worse": not_worse,
+        "definition": "high_is_observed_max_confidence_no_policy_threshold",
+    }
+
+
 def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for batch_index, payload in enumerate(payloads):
@@ -163,6 +206,11 @@ def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
                     normalized_direction_index = int(direction_index)
                 except (TypeError, ValueError):
                     normalized_direction_index = None
+                raw_confidence = score.get("confidence")
+                try:
+                    confidence = float(raw_confidence) if raw_confidence is not None else None
+                except (TypeError, ValueError):
+                    confidence = None
                 rows.append(
                     {
                         "scenario": scenario_id,
@@ -170,6 +218,8 @@ def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
                         "observer": observer.value,
                         "hindsight": hindsight.value,
                         "cohort": _cohort_name(observer, hindsight),
+                        "confidence": confidence,
+                        "deterministic_verdict": score.get("verdict"),
                         "quality_gain_observed": decision.quality_gain_observed,
                         "waste_ratio": decision.waste_ratio,
                         "added_qualified_candidates": marginal.added_qualified_candidates,
@@ -235,6 +285,7 @@ def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
         "disagreement_count": len(disagreements),
         "disagreement_ratio": round(len(disagreements) / len(rows), 6),
         "cohorts": cohorts,
+        "confidence_calibration": _confidence_calibration(rows),
         "disagreements": disagreements,
         "routing_changed": False,
         "steering_enabled": False,
