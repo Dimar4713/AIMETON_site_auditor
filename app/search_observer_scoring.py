@@ -32,7 +32,7 @@ class ObserverRuntimeEvidence(ScoringModel):
     provider: str = Field(min_length=1, max_length=120)
     model: str = Field(min_length=1, max_length=200)
     tier: str = Field(min_length=1, max_length=40)
-    timeout_seconds: float = Field(gt=0.0, le=30.0)
+    timeout_seconds: float = Field(gt=0.0, le=45.0)
     observer_latency_ms: int = Field(ge=0)
     observer_outcome: ObserverRuntimeOutcome
     schema_valid: bool
