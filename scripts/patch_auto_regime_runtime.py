@@ -79,4 +79,4 @@ async def test_hunt_search_regime_auto_uses_observed_sparse_funnel(monkeypatch):
     assert metadata["steering_enabled"] is False
 '''
 if "test_hunt_search_regime_auto_uses_observed_sparse_funnel" not in test_text:
-    tests.write_text(test_text.rstrip() + addition + "\n", encoding="utf-8")
+    tests.write_text(test_text.rstrip() + addition.rstrip() + "\n", encoding="utf-8")
