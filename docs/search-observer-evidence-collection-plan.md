@@ -54,6 +54,74 @@ Each batch must preserve:
 - explicit spend authorization before any paid live batch;
 - machine-readable evidence artifact with cost and verdicts.
 
+## AIMETON Search Benchmark v1 — approved experiment program
+
+Purpose: replace subjective comparisons with reproducible measurements and position AIMETON, Perplexity and combined AIMETON+Perplexity execution on the same task set.
+
+Initial target: 30 benchmark tasks, balanced across ten experiment groups.
+
+| Group | Task family | Primary measurements |
+|---|---|---|
+| A | Known company intelligence | official-source recall, factual correctness, provenance completeness |
+| B | Regional company hunt | unique qualified companies, direct/official yield, precision |
+| C | Narrow B2B niche | recall, precision, qualified-per-query |
+| D | Low-information regional company | source discovery depth, primary-source recovery |
+| E | Contradictory company facts | contradiction detection, conflict resolution, evidence quality |
+| F | Deep market/supply-chain research | breadth, depth, useful-evidence density |
+| G | Russian regulatory/standards sources | domain-source recall, official-source share, citation correctness |
+| H | Search economics | RUB per qualified candidate, RUB per verified fact, provider-call count |
+| I | Time efficiency | useful evidence per second, latency to first verified fact, total mission latency |
+| J | Decision usefulness | actionability, evidence completeness, unsupported-claim rate |
+
+### Benchmark contenders
+
+Every benchmark task should be executable, where technically and legally available, in three comparable modes:
+
+1. `AIMETON_NATIVE` — AIMETON Search Gateway / Search Observer only;
+2. `PERPLEXITY` — Perplexity search/research capability as an external contender;
+3. `AIMETON_PLUS_PERPLEXITY` — Perplexity used as one bounded external search organ inside AIMETON, with AIMETON retaining orchestration, evidence normalization and decision governance.
+
+### Canonical metrics
+
+At minimum retain per task and contender:
+
+- task_id, category, region, industry, timestamp and exact system/version identifiers;
+- unique sources and unique domains;
+- official/direct source count and share;
+- qualified candidate count;
+- verified facts and contradicted facts;
+- unsupported claims;
+- duplicate and excluded result counts;
+- useful-evidence density;
+- citation/provenance completeness;
+- time to first verified fact and total latency;
+- provider/search call count;
+- measured cost where available;
+- final actionability score under the same rubric;
+- raw evidence artifact sufficient for independent re-scoring.
+
+### Fairness and reproducibility rules
+
+- identical task wording and task-specific constraints across contenders;
+- preserve raw outputs and source lists before human interpretation;
+- blind or deterministic scoring where practical;
+- separate retrieval quality from answer-writing quality;
+- no promotion decision from a single task or single domain;
+- report confidence intervals or at least sample counts with every aggregate;
+- document unavailable/unsupported metrics instead of substituting estimates;
+- Perplexity comparison does not authorize paid usage beyond explicit owner approval and configured hard caps.
+
+### Experiment sequence
+
+1. Freeze v1 task corpus and scoring rubric.
+2. Implement machine-readable benchmark schema and artifact layout.
+3. Run a small dry batch with no more than three tasks to validate scoring and evidence capture.
+4. Run the full 30-task benchmark only after instrumentation is validated.
+5. Compare `AIMETON_NATIVE`, `PERPLEXITY`, and `AIMETON_PLUS_PERPLEXITY` by task group and overall, not only by one aggregate score.
+6. Feed findings back into Search Observer policy, provider routing and source-role priorities while preserving shadow-first governance.
+
+This benchmark is an evidence program, not an authorization to activate autonomous routing or purchase premium provider capacity.
+
 ## Evidence ledger fields
 
 For every scored outcome retain:
