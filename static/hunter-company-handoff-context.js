@@ -5,6 +5,16 @@
     unknown_candidate: 'Коммерческий статус не подтверждён',
     institutional_candidate: 'Институциональная организация',
   };
+  const REGIME_LABELS = {
+    auto: 'Авто',
+    precision: 'Лучшее',
+    balanced: 'Баланс',
+    discovery: 'Редкое / не упустить',
+  };
+  const REGIME_REASON_LABELS = {
+    auto_balanced_default: 'автоматическая классификация ещё в shadow; безопасный базовый режим — баланс',
+    user_override: 'явный выбор пользователя',
+  };
 
   function safeHost(value) {
     try {
@@ -83,6 +93,37 @@
     }
     node.hidden = false;
   }
+
+  function renderSearchRegimeStatus(metadata) {
+    const node = document.querySelector('#hunterSearchRegimeStatus');
+    if (!node || !metadata) return;
+    const requested = REGIME_LABELS[metadata.requested] || metadata.requested || '—';
+    const effective = REGIME_LABELS[metadata.effective] || metadata.effective || '—';
+    const reason = REGIME_REASON_LABELS[metadata.reason] || metadata.reason || 'без причины';
+    node.textContent = `Запрошено: ${requested}. Shadow-режим: ${effective}. Причина: ${reason}. Production routing не изменён.`;
+  }
+
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    let target = input;
+    const method = String(init?.method || 'GET').toUpperCase();
+    if (typeof input === 'string' && input === '/api/hunt' && method === 'POST') {
+      const requested = document.querySelector('#hunterSearchRegime')?.value || 'auto';
+      target = `/api/hunt?search_regime=${encodeURIComponent(requested)}`;
+    }
+    const response = await originalFetch(target, init);
+    if (typeof target === 'string' && target.startsWith('/api/hunt?') && response.ok) {
+      response.clone().json().then(data => renderSearchRegimeStatus(data.search_regime)).catch(() => {});
+    }
+    return response;
+  };
+
+  document.querySelector('#hunterSearchRegime')?.addEventListener('change', event => {
+    const node = document.querySelector('#hunterSearchRegimeStatus');
+    if (!node) return;
+    const requested = REGIME_LABELS[event.target.value] || event.target.value;
+    node.textContent = `Выбрано: ${requested}. Настройка будет записана как shadow intent при следующем поиске; production routing пока не меняется.`;
+  });
 
   document.addEventListener('click', event => {
     if (event.target.closest('.hunter-candidate-action')) {
