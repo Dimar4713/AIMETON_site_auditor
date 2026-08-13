@@ -400,9 +400,23 @@ def preliminary_analysis_docx(req: SiteAnalysis):
 
 
 @app.post("/api/hunt")
-async def hunt(req: HuntRequest):
+async def hunt(req: HuntRequest, request: Request):
+    requested_regime = request.query_params.get("search_regime", "auto").strip().lower()
+    allowed_regimes = {"auto", "precision", "balanced", "discovery"}
+    if requested_regime not in allowed_regimes:
+        raise HTTPException(status_code=422, detail="invalid_search_regime")
+
     effective = get_hunter_settings_repository().apply(req)
-    return await run_hunt(effective)
+    result = await run_hunt(effective)
+    payload = result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result)
+    payload["search_regime"] = {
+        "requested": requested_regime,
+        "effective": "balanced" if requested_regime == "auto" else requested_regime,
+        "reason": "auto_balanced_default" if requested_regime == "auto" else "user_override",
+        "routing_changed": False,
+        "steering_enabled": False,
+    }
+    return payload
 
 
 @app.post("/api/chat")
