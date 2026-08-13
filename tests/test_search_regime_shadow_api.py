@@ -80,3 +80,32 @@ async def test_hunt_rejects_unknown_search_regime(monkeypatch):
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail == "invalid_search_regime"
     assert called is False
+
+@pytest.mark.asyncio
+async def test_hunt_search_regime_auto_uses_observed_sparse_funnel(monkeypatch):
+    async def sparse_run_hunt(_request):
+        return {
+            "region": "Красноярск",
+            "candidates": [],
+            "discovered": 2,
+            "funnel": {
+                "raw_results": 3,
+                "unique_candidates": 2,
+                "qualified_candidates": 1,
+                "duplicate_results": 0,
+                "excluded_results": 0,
+            },
+        }
+
+    monkeypatch.setattr(main, "run_hunt", sparse_run_hunt)
+    result = await main.hunt(
+        HuntRequest(region="Красноярск", industries=[]),
+        _request(),
+    )
+
+    metadata = result["search_regime"]
+    assert metadata["requested"] == "auto"
+    assert metadata["effective"] == "discovery"
+    assert metadata["reason"] == "rarity_or_sparsity"
+    assert metadata["routing_changed"] is False
+    assert metadata["steering_enabled"] is False

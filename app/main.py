@@ -53,6 +53,7 @@ from app.retention_runtime import build_retention_runner
 from app.runtime_core.api import router as runtime_router
 from app.scraper import FetchError, fetch_site
 from app.search_gateway import get_search_gateway, search_policy_from_env
+from app.search_regime_shadow import resolve_auto_search_regime
 from app.sef.company_profile import (
     CompanyProfileBuildRequest,
     CompanyProfileV1,
@@ -409,10 +410,29 @@ async def hunt(req: HuntRequest, request: Request):
     effective = get_hunter_settings_repository().apply(req)
     result = await run_hunt(effective)
     payload = result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result)
+    if requested_regime == "auto":
+        funnel = payload.get("funnel")
+        if isinstance(funnel, dict):
+            decision = resolve_auto_search_regime(
+                raw_results=int(funnel.get("raw_results") or 0),
+                unique_candidates=int(funnel.get("unique_candidates") or 0),
+                qualified_candidates=int(funnel.get("qualified_candidates") or 0),
+                duplicate_results=int(funnel.get("duplicate_results") or 0),
+                excluded_results=int(funnel.get("excluded_results") or 0),
+            )
+            effective_regime = decision.effective
+            regime_reason = decision.reason
+        else:
+            effective_regime = "balanced"
+            regime_reason = "auto_balanced_default"
+    else:
+        effective_regime = requested_regime
+        regime_reason = "user_override"
+
     payload["search_regime"] = {
         "requested": requested_regime,
-        "effective": "balanced" if requested_regime == "auto" else requested_regime,
-        "reason": "auto_balanced_default" if requested_regime == "auto" else "user_override",
+        "effective": effective_regime,
+        "reason": regime_reason,
         "routing_changed": False,
         "steering_enabled": False,
     }
