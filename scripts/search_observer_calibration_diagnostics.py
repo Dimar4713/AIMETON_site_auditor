@@ -46,6 +46,34 @@ def _cohort_name(
     return "other_disagreement"
 
 
+def _source_features(snapshot: dict[str, Any] | None) -> dict[str, float | None]:
+    if not snapshot:
+        return {
+            "source_waste_ratio": None,
+            "source_raw_per_query": None,
+            "source_qualified_per_query": None,
+            "source_direct_or_official_per_query": None,
+        }
+    query_count = int(snapshot.get("query_count") or 0)
+    raw = int(snapshot.get("raw_results") or 0)
+    duplicates = int(snapshot.get("duplicate_results") or 0)
+    excluded = int(snapshot.get("excluded_results") or 0)
+    qualified = int(snapshot.get("qualified_candidates") or 0)
+    direct = int(snapshot.get("direct_or_official_candidates") or 0)
+    wasted = min(raw, duplicates + excluded)
+    return {
+        "source_waste_ratio": round(wasted / raw, 6) if raw else 0.0,
+        "source_raw_per_query": round(raw / query_count, 6) if query_count else 0.0,
+        "source_qualified_per_query": round(qualified / query_count, 6) if query_count else 0.0,
+        "source_direct_or_official_per_query": round(direct / query_count, 6) if query_count else 0.0,
+    }
+
+
+def _mean_present(items: list[dict[str, Any]], key: str) -> float | None:
+    values = [row[key] for row in items if row.get(key) is not None]
+    return round(fmean(values), 6) if values else None
+
+
 def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for batch_index, payload in enumerate(payloads):
@@ -82,6 +110,7 @@ def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
                         "added_qualified_candidates": marginal.added_qualified_candidates,
                         "added_direct_or_official_candidates": marginal.added_direct_or_official_candidates,
                         "added_raw_results": marginal.added_raw_results,
+                        **_source_features(outcome.get("source_snapshot")),
                     }
                 )
 
@@ -106,6 +135,15 @@ def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
             "mean_added_direct_or_official_candidates": round(
                 fmean(row["added_direct_or_official_candidates"] for row in items), 6
             ) if items else None,
+            "mean_source_waste_ratio": _mean_present(items, "source_waste_ratio"),
+            "mean_source_raw_per_query": _mean_present(items, "source_raw_per_query"),
+            "mean_source_qualified_per_query": _mean_present(items, "source_qualified_per_query"),
+            "mean_source_direct_or_official_per_query": _mean_present(
+                items, "source_direct_or_official_per_query"
+            ),
+            "source_feature_count": sum(
+                row.get("source_waste_ratio") is not None for row in items
+            ),
         }
 
     disagreements = [row for row in rows if row["cohort"] != "aligned"]
