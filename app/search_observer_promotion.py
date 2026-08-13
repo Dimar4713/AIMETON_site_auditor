@@ -33,6 +33,8 @@ class PromotionThresholds(PromotionModel):
     max_contradicted_ratio: float = Field(default=0.15, ge=0.0, le=1.0)
     min_heterogeneous_batches: int = Field(default=2, ge=1)
     high_confidence_floor: float = Field(default=0.75, ge=0.0, le=1.0)
+    min_recent_batch_supported_ratio: float = Field(default=0.60, ge=0.0, le=1.0)
+    consecutive_weak_batch_limit: int = Field(default=2, ge=2)
 
 
 class QualityGuard(PromotionModel):
@@ -75,6 +77,7 @@ class PromotionDecision(PromotionModel):
     total_outcomes: int = Field(ge=0)
     total_scorable: int = Field(ge=0)
     heterogeneous_batch_count: int = Field(ge=0)
+    recent_batch_supported_ratios: list[float]
     quality_guard_passed: bool
     routing_changed_count: int = Field(ge=0)
     families: list[FamilyPromotionEvidence]
@@ -155,10 +158,24 @@ def _family_evidence(
     )
 
 
+def _has_consecutive_weak_batches(
+    recent_batch_supported_ratios: list[float],
+    thresholds: PromotionThresholds,
+) -> bool:
+    window = thresholds.consecutive_weak_batch_limit
+    if len(recent_batch_supported_ratios) < window:
+        return False
+    return all(
+        ratio < thresholds.min_recent_batch_supported_ratio
+        for ratio in recent_batch_supported_ratios[-window:]
+    )
+
+
 def evaluate_promotion_gate(
     outcomes: Iterable[RecommendationOutcome],
     *,
     heterogeneous_batch_count: int,
+    recent_batch_supported_ratios: Iterable[float] = (),
     quality_guard: QualityGuard | None = None,
     thresholds: PromotionThresholds | None = None,
 ) -> PromotionDecision:
@@ -166,6 +183,9 @@ def evaluate_promotion_gate(
     items = list(outcomes)
     guard = quality_guard or QualityGuard()
     limits = thresholds or PromotionThresholds()
+    recent_ratios = [round(float(item), 6) for item in recent_batch_supported_ratios]
+    if any(item < 0.0 or item > 1.0 for item in recent_ratios):
+        raise ValueError("recent_batch_supported_ratio_out_of_range")
     scorable = [item for item in items if item.verdict != RecommendationVerdict.NOT_SCORABLE]
     routing_changed_count = sum(item.routing_changed for item in items)
 
@@ -183,6 +203,8 @@ def evaluate_promotion_gate(
         reasons.append("insufficient_total_samples")
     if heterogeneous_batch_count < limits.min_heterogeneous_batches:
         reasons.append("insufficient_heterogeneous_batches")
+    if _has_consecutive_weak_batches(recent_ratios, limits):
+        reasons.append("consecutive_weak_heterogeneous_batches")
     if routing_changed_count:
         reasons.append("shadow_routing_changed")
     if not guard.passed:
@@ -203,6 +225,7 @@ def evaluate_promotion_gate(
         total_outcomes=len(items),
         total_scorable=len(scorable),
         heterogeneous_batch_count=max(0, heterogeneous_batch_count),
+        recent_batch_supported_ratios=recent_ratios,
         quality_guard_passed=guard.passed,
         routing_changed_count=routing_changed_count,
         families=families,

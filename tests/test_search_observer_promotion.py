@@ -66,12 +66,65 @@ def test_family_can_become_eligible_only_after_thresholds():
         outcome(ObserverAction.CONTINUE, RecommendationVerdict.CONTRADICTED, 0.6)
         for _ in range(2)
     ]
-    decision = evaluate_promotion_gate(samples, heterogeneous_batch_count=3)
+    decision = evaluate_promotion_gate(
+        samples,
+        heterogeneous_batch_count=3,
+        recent_batch_supported_ratios=[0.8, 0.75],
+    )
     assert decision.state == PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING
     continuation = family(decision, ActionFamily.CONTINUATION)
     assert continuation.state == PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING
     assert continuation.supported_ratio == 0.933333
     assert continuation.contradicted_ratio == 0.066667
+
+
+def test_two_consecutive_weak_heterogeneous_batches_block_global_gate():
+    samples = [
+        outcome(ObserverAction.CONTINUE, RecommendationVerdict.SUPPORTED, 0.8)
+        for _ in range(28)
+    ] + [
+        outcome(ObserverAction.CONTINUE, RecommendationVerdict.CONTRADICTED, 0.6)
+        for _ in range(2)
+    ]
+    decision = evaluate_promotion_gate(
+        samples,
+        heterogeneous_batch_count=4,
+        recent_batch_supported_ratios=[0.9, 0.59, 0.55],
+    )
+    assert family(decision, ActionFamily.CONTINUATION).state == PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING
+    assert decision.state == PromotionState.SHADOW_ONLY
+    assert "consecutive_weak_heterogeneous_batches" in decision.reason_codes
+
+
+def test_one_weak_batch_does_not_trigger_consecutive_batch_guard():
+    samples = [
+        outcome(ObserverAction.CONTINUE, RecommendationVerdict.SUPPORTED, 0.8)
+        for _ in range(30)
+    ]
+    decision = evaluate_promotion_gate(
+        samples,
+        heterogeneous_batch_count=3,
+        recent_batch_supported_ratios=[0.55, 0.8],
+    )
+    assert decision.state == PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING
+    assert "consecutive_weak_heterogeneous_batches" not in decision.reason_codes
+
+
+def test_recent_batch_supported_ratio_must_be_bounded():
+    samples = [
+        outcome(ObserverAction.CONTINUE, RecommendationVerdict.SUPPORTED, 0.8)
+        for _ in range(30)
+    ]
+    try:
+        evaluate_promotion_gate(
+            samples,
+            heterogeneous_batch_count=3,
+            recent_batch_supported_ratios=[1.01],
+        )
+    except ValueError as exc:
+        assert str(exc) == "recent_batch_supported_ratio_out_of_range"
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_high_confidence_calibration_regression_blocks_family():
