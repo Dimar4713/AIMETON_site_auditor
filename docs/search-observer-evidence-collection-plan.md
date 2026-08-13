@@ -4,17 +4,28 @@ Status: shadow-only evidence program. This document does not authorize active st
 
 ## Objective
 
-Collect enough direction-scoped causal outcomes to evaluate the promotion gate merged in PR #588 without changing routing or provider policy.
+Use the accumulated direction-scoped causal evidence to evaluate Search Observer recommendation quality, distinguish clean productive continuation from productive-but-wasteful continuation, and keep the promotion gate fail-closed until family-level and quality guards are satisfied. New paid live batches are not justified merely to increase the global sample count because the global floor has already been reached.
 
 ## Current baseline
 
-- scored outcomes: 2
-- heterogeneous batches: 1
-- current state: `shadow_only`
-- target floor: 30 scorable outcomes
-- per action-family floor: 5 decided outcomes for any family considered for promotion
+- causal/scorable corpus: `N=30` — global sample floor reached;
+- current state: `shadow_only`;
+- global minimum floor: 30 scorable outcomes — satisfied;
+- per action-family floor: 5 decided outcomes for any family considered for promotion — evaluated independently;
+- active steering: disabled;
+- routing authority: unchanged (`routing_changed=false` for shadow evidence);
+- premium escalation: unauthorized;
+- next evidence priority: zero-cost re-scoring and waste discrimination before any additional live spend.
 
-## Quality-first live finding — 2026-08-13
+PR #608 made the second-wave hindsight decision explicit and machine-readable:
+
+- clean observed quality gain -> `continue`;
+- observed quality gain with high duplicate/excluded waste -> `refine`;
+- no observed quality gain or no later wave -> `skip`.
+
+This classification remains shadow-only evidence and has no provider or routing authority.
+
+## Quality-first live findings — 2026-08-13
 
 Exact-SHA live validation run `31656295200` on `8a677339b78f902b07686beb83880849c3174a76` confirmed that a second search wave can materially increase useful yield while also increasing duplicate/excluded waste.
 
@@ -22,15 +33,23 @@ Observed examples:
 
 - metalworking / official-site direction: qualified/direct candidates increased from 3/3 to 12/12 after one additional same-direction query; the `continue` recommendation was scored as supported;
 - metalworking / directory direction: qualified/direct candidates increased from 1/1 to 8/8, but duplicate/excluded waste also grew materially; the `refine` recommendation was contradicted by the later-wave evidence;
-- dentistry / Krasnoyarsk: the Observer hit the 20-second wall-clock guard and produced no scorable recommendation.
+- dentistry / Krasnoyarsk: the Observer hit the earlier wall-clock guard and produced no scorable recommendation.
 
 During the current quality-first phase, latency and cost growth alone do not outweigh a demonstrated search-quality improvement, but existing hard caps, provider policy, routing authority restrictions and premium-escalation restrictions remain unchanged.
 
-The Observer timeout is therefore treated as a quality-evidence completeness defect. The default wall-clock allowance is raised from 20 to 30 seconds while remaining bounded and shadow-only. The HTTP client timeout must stay above the Observer wall-clock guard so the outer Observer timeout remains the authoritative classified outcome.
+Subsequent heterogeneous live validation proved that timeout growth alone is not the current remedy:
+
+- run `31700529243` hit the 30-second wall-clock guard on both Observer evaluations;
+- PR #606 raised the bounded Observer runtime ceiling from 30 to 45 seconds without changing routing, provider-call count or spend authority;
+- run `31702202089` again hit the wall-clock guard on both evaluations at approximately 45002 ms;
+- measured search cost for that run was 0.04 RUB and routing remained unchanged;
+- PR #607 aligned offline runtime-evidence validation with the 45-second bounded contract and was deployed to Stage on exact SHA `46bafe36eeb11471f612fe0cc5d4df3aeec12960`.
+
+The repeated exact-bound timeouts are therefore treated as current Observer/provider-path degradation evidence, not as justification to increase the timeout again. Do not launch additional paid batches solely to reach the global sample floor; it is already satisfied at `N=30`.
 
 ## Batch design
 
-Use multiple industries, regions and query shapes. Prefer batches that differ along at least two dimensions from the previous accepted batch.
+Use additional live batches only when a concrete unresolved hypothesis cannot be evaluated from stored evidence and the batch has explicit spend authorization. When a new live batch is justified, use multiple industries, regions and query shapes and prefer batches that differ along at least two dimensions from the previous accepted batch.
 
 Suggested matrix:
 
@@ -47,7 +66,7 @@ Each batch must preserve:
 
 - exact deployed SHA;
 - Observer shadow-only mode;
-- same-direction second-wave continuation for causal scoring;
+- same-direction second-wave continuation for causal scoring when continuation evidence is the tested hypothesis;
 - `routing_changed=false`;
 - provider concurrency/cooldown/circuit/quota policy unchanged;
 - no premium escalation;
@@ -134,6 +153,7 @@ For every scored outcome retain:
 - source and later snapshots;
 - marginal qualified/direct-or-official/unique/raw yield;
 - duplicates and exclusions;
+- second-wave shadow preferred action (`continue`, `refine`, `skip`) where derivable;
 - latency and search cost;
 - deterministic verdict and score;
 - routing_changed flag;
@@ -141,8 +161,8 @@ For every scored outcome retain:
 
 ## Promotion review cadence
 
-Recompute the gate after each heterogeneous batch, but do not interpret early ratios as promotion evidence before the global and per-family minimum sample floors are met.
+Recompute the gate after new evidence or a scoring-policy change. The global sample floor is already satisfied, so additional sample count alone is not a reason for new paid live runs.
 
-If an action family lacks enough decided outcomes, it remains shadow-only independently of other families.
+If an action family lacks enough decided outcomes, or if its support/contradiction or quality guard fails, that family remains shadow-only independently of other families.
 
 `escalate` is excluded from automatic steering and remains under a separate economic/policy authorization gate.
