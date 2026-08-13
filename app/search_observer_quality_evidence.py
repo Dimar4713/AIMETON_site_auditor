@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.search_observer_quality import QualityMetrics, summarize_quality_metrics
-from app.search_observer_scoring import ObservedMarginalYield
+from app.search_observer_scoring import (
+    ObservedMarginalYield,
+    SecondWaveShadowAction,
+    assess_second_wave_shadow,
+)
 
 
 class QualityEvidenceModel(BaseModel):
@@ -35,6 +40,22 @@ class ShadowQualityProxy(QualityEvidenceModel):
     reason_code: str = "shadow_proxy_not_steering_candidate"
 
 
+class ShadowSecondWaveActionProfile(QualityEvidenceModel):
+    """Zero-cost hindsight profile derived only from stored marginal outcomes."""
+
+    evidence_kind: str = "shadow_second_wave_action_profile"
+    promotion_eligible: bool = False
+    sample_count: int = Field(ge=1)
+    continue_count: int = Field(ge=0)
+    refine_count: int = Field(ge=0)
+    skip_count: int = Field(ge=0)
+    high_waste_count: int = Field(ge=0)
+    quality_gain_count: int = Field(ge=0)
+    mean_waste_ratio: float = Field(ge=0.0, le=1.0)
+    routing_changed: bool = False
+    reason_code: str = "shadow_profile_not_steering_candidate"
+
+
 def _summarize_snapshots(items: Iterable[SnapshotCounters]) -> QualityMetrics:
     snapshots = list(items)
     query_count = sum(item.query_count for item in snapshots)
@@ -55,6 +76,19 @@ def _summarize_snapshots(items: Iterable[SnapshotCounters]) -> QualityMetrics:
         latency_ms_per_query=round(latency_ms / query_count, 6) if query_count else 0.0,
         cost_rub_per_query=round(cost_rub / query_count, 6) if query_count else 0.0,
     )
+
+
+def _stored_marginal_outcomes(payload: Mapping[str, Any]) -> list[ObservedMarginalYield]:
+    marginals: list[ObservedMarginalYield] = []
+    for scenario in payload.get("scenarios", []):
+        for outcome in scenario.get("outcomes", []):
+            score = outcome.get("score") or {}
+            if score.get("routing_changed") is True:
+                raise ValueError("shadow_action_profile_requires_routing_unchanged")
+            marginal = score.get("outcome")
+            if marginal is not None:
+                marginals.append(ObservedMarginalYield.model_validate(marginal))
+    return marginals
 
 
 def load_shadow_quality_proxy(payload: Mapping[str, Any]) -> ShadowQualityProxy:
@@ -84,4 +118,29 @@ def load_shadow_quality_proxy(payload: Mapping[str, Any]) -> ShadowQualityProxy:
         source=_summarize_snapshots(sources),
         later=_summarize_snapshots(laters),
         marginal=summarize_quality_metrics(marginals),
+    )
+
+
+def load_shadow_second_wave_action_profile(
+    payload: Mapping[str, Any],
+) -> ShadowSecondWaveActionProfile:
+    """Classify stored marginal outcomes without calling providers or steering routing."""
+    marginals = _stored_marginal_outcomes(payload)
+    if not marginals:
+        raise ValueError("shadow_action_profile_requires_marginal_evidence")
+
+    decisions = [assess_second_wave_shadow(item) for item in marginals]
+    counts = Counter(item.preferred_action for item in decisions)
+    return ShadowSecondWaveActionProfile(
+        sample_count=len(decisions),
+        continue_count=counts[SecondWaveShadowAction.CONTINUE],
+        refine_count=counts[SecondWaveShadowAction.REFINE],
+        skip_count=counts[SecondWaveShadowAction.SKIP],
+        high_waste_count=sum(item.high_waste for item in decisions),
+        quality_gain_count=sum(item.quality_gain_observed for item in decisions),
+        mean_waste_ratio=round(
+            sum(item.waste_ratio for item in decisions) / len(decisions),
+            6,
+        ),
+        routing_changed=False,
     )
