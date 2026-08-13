@@ -14,6 +14,8 @@ class QualityEvidenceModel(BaseModel):
 
 
 class SnapshotCounters(QualityEvidenceModel):
+    model_config = ConfigDict(extra="ignore")
+
     query_count: int = Field(ge=0)
     raw_results: int = Field(ge=0)
     qualified_candidates: int = Field(ge=0)
