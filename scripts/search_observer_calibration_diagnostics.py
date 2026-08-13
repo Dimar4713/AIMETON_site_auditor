@@ -14,6 +14,7 @@ from statistics import fmean
 from typing import Any
 
 from app.search_observer_llm import ObserverAction
+from app.search_observer_promotion import PromotionThresholds
 from app.search_observer_scoring import (
     ObservedMarginalYield,
     SecondWaveShadowAction,
@@ -141,9 +142,11 @@ def _confidence_calibration(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if row.get("confidence") is not None
         and row.get("deterministic_verdict") in {"supported", "contradicted"}
     ]
+    high_floor = PromotionThresholds().high_confidence_floor
     if not comparable:
         return {
             "comparable_count": 0,
+            "high_confidence_floor": high_floor,
             "observed_max_confidence": None,
             "high_confidence_count": 0,
             "high_confidence_contradicted_count": 0,
@@ -152,12 +155,12 @@ def _confidence_calibration(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "lower_confidence_contradicted_count": 0,
             "lower_confidence_contradiction_rate": None,
             "high_confidence_not_worse": None,
-            "definition": "high_is_observed_max_confidence_no_policy_threshold",
+            "definition": "high_uses_canonical_promotion_threshold",
         }
 
     observed_max = max(float(row["confidence"]) for row in comparable)
-    high = [row for row in comparable if float(row["confidence"]) == observed_max]
-    lower = [row for row in comparable if float(row["confidence"]) < observed_max]
+    high = [row for row in comparable if float(row["confidence"]) >= high_floor]
+    lower = [row for row in comparable if float(row["confidence"]) < high_floor]
     high_contradicted = sum(row["deterministic_verdict"] == "contradicted" for row in high)
     lower_contradicted = sum(row["deterministic_verdict"] == "contradicted" for row in lower)
     high_rate = round(high_contradicted / len(high), 6) if high else None
@@ -165,6 +168,7 @@ def _confidence_calibration(rows: list[dict[str, Any]]) -> dict[str, Any]:
     not_worse = None if lower_rate is None or high_rate is None else high_rate <= lower_rate
     return {
         "comparable_count": len(comparable),
+        "high_confidence_floor": high_floor,
         "observed_max_confidence": observed_max,
         "high_confidence_count": len(high),
         "high_confidence_contradicted_count": high_contradicted,
@@ -173,7 +177,7 @@ def _confidence_calibration(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "lower_confidence_contradicted_count": lower_contradicted,
         "lower_confidence_contradiction_rate": lower_rate,
         "high_confidence_not_worse": not_worse,
-        "definition": "high_is_observed_max_confidence_no_policy_threshold",
+        "definition": "high_uses_canonical_promotion_threshold",
     }
 
 
