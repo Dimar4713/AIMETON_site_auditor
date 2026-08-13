@@ -38,15 +38,28 @@ class PromotionThresholds(PromotionModel):
 
 
 class QualityGuard(PromotionModel):
-    qualified_yield_regressed: bool = False
-    direct_or_official_yield_regressed: bool = False
-    duplicate_or_excluded_waste_regressed: bool = False
-    latency_or_cost_outside_policy: bool = False
+    qualified_yield_regressed: bool | None = None
+    direct_or_official_yield_regressed: bool | None = None
+    duplicate_or_excluded_waste_regressed: bool | None = None
+    latency_or_cost_outside_policy: bool | None = None
+
+    @property
+    def evidence_complete(self) -> bool:
+        return all(
+            item is not None
+            for item in (
+                self.qualified_yield_regressed,
+                self.direct_or_official_yield_regressed,
+                self.duplicate_or_excluded_waste_regressed,
+                self.latency_or_cost_outside_policy,
+            )
+        )
 
     @property
     def passed(self) -> bool:
-        return not any(
-            (
+        return self.evidence_complete and not any(
+            item is True
+            for item in (
                 self.qualified_yield_regressed,
                 self.direct_or_official_yield_regressed,
                 self.duplicate_or_excluded_waste_regressed,
@@ -78,6 +91,7 @@ class PromotionDecision(PromotionModel):
     total_scorable: int = Field(ge=0)
     heterogeneous_batch_count: int = Field(ge=0)
     recent_batch_supported_ratios: list[float]
+    quality_evidence_complete: bool
     quality_guard_passed: bool
     routing_changed_count: int = Field(ge=0)
     families: list[FamilyPromotionEvidence]
@@ -96,6 +110,14 @@ def action_family(action: ObserverAction) -> ActionFamily:
 
 def _ratio(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 6) if denominator else 0.0
+
+
+def _quality_reason(quality_guard: QualityGuard) -> str | None:
+    if not quality_guard.evidence_complete:
+        return "quality_evidence_missing"
+    if not quality_guard.passed:
+        return "quality_regression_guard_failed"
+    return None
 
 
 def _family_evidence(
@@ -132,8 +154,9 @@ def _family_evidence(
         reasons.append("contradicted_ratio_above_threshold")
     if high and low and high_rate > low_rate:
         reasons.append("high_confidence_calibration_regression")
-    if not quality_guard.passed:
-        reasons.append("quality_regression_guard_failed")
+    quality_reason = _quality_reason(quality_guard)
+    if quality_reason:
+        reasons.append(quality_reason)
 
     eligible = not reasons and family != ActionFamily.ESCALATE
     return FamilyPromotionEvidence(
@@ -207,8 +230,9 @@ def evaluate_promotion_gate(
         reasons.append("consecutive_weak_heterogeneous_batches")
     if routing_changed_count:
         reasons.append("shadow_routing_changed")
-    if not guard.passed:
-        reasons.append("quality_regression_guard_failed")
+    quality_reason = _quality_reason(guard)
+    if quality_reason:
+        reasons.append(quality_reason)
 
     any_family_eligible = any(
         family.state == PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING
@@ -226,6 +250,7 @@ def evaluate_promotion_gate(
         total_scorable=len(scorable),
         heterogeneous_batch_count=max(0, heterogeneous_batch_count),
         recent_batch_supported_ratios=recent_ratios,
+        quality_evidence_complete=guard.evidence_complete,
         quality_guard_passed=guard.passed,
         routing_changed_count=routing_changed_count,
         families=families,
