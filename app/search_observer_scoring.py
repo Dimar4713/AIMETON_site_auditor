@@ -69,6 +69,57 @@ class ObservedMarginalYield(ScoringModel):
         return round(wasted / self.added_raw_results, 6)
 
 
+class SecondWaveShadowDecision(ScoringModel):
+    """Retrospective shadow-only assessment of whether a later wave was worthwhile.
+
+    This is deliberately hindsight evidence. It must never be interpreted as
+    active routing authority. Quality gain dominates waste/cost: a wave that adds
+    qualified/direct candidates remains worth running in shadow, while high waste
+    is surfaced as a refine signal rather than used to discard useful evidence.
+    """
+
+    would_run_second_wave: bool
+    quality_gain_observed: bool
+    high_waste: bool
+    waste_ratio: float = Field(ge=0.0, le=1.0)
+    reason_code: str = Field(min_length=1, max_length=80)
+    routing_changed: bool = False
+
+
+def assess_second_wave_shadow(outcome: ObservedMarginalYield) -> SecondWaveShadowDecision:
+    """Classify observed second-wave value without changing execution or routing."""
+    if outcome.added_queries == 0:
+        return SecondWaveShadowDecision(
+            would_run_second_wave=False,
+            quality_gain_observed=False,
+            high_waste=False,
+            waste_ratio=outcome.waste_ratio,
+            reason_code="shadow_no_later_wave",
+            routing_changed=False,
+        )
+
+    quality_gain = outcome.useful_yield > 0
+    high_waste = outcome.waste_ratio >= 0.6
+
+    if quality_gain and high_waste:
+        reason = "shadow_run_quality_gain_refine_high_waste"
+    elif quality_gain:
+        reason = "shadow_run_quality_gain_clean"
+    elif high_waste:
+        reason = "shadow_skip_no_quality_gain_high_waste"
+    else:
+        reason = "shadow_skip_no_quality_gain"
+
+    return SecondWaveShadowDecision(
+        would_run_second_wave=quality_gain,
+        quality_gain_observed=quality_gain,
+        high_waste=high_waste,
+        waste_ratio=outcome.waste_ratio,
+        reason_code=reason,
+        routing_changed=False,
+    )
+
+
 class OfflineRecommendationEvidence(ScoringModel):
     """Trace-linked, read-only input for scoring one shadow recommendation."""
 

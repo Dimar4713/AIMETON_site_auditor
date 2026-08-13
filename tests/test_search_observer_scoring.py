@@ -7,6 +7,7 @@ from app.search_observer_scoring import (
     ObserverRuntimeOutcome,
     OfflineRecommendationEvidence,
     RecommendationVerdict,
+    assess_second_wave_shadow,
     score_offline_evidence,
     score_recommendation,
     summarize_observer_runtime,
@@ -124,6 +125,67 @@ def test_escalate_remains_economic_gate_not_scorable():
     assert item.verdict == RecommendationVerdict.NOT_SCORABLE
     assert item.reason_code == "economic_gate_required"
     assert item.routing_changed is False
+
+
+def test_shadow_second_wave_keeps_quality_gain_even_when_waste_is_high():
+    observed = outcome(
+        added_queries=1,
+        added_raw_results=20,
+        added_unique_domains=5,
+        added_qualified_candidates=5,
+        added_direct_or_official_candidates=2,
+        duplicate_results=4,
+        excluded_results=11,
+    )
+    decision = assess_second_wave_shadow(observed)
+    assert decision.would_run_second_wave is True
+    assert decision.quality_gain_observed is True
+    assert decision.high_waste is True
+    assert decision.waste_ratio == 0.75
+    assert decision.reason_code == "shadow_run_quality_gain_refine_high_waste"
+    assert decision.routing_changed is False
+
+
+def test_shadow_second_wave_skips_high_waste_without_quality_gain():
+    observed = outcome(
+        added_queries=1,
+        added_raw_results=20,
+        added_unique_domains=1,
+        added_qualified_candidates=0,
+        added_direct_or_official_candidates=0,
+        duplicate_results=9,
+        excluded_results=6,
+    )
+    decision = assess_second_wave_shadow(observed)
+    assert decision.would_run_second_wave is False
+    assert decision.quality_gain_observed is False
+    assert decision.high_waste is True
+    assert decision.reason_code == "shadow_skip_no_quality_gain_high_waste"
+    assert decision.routing_changed is False
+
+
+def test_shadow_second_wave_clean_quality_gain_is_worth_running():
+    decision = assess_second_wave_shadow(outcome(duplicate_results=0, excluded_results=0))
+    assert decision.would_run_second_wave is True
+    assert decision.high_waste is False
+    assert decision.reason_code == "shadow_run_quality_gain_clean"
+
+
+def test_shadow_second_wave_no_later_wave_is_not_run_candidate():
+    decision = assess_second_wave_shadow(outcome(
+        added_queries=0,
+        added_raw_results=0,
+        added_unique_domains=0,
+        added_qualified_candidates=0,
+        added_direct_or_official_candidates=0,
+        duplicate_results=0,
+        excluded_results=0,
+        latency_ms=0,
+        cost_rub=0.0,
+    ))
+    assert decision.would_run_second_wave is False
+    assert decision.reason_code == "shadow_no_later_wave"
+    assert decision.routing_changed is False
 
 
 def test_summary_reports_precision_and_never_routing_changes():
