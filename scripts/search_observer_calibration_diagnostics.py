@@ -69,6 +69,66 @@ def _source_features(snapshot: dict[str, Any] | None) -> dict[str, float | None]
     }
 
 
+def _observer_input_features(
+    scenario: dict[str, Any], direction_index: int | None
+) -> dict[str, Any]:
+    retained = scenario.get("observer_input_telemetry")
+    if not isinstance(retained, dict):
+        return {
+            "observer_input_duplicate_domain_ratio": None,
+            "observer_input_unique_domain_count": None,
+            "observer_input_result_count": None,
+            "observer_input_degraded_attempts": None,
+            "observer_input_cache_hit": None,
+            "observer_input_provider_result_counts": None,
+            "observer_input_attempt_states": None,
+        }
+    if retained.get("routing_changed") is not False:
+        raise ValueError("calibration_diagnostics_requires_observer_input_routing_unchanged")
+    telemetry = retained.get("telemetry")
+    if not isinstance(telemetry, dict) or direction_index is None:
+        return {
+            "observer_input_duplicate_domain_ratio": None,
+            "observer_input_unique_domain_count": None,
+            "observer_input_result_count": None,
+            "observer_input_degraded_attempts": None,
+            "observer_input_cache_hit": None,
+            "observer_input_provider_result_counts": None,
+            "observer_input_attempt_states": None,
+        }
+    directions = telemetry.get("directions")
+    if not isinstance(directions, list) or direction_index < 0 or direction_index >= len(directions):
+        return {
+            "observer_input_duplicate_domain_ratio": None,
+            "observer_input_unique_domain_count": None,
+            "observer_input_result_count": None,
+            "observer_input_degraded_attempts": None,
+            "observer_input_cache_hit": None,
+            "observer_input_provider_result_counts": None,
+            "observer_input_attempt_states": None,
+        }
+    direction = directions[direction_index]
+    if not isinstance(direction, dict):
+        return {
+            "observer_input_duplicate_domain_ratio": None,
+            "observer_input_unique_domain_count": None,
+            "observer_input_result_count": None,
+            "observer_input_degraded_attempts": None,
+            "observer_input_cache_hit": None,
+            "observer_input_provider_result_counts": None,
+            "observer_input_attempt_states": None,
+        }
+    return {
+        "observer_input_duplicate_domain_ratio": direction.get("duplicate_domain_ratio"),
+        "observer_input_unique_domain_count": direction.get("unique_domain_count"),
+        "observer_input_result_count": direction.get("result_count"),
+        "observer_input_degraded_attempts": direction.get("degraded_attempts"),
+        "observer_input_cache_hit": direction.get("cache_hit"),
+        "observer_input_provider_result_counts": direction.get("provider_result_counts"),
+        "observer_input_attempt_states": direction.get("attempt_states"),
+    }
+
+
 def _mean_present(items: list[dict[str, Any]], key: str) -> float | None:
     values = [row[key] for row in items if row.get(key) is not None]
     return round(fmean(values), 6) if values else None
@@ -98,10 +158,15 @@ def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
                 marginal = ObservedMarginalYield.model_validate(raw_marginal)
                 decision = assess_second_wave_shadow(marginal)
                 hindsight = decision.preferred_action
+                direction_index = outcome.get("direction_index")
+                try:
+                    normalized_direction_index = int(direction_index)
+                except (TypeError, ValueError):
+                    normalized_direction_index = None
                 rows.append(
                     {
                         "scenario": scenario_id,
-                        "direction_index": outcome.get("direction_index"),
+                        "direction_index": direction_index,
                         "observer": observer.value,
                         "hindsight": hindsight.value,
                         "cohort": _cohort_name(observer, hindsight),
@@ -111,6 +176,7 @@ def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
                         "added_direct_or_official_candidates": marginal.added_direct_or_official_candidates,
                         "added_raw_results": marginal.added_raw_results,
                         **_source_features(outcome.get("source_snapshot")),
+                        **_observer_input_features(scenario, normalized_direction_index),
                     }
                 )
 
@@ -143,6 +209,21 @@ def build_diagnostics(payloads: list[dict[str, Any]]) -> dict[str, Any]:
             ),
             "source_feature_count": sum(
                 row.get("source_waste_ratio") is not None for row in items
+            ),
+            "mean_observer_input_duplicate_domain_ratio": _mean_present(
+                items, "observer_input_duplicate_domain_ratio"
+            ),
+            "mean_observer_input_unique_domain_count": _mean_present(
+                items, "observer_input_unique_domain_count"
+            ),
+            "mean_observer_input_result_count": _mean_present(
+                items, "observer_input_result_count"
+            ),
+            "mean_observer_input_degraded_attempts": _mean_present(
+                items, "observer_input_degraded_attempts"
+            ),
+            "observer_input_feature_count": sum(
+                row.get("observer_input_duplicate_domain_ratio") is not None for row in items
             ),
         }
 
