@@ -69,6 +69,14 @@ class ObservedMarginalYield(ScoringModel):
         return round(wasted / self.added_raw_results, 6)
 
 
+class SecondWaveShadowAction(StrEnum):
+    """Hindsight-only preferred treatment for an observed second wave."""
+
+    CONTINUE = "continue"
+    REFINE = "refine"
+    SKIP = "skip"
+
+
 class SecondWaveShadowDecision(ScoringModel):
     """Retrospective shadow-only assessment of whether a later wave was worthwhile.
 
@@ -82,6 +90,7 @@ class SecondWaveShadowDecision(ScoringModel):
     quality_gain_observed: bool
     high_waste: bool
     waste_ratio: float = Field(ge=0.0, le=1.0)
+    preferred_action: SecondWaveShadowAction
     reason_code: str = Field(min_length=1, max_length=80)
     routing_changed: bool = False
 
@@ -94,6 +103,7 @@ def assess_second_wave_shadow(outcome: ObservedMarginalYield) -> SecondWaveShado
             quality_gain_observed=False,
             high_waste=False,
             waste_ratio=outcome.waste_ratio,
+            preferred_action=SecondWaveShadowAction.SKIP,
             reason_code="shadow_no_later_wave",
             routing_changed=False,
         )
@@ -102,12 +112,16 @@ def assess_second_wave_shadow(outcome: ObservedMarginalYield) -> SecondWaveShado
     high_waste = outcome.waste_ratio >= 0.6
 
     if quality_gain and high_waste:
+        preferred_action = SecondWaveShadowAction.REFINE
         reason = "shadow_run_quality_gain_refine_high_waste"
     elif quality_gain:
+        preferred_action = SecondWaveShadowAction.CONTINUE
         reason = "shadow_run_quality_gain_clean"
     elif high_waste:
+        preferred_action = SecondWaveShadowAction.SKIP
         reason = "shadow_skip_no_quality_gain_high_waste"
     else:
+        preferred_action = SecondWaveShadowAction.SKIP
         reason = "shadow_skip_no_quality_gain"
 
     return SecondWaveShadowDecision(
@@ -115,6 +129,7 @@ def assess_second_wave_shadow(outcome: ObservedMarginalYield) -> SecondWaveShado
         quality_gain_observed=quality_gain,
         high_waste=high_waste,
         waste_ratio=outcome.waste_ratio,
+        preferred_action=preferred_action,
         reason_code=reason,
         routing_changed=False,
     )
