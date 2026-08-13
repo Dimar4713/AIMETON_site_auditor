@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.search_observer_llm import ObserverAction
 from app.search_observer_quality import QualityMetrics, summarize_quality_metrics
 from app.search_observer_scoring import (
     ObservedMarginalYield,
@@ -56,6 +57,23 @@ class ShadowSecondWaveActionProfile(QualityEvidenceModel):
     reason_code: str = "shadow_profile_not_steering_candidate"
 
 
+class ShadowObserverCalibrationProfile(QualityEvidenceModel):
+    """Offline comparison of stored Observer advice with hindsight treatment."""
+
+    evidence_kind: str = "shadow_observer_calibration_profile"
+    promotion_eligible: bool = False
+    sample_count: int = Field(ge=1)
+    aligned_count: int = Field(ge=0)
+    disagreement_count: int = Field(ge=0)
+    disagreement_ratio: float = Field(ge=0.0, le=1.0)
+    over_refine_count: int = Field(ge=0)
+    under_refine_count: int = Field(ge=0)
+    continued_without_gain_count: int = Field(ge=0)
+    other_disagreement_count: int = Field(ge=0)
+    routing_changed: bool = False
+    reason_code: str = "shadow_calibration_not_steering_candidate"
+
+
 def _summarize_snapshots(items: Iterable[SnapshotCounters]) -> QualityMetrics:
     snapshots = list(items)
     query_count = sum(item.query_count for item in snapshots)
@@ -92,11 +110,7 @@ def _stored_marginal_outcomes(payload: Mapping[str, Any]) -> list[ObservedMargin
 
 
 def load_shadow_quality_proxy(payload: Mapping[str, Any]) -> ShadowQualityProxy:
-    """Recover source/later/marginal metrics from heterogeneous shadow evidence.
-
-    These measurements are useful for offline diagnostics but are explicitly not
-    a steering candidate and therefore cannot satisfy the promotion quality gate.
-    """
+    """Recover source/later/marginal metrics from heterogeneous shadow evidence."""
     sources: list[SnapshotCounters] = []
     laters: list[SnapshotCounters] = []
     marginals: list[ObservedMarginalYield] = []
@@ -128,7 +142,6 @@ def load_shadow_second_wave_action_profile(
     marginals = _stored_marginal_outcomes(payload)
     if not marginals:
         raise ValueError("shadow_action_profile_requires_marginal_evidence")
-
     decisions = [assess_second_wave_shadow(item) for item in marginals]
     counts = Counter(item.preferred_action for item in decisions)
     return ShadowSecondWaveActionProfile(
@@ -138,9 +151,73 @@ def load_shadow_second_wave_action_profile(
         skip_count=counts[SecondWaveShadowAction.SKIP],
         high_waste_count=sum(item.high_waste for item in decisions),
         quality_gain_count=sum(item.quality_gain_observed for item in decisions),
-        mean_waste_ratio=round(
-            sum(item.waste_ratio for item in decisions) / len(decisions),
-            6,
-        ),
+        mean_waste_ratio=round(sum(item.waste_ratio for item in decisions) / len(decisions), 6),
+        routing_changed=False,
+    )
+
+
+def _observer_treatment(action: ObserverAction) -> SecondWaveShadowAction | None:
+    if action in {ObserverAction.CONTINUE, ObserverAction.BOOST}:
+        return SecondWaveShadowAction.CONTINUE
+    if action in {ObserverAction.REFINE, ObserverAction.SLOW}:
+        return SecondWaveShadowAction.REFINE
+    if action == ObserverAction.STOP:
+        return SecondWaveShadowAction.SKIP
+    return None
+
+
+def load_shadow_observer_calibration_profile(
+    payloads: Mapping[str, Any] | Iterable[Mapping[str, Any]],
+) -> ShadowObserverCalibrationProfile:
+    """Compare stored advisory actions to hindsight treatment, with zero live calls."""
+    batches = (payloads,) if isinstance(payloads, Mapping) else tuple(payloads)
+    pairs: list[tuple[SecondWaveShadowAction, SecondWaveShadowAction]] = []
+    for payload in batches:
+        for scenario in payload.get("scenarios", []):
+            for outcome in scenario.get("outcomes", []):
+                score = outcome.get("score") or {}
+                if score.get("routing_changed") is True:
+                    raise ValueError("shadow_calibration_requires_routing_unchanged")
+                marginal = score.get("outcome")
+                raw_action = score.get("action")
+                if marginal is None or raw_action is None:
+                    continue
+                observer = _observer_treatment(ObserverAction(raw_action))
+                if observer is None:
+                    continue
+                hindsight = assess_second_wave_shadow(
+                    ObservedMarginalYield.model_validate(marginal)
+                ).preferred_action
+                pairs.append((observer, hindsight))
+    if not pairs:
+        raise ValueError("shadow_calibration_requires_comparable_evidence")
+
+    aligned = sum(observer == hindsight for observer, hindsight in pairs)
+    over_refine = sum(
+        observer == SecondWaveShadowAction.REFINE
+        and hindsight == SecondWaveShadowAction.CONTINUE
+        for observer, hindsight in pairs
+    )
+    under_refine = sum(
+        observer == SecondWaveShadowAction.CONTINUE
+        and hindsight == SecondWaveShadowAction.REFINE
+        for observer, hindsight in pairs
+    )
+    continued_without_gain = sum(
+        observer == SecondWaveShadowAction.CONTINUE
+        and hindsight == SecondWaveShadowAction.SKIP
+        for observer, hindsight in pairs
+    )
+    disagreement = len(pairs) - aligned
+    categorized = over_refine + under_refine + continued_without_gain
+    return ShadowObserverCalibrationProfile(
+        sample_count=len(pairs),
+        aligned_count=aligned,
+        disagreement_count=disagreement,
+        disagreement_ratio=round(disagreement / len(pairs), 6),
+        over_refine_count=over_refine,
+        under_refine_count=under_refine,
+        continued_without_gain_count=continued_without_gain,
+        other_disagreement_count=disagreement - categorized,
         routing_changed=False,
     )
