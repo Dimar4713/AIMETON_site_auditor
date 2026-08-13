@@ -87,7 +87,7 @@ def _observer_timeout_seconds() -> float:
         value = float(raw)
     except ValueError:
         return DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS
-    return min(30.0, max(1.0, value))
+    return min(45.0, max(1.0, value))
 
 
 def _observer_failure_reason(exc: Exception) -> str:
