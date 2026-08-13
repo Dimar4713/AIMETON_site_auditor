@@ -17,7 +17,7 @@ from app.search_observer_models import ResolvedObserverModel
 
 
 DEFAULT_SEARCH_OBSERVER_MODEL = "deepseek/deepseek-v3.2"
-DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS = 20.0
+DEFAULT_SEARCH_OBSERVER_TIMEOUT_SECONDS = 30.0
 _LAST_SHADOW_OBSERVER_EVIDENCE: ContextVar[dict[str, object] | None] = ContextVar(
     "last_shadow_observer_evidence", default=None
 )
@@ -216,7 +216,7 @@ JSON schema:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=25) as client:
+        async with httpx.AsyncClient(timeout=_observer_timeout_seconds() + 5.0) as client:
             response = await client.post(
                 f"{model.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {model.api_key}"},
