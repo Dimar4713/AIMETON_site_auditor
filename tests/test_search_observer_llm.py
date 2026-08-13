@@ -143,7 +143,7 @@ def test_shadow_observer_timeout_is_bounded(monkeypatch) -> None:
     assert _observer_timeout_seconds() == 1.0
 
     monkeypatch.setenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", "99")
-    assert _observer_timeout_seconds() == 30.0
+    assert _observer_timeout_seconds() == 45.0
 
     monkeypatch.setenv("HUNTER_SEARCH_OBSERVER_TIMEOUT_SECONDS", "12.5")
     assert _observer_timeout_seconds() == 12.5
