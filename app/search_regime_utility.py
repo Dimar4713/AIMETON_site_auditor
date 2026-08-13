@@ -43,6 +43,14 @@ def build_regime_utility_evidence(
     )
     if any(value < 0 for value in counts):
         raise ValueError("regime_utility_counts_must_be_nonnegative")
+    if unique_candidates > raw_results:
+        raise ValueError("unique_candidates_exceed_raw_results")
+    if qualified_candidates > unique_candidates:
+        raise ValueError("qualified_candidates_exceed_unique_candidates")
+    if direct_or_official_candidates > qualified_candidates:
+        raise ValueError("direct_or_official_candidates_exceed_qualified_candidates")
+    if duplicate_results + excluded_results > raw_results:
+        raise ValueError("duplicate_and_excluded_exceed_raw_results")
     if uncertainty_reduction is not None and not 0.0 <= uncertainty_reduction <= 1.0:
         raise ValueError("uncertainty_reduction_out_of_range")
 
@@ -102,6 +110,10 @@ def build_regime_utility_evidence(
     assert uncertainty_reduction is not None
     if any(value < 0 for value in (novel_entities, rare_hits, unique_evidence_items)):
         raise ValueError("discovery_utility_counts_must_be_nonnegative")
+    if novel_entities > unique_candidates:
+        raise ValueError("novel_entities_exceed_unique_candidates")
+    if rare_hits > unique_candidates:
+        raise ValueError("rare_hits_exceed_unique_candidates")
 
     return RegimeUtilityEvidence(
         regime=regime,
