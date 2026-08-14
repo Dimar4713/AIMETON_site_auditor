@@ -23,13 +23,12 @@ def persist_shadow_follow_up_suggestions(
     plan: ShadowRefinementPlan,
     trace_db_path: str | Path | None = None,
 ) -> int:
-    """Persist advisory query identity without executing or promoting it.
+    """Persist advisory suggestions plus aggregate persistence outcome.
 
-    Failure is intentionally fail-open for the product response: trace retention
-    must never turn a successful hunt into a failed hunt.
+    This remains observability-only: no suggestion is executed or promoted.
+    Failure is fail-open for the product response so trace retention can never
+    turn a successful hunt into a failed hunt.
     """
-    if not plan.suggestions:
-        return 0
     configured = trace_db_path or os.getenv(
         "AIMETON_TRACE_DB",
         os.getenv("AIMETON_RUNTIME_DB", "data/runtime-core.sqlite3"),
@@ -70,4 +69,34 @@ def persist_shadow_follow_up_suggestions(
             persisted += 1
         except Exception:
             continue
+
+    try:
+        ledger.append(
+            TraceEventCreate(
+                mission_id=mission_id,
+                attempt_id=attempt_id,
+                component="search_refinement_shadow",
+                operation="refinement_observed",
+                state=TraceState.SUCCEEDED,
+                reason_code="shadow_refinement_persistence_observed",
+                summary="Aggregate gap-driven shadow refinement persistence outcome retained",
+                counters={
+                    "gap_count": len(plan.gaps),
+                    "suggestion_count": len(plan.suggestions),
+                    "persisted_suggestion_count": persisted,
+                },
+                metadata={
+                    "effective_regime": effective_regime,
+                    "routing_changed": False,
+                    "steering_enabled": False,
+                    "promotion_activated": False,
+                },
+                event_key=(
+                    f"{mission_id}:{attempt_id}:search-refinement-shadow:refinement-observed"
+                )[:256],
+                retention_class=RetentionClass.TRACE,
+            )
+        )
+    except Exception:
+        pass
     return persisted
