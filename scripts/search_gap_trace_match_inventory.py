@@ -22,6 +22,11 @@ def read_inventory_events_readonly(trace_db: Path) -> list[TraceEvent]:
                 (component = 'search_refinement_shadow' AND operation = 'follow_up_query_suggested')
                 OR
                 (component = 'search_gateway' AND operation = 'query_planned')
+                OR
+                (
+                    component = 'hunter'
+                    AND operation IN ('hunt_plan', 'hunt_search_wave_observed', 'hunt_funnel_complete')
+                )
             ORDER BY created_at, mission_id, attempt_id, sequence
             """
         ).fetchall()
