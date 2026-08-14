@@ -20,6 +20,8 @@ class RegimeCalibrationRecord:
     def validate(self) -> None:
         if self.utility.regime != self.effective_regime:
             raise ValueError("utility_regime_must_match_effective_regime")
+        if self.requested_regime != "auto" and self.requested_regime != self.effective_regime:
+            raise ValueError("explicit_requested_regime_must_match_effective_regime")
         if self.outcome.routing_changed:
             raise ValueError("regime_calibration_requires_shadow_routing_unchanged")
         if not self.regime_reason:
@@ -61,6 +63,7 @@ def summarize_regime_calibration(
             item.outcome.verdict == RecommendationVerdict.CONTRADICTED for item in decided
         )
         complete_utility = [item for item in items if item.utility.evidence_complete]
+        calibration_ready = [item for item in scorable if item.utility.evidence_complete]
         metric_names = sorted(
             {
                 name
@@ -96,6 +99,10 @@ def summarize_regime_calibration(
             "utility_evidence_incomplete_count": len(items) - len(complete_utility),
             "utility_evidence_complete_ratio": (
                 round(len(complete_utility) / len(items), 6) if items else 0.0
+            ),
+            "calibration_ready_count": len(calibration_ready),
+            "calibration_ready_ratio": (
+                round(len(calibration_ready) / len(items), 6) if items else 0.0
             ),
             "mean_utility_metrics": mean_utility_metrics,
             "regime_reason_counts": dict(sorted(reason_counts.items())),
