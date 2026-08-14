@@ -1,0 +1,86 @@
+name: Patch Hunter Trace Quality Evidence
+
+on:
+  push:
+    branches:
+      - feat/hunter-trace-quality-evidence-632
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch trace evidence and regression
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/discovery.py')
+          text = path.read_text(encoding='utf-8')
+          old_returned = '''                metadata={
+                    "qualification": candidate.qualification,
+                    "deep_analysis_performed": candidate.deep_analysis_performed,
+                    "source_role": _candidate_rank_role(candidate),
+                    "lead_fit": candidate.lead_fit,
+'''
+          new_returned = '''                metadata={
+                    "qualification": candidate.qualification,
+                    "deep_analysis_performed": candidate.deep_analysis_performed,
+                    "region_confirmed": candidate.region_confirmed,
+                    "industry_match": candidate.pre_score_factors.get("industry_match"),
+                    "source_role": _candidate_rank_role(candidate),
+                    "lead_fit": candidate.lead_fit,
+'''
+          old_omitted = '''                metadata={
+                    "qualification": candidate.qualification,
+                    "source_role": _candidate_rank_role(candidate),
+                    "lead_fit": candidate.lead_fit,
+'''
+          new_omitted = '''                metadata={
+                    "qualification": candidate.qualification,
+                    "region_confirmed": candidate.region_confirmed,
+                    "industry_match": candidate.pre_score_factors.get("industry_match"),
+                    "source_role": _candidate_rank_role(candidate),
+                    "lead_fit": candidate.lead_fit,
+'''
+          assert text.count(old_returned) == 1
+          assert text.count(old_omitted) == 1
+          text = text.replace(old_returned, new_returned, 1).replace(old_omitted, new_omitted, 1)
+          path.write_text(text, encoding='utf-8')
+
+          test = Path('tests/test_hunter_forensic_trace.py')
+          content = test.read_text(encoding='utf-8')
+          marker = '''    final = hunter_events[-1]
+    assert final.counters == {
+'''
+          insert = '''    returned_event = next(event for event in hunter_events if event.operation == "candidate_returned")
+    omitted_event = next(event for event in hunter_events if event.operation == "candidate_output_omitted")
+    for candidate_event in (returned_event, omitted_event):
+        assert candidate_event.metadata["region_confirmed"] is True
+        assert candidate_event.metadata["industry_match"] == 25
+
+    final = hunter_events[-1]
+    assert final.counters == {
+'''
+          assert content.count(marker) == 1
+          test.write_text(content.replace(marker, insert, 1), encoding='utf-8')
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if git diff --quiet -- app/discovery.py tests/test_hunter_forensic_trace.py; then
+            exit 0
+          fi
+          git config user.name "AIMETON Agent"
+          git config user.email "127470701+Dimar4713@users.noreply.github.com"
+          git add app/discovery.py tests/test_hunter_forensic_trace.py
+          git diff --cached --check
+          git commit -m "feat: retain Hunter candidate quality evidence in trace"
+          git push origin HEAD:${GITHUB_REF_NAME}
