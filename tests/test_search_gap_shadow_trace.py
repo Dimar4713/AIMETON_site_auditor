@@ -3,6 +3,7 @@ from pathlib import Path
 from app.models import HuntResult
 from app.search_gap_shadow_refinement import (
     FollowUpQuerySuggestion,
+    SearchGapObservation,
     ShadowRefinementPlan,
 )
 from app.search_gap_shadow_trace import persist_shadow_follow_up_suggestions
@@ -21,10 +22,16 @@ def test_hunt_result_trace_identity_is_excluded_from_public_dump():
     assert "trace_attempt_id" not in payload
 
 
-def test_shadow_follow_up_suggestion_is_retained_as_trace_only_evidence(tmp_path: Path):
+def test_shadow_follow_up_suggestion_and_aggregate_outcome_are_retained(tmp_path: Path):
     db = tmp_path / "runtime.sqlite3"
     plan = ShadowRefinementPlan(
-        gaps=(),
+        gaps=(
+            SearchGapObservation(
+                code="sparse_yield",
+                evidence_target="more_unique_candidates",
+                reason="test sparse gap",
+            ),
+        ),
         suggestions=(
             FollowUpQuerySuggestion(
                 query="стоматология Красноярск официальный сайт",
@@ -44,20 +51,33 @@ def test_shadow_follow_up_suggestion_is_retained_as_trace_only_evidence(tmp_path
 
     assert persisted == 1
     events = SQLiteTraceLedger(db).list_attempt("hunt-shadow-trace", "corr-shadow-trace")
-    assert len(events) == 1
-    event = events[0]
-    assert event.component == "search_refinement_shadow"
-    assert event.operation == "follow_up_query_suggested"
-    assert event.reason_code == "sparse_yield"
-    assert event.retention_class is RetentionClass.TRACE
-    assert event.metadata["query_text"] == "стоматология Красноярск официальный сайт"
-    assert event.metadata["gap_code"] == "sparse_yield"
-    assert event.metadata["effective_regime"] == "discovery"
-    assert event.metadata["routing_changed"] is False
-    assert event.metadata["steering_enabled"] is False
+    assert len(events) == 2
+    suggestion = next(event for event in events if event.operation == "follow_up_query_suggested")
+    assert suggestion.component == "search_refinement_shadow"
+    assert suggestion.reason_code == "sparse_yield"
+    assert suggestion.retention_class is RetentionClass.TRACE
+    assert suggestion.metadata["query_text"] == "стоматология Красноярск официальный сайт"
+    assert suggestion.metadata["gap_code"] == "sparse_yield"
+    assert suggestion.metadata["effective_regime"] == "discovery"
+    assert suggestion.metadata["routing_changed"] is False
+    assert suggestion.metadata["steering_enabled"] is False
+
+    observation = next(event for event in events if event.operation == "refinement_observed")
+    assert observation.component == "search_refinement_shadow"
+    assert observation.retention_class is RetentionClass.TRACE
+    assert observation.counters == {
+        "gap_count": 1,
+        "suggestion_count": 1,
+        "persisted_suggestion_count": 1,
+    }
+    assert observation.metadata["effective_regime"] == "discovery"
+    assert observation.metadata["routing_changed"] is False
+    assert observation.metadata["steering_enabled"] is False
+    assert observation.metadata["promotion_activated"] is False
+    assert "query_text" not in observation.metadata
 
 
-def test_empty_shadow_plan_writes_nothing(tmp_path: Path):
+def test_empty_shadow_plan_still_records_decisive_aggregate_observation(tmp_path: Path):
     db = tmp_path / "runtime.sqlite3"
     persisted = persist_shadow_follow_up_suggestions(
         mission_id="hunt-shadow-trace",
@@ -67,4 +87,13 @@ def test_empty_shadow_plan_writes_nothing(tmp_path: Path):
         trace_db_path=db,
     )
     assert persisted == 0
-    assert not db.exists()
+    events = SQLiteTraceLedger(db).list_attempt("hunt-shadow-trace", "corr-shadow-trace")
+    assert len(events) == 1
+    observation = events[0]
+    assert observation.operation == "refinement_observed"
+    assert observation.counters == {
+        "gap_count": 0,
+        "suggestion_count": 0,
+        "persisted_suggestion_count": 0,
+    }
+    assert "query_text" not in observation.metadata
