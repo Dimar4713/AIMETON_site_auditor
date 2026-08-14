@@ -56,8 +56,8 @@ jobs:
 
           docker exec "$CONTAINER" test -f /app/scripts/search_gap_trace_match_inventory.py
           docker exec "$CONTAINER" test -f "$TRACE_DB"
-          docker exec "$CONTAINER" \
-            python /app/scripts/search_gap_trace_match_inventory.py "$TRACE_DB" \
+          docker exec -w /app "$CONTAINER" \
+            python scripts/search_gap_trace_match_inventory.py "$TRACE_DB" \
             > "$report"
 
           python_bin="$(command -v python3 || command -v python)"
