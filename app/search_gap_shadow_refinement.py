@@ -87,11 +87,18 @@ def observe_search_gaps(
             reason="search produced raw results but no candidate reached the response",
         ))
 
-    if candidates and not any(candidate.region_confirmed is True for candidate in candidates):
+    candidate_window_complete = (
+        funnel.qualified_candidates == funnel.returned_candidates == len(candidates)
+    )
+    if (
+        candidate_window_complete
+        and candidates
+        and not any(candidate.region_confirmed is True for candidate in candidates)
+    ):
         gaps.append(SearchGapObservation(
             code="region_confirmation_missing",
             evidence_target="explicit_region_evidence",
-            reason="no retained candidate has confirmed regional evidence",
+            reason="complete retained candidate window has no confirmed regional evidence",
         ))
 
     industry_signals = [
@@ -99,11 +106,16 @@ def observe_search_gaps(
         for candidate in candidates
         if "industry_match" in candidate.pre_score_factors
     ]
-    if candidates and industry_signals and not any(value for value in industry_signals):
+    if (
+        candidate_window_complete
+        and candidates
+        and industry_signals
+        and not any(value for value in industry_signals)
+    ):
         gaps.append(SearchGapObservation(
             code="industry_confirmation_missing",
             evidence_target="explicit_industry_evidence",
-            reason="retained candidates do not expose a positive industry-match signal",
+            reason="complete retained candidate window has no positive industry-match signal",
         ))
 
     if effective_regime == "discovery":
