@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.trace_ledger import SQLiteTraceLedger, TraceEventCreate, TraceState
 from scripts.search_gap_trace_replay_report import build_trace_replay_report
 
@@ -26,7 +28,10 @@ def _append(
     )
 
 
-def test_trace_replay_report_reads_retained_attempt_and_scores_quality(tmp_path: Path):
+def test_trace_replay_report_reads_retained_attempt_and_scores_quality(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     db = tmp_path / "runtime.sqlite3"
     ledger = SQLiteTraceLedger(db)
     _append(
@@ -56,6 +61,10 @@ def test_trace_replay_report_reads_retained_attempt_and_scores_quality(tmp_path:
         },
     )
 
+    def mutable_init_must_not_run(*_args, **_kwargs):
+        raise AssertionError("mutable SQLiteTraceLedger initialization is forbidden during replay")
+
+    monkeypatch.setattr(SQLiteTraceLedger, "__init__", mutable_init_must_not_run)
     report = build_trace_replay_report(
         db,
         mission_id="hunt-cli-replay",
