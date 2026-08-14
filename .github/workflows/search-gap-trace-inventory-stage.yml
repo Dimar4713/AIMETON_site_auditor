@@ -41,7 +41,6 @@ jobs:
           set -Eeuo pipefail
           cd "$STACK_DIR"
           deployed="$(cat app-source-sha.txt)"
-          echo "expected=$${{ steps.expected.outputs.sha }}" >/dev/null
           [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
           docker inspect "$CONTAINER" >/dev/null
 
@@ -61,11 +60,14 @@ jobs:
             python /app/scripts/search_gap_trace_match_inventory.py "$TRACE_DB" \
             > "$report"
 
-          cat "$report" | docker exec -i "$CONTAINER" python - <<'PY'
+          python_bin="$(command -v python3 || command -v python)"
+          "$python_bin" - "$report" "$summary" '${{ steps.expected.outputs.sha }}' <<'PY'
           import json
           import sys
+          from pathlib import Path
 
-          payload = json.load(sys.stdin)
+          report_path, summary_path, expected_sha = sys.argv[1:]
+          data = json.loads(Path(report_path).read_text(encoding="utf-8"))
           required = {
               "evidence_kind",
               "suggestion_count",
@@ -79,12 +81,13 @@ jobs:
               "steering_enabled",
               "promotion_activated",
           }
-          assert required <= set(payload)
-          assert payload["evidence_kind"] == "search_gap_shadow_query_match_inventory"
-          assert payload["routing_changed"] is False
-          assert payload["steering_enabled"] is False
-          assert payload["promotion_activated"] is False
+          assert required <= set(data)
+          assert data["evidence_kind"] == "search_gap_shadow_query_match_inventory"
+          assert data["routing_changed"] is False
+          assert data["steering_enabled"] is False
+          assert data["promotion_activated"] is False
           forbidden = {"query_text", "mission_id", "attempt_id", "query_digest"}
+
           def walk(value):
               if isinstance(value, dict):
                   assert forbidden.isdisjoint(value)
@@ -93,17 +96,8 @@ jobs:
               elif isinstance(value, list):
                   for item in value:
                       walk(item)
-          walk(payload)
-          PY
 
-          python_bin="$(command -v python3 || command -v python)"
-          "$python_bin" - "$report" "$summary" '${{ steps.expected.outputs.sha }}' <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          report_path, summary_path, expected_sha = sys.argv[1:]
-          data = json.loads(Path(report_path).read_text(encoding="utf-8"))
+          walk(data)
           lines = [
               "## Search gap trace inventory — Stage",
               "",
