@@ -89,13 +89,13 @@ def _quality_guard_from_retained_evidence(
         proxy = load_shadow_quality_proxy(_combined_quality_payload(payloads))
     except ValueError:
         return QualityGuard(), False
-    comparison = derive_quality_first_guard(
+    guard = derive_quality_first_guard(
         baseline=proxy.source,
         candidate=proxy.later,
         resource_policy_compliant=resource_policy_compliant,
         policy=quality_policy,
     )
-    return comparison.guard, True
+    return guard, True
 
 
 def build_readiness(
