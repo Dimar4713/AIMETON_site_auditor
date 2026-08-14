@@ -53,6 +53,15 @@ def _time_bounds(events: list[TraceEvent]) -> tuple[str | None, str | None]:
     return ordered[0].isoformat(), ordered[-1].isoformat()
 
 
+def _counter_total(events: list[TraceEvent], key: str) -> int:
+    total = 0
+    for event in events:
+        value = event.counters.get(key)
+        if isinstance(value, int) and value >= 0:
+            total += value
+    return total
+
+
 def find_shadow_query_matches(events: list[TraceEvent]) -> list[ShadowQueryMatch]:
     suggestions: list[tuple[TraceEvent, str]] = []
     planned: list[tuple[TraceEvent, str]] = []
@@ -112,6 +121,12 @@ def build_shadow_query_match_summary(events: list[TraceEvent]) -> dict[str, obje
         if event.component == "search_refinement_shadow"
         and event.operation == "follow_up_query_suggested"
         and _canonical_query(str(event.metadata.get("query_text") or ""))
+    ]
+    refinement_observations = [
+        event
+        for event in events
+        if event.component == "search_refinement_shadow"
+        and event.operation == "refinement_observed"
     ]
     query_plans = [
         event
@@ -173,9 +188,15 @@ def build_shadow_query_match_summary(events: list[TraceEvent]) -> dict[str, obje
         component="search_refinement_shadow",
         operation="follow_up_query_suggested",
     )
+    refinement_observation_attempts = _attempts(
+        events,
+        component="search_refinement_shadow",
+        operation="refinement_observed",
+    )
     hunter_first_at, hunter_latest_at = _time_bounds(hunter_plans)
     query_first_at, query_latest_at = _time_bounds(query_plans)
     suggestion_first_at, suggestion_latest_at = _time_bounds(suggestions)
+    refinement_first_at, refinement_latest_at = _time_bounds(refinement_observations)
 
     if not hunter_attempts:
         corpus_state = "no_hunter_traffic"
@@ -185,6 +206,13 @@ def build_shadow_query_match_summary(events: list[TraceEvent]) -> dict[str, obje
         corpus_state = "query_plans_without_shadow_suggestions"
     else:
         corpus_state = "shadow_suggestions_present"
+
+    observed_gap_count = _counter_total(refinement_observations, "gap_count")
+    observed_suggestion_count = _counter_total(refinement_observations, "suggestion_count")
+    persisted_suggestion_count = _counter_total(
+        refinement_observations,
+        "persisted_suggestion_count",
+    )
 
     return {
         "evidence_kind": "search_gap_shadow_query_match_inventory",
@@ -199,6 +227,18 @@ def build_shadow_query_match_summary(events: list[TraceEvent]) -> dict[str, obje
         "search_gateway_attempt_count": len(search_gateway_attempts),
         "query_first_at": query_first_at,
         "query_latest_at": query_latest_at,
+        "refinement_observation_count": len(refinement_observations),
+        "refinement_observation_attempt_count": len(refinement_observation_attempts),
+        "refinement_first_at": refinement_first_at,
+        "refinement_latest_at": refinement_latest_at,
+        "observed_gap_count": observed_gap_count,
+        "observed_suggestion_count": observed_suggestion_count,
+        "persisted_suggestion_count": persisted_suggestion_count,
+        "suggestion_persistence_complete": (
+            observed_suggestion_count == persisted_suggestion_count
+            if refinement_observations
+            else None
+        ),
         "suggestion_attempt_count": len(suggestion_attempts),
         "suggestion_first_at": suggestion_first_at,
         "suggestion_latest_at": suggestion_latest_at,
