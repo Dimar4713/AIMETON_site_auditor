@@ -46,6 +46,13 @@ def _attempts(events: list[TraceEvent], *, component: str, operation: str | None
     }
 
 
+def _time_bounds(events: list[TraceEvent]) -> tuple[str | None, str | None]:
+    if not events:
+        return None, None
+    ordered = sorted(event.created_at for event in events)
+    return ordered[0].isoformat(), ordered[-1].isoformat()
+
+
 def find_shadow_query_matches(events: list[TraceEvent]) -> list[ShadowQueryMatch]:
     suggestions: list[tuple[TraceEvent, str]] = []
     planned: list[tuple[TraceEvent, str]] = []
@@ -166,6 +173,9 @@ def build_shadow_query_match_summary(events: list[TraceEvent]) -> dict[str, obje
         component="search_refinement_shadow",
         operation="follow_up_query_suggested",
     )
+    hunter_first_at, hunter_latest_at = _time_bounds(hunter_plans)
+    query_first_at, query_latest_at = _time_bounds(query_plans)
+    suggestion_first_at, suggestion_latest_at = _time_bounds(suggestions)
 
     if not hunter_attempts:
         corpus_state = "no_hunter_traffic"
@@ -183,9 +193,15 @@ def build_shadow_query_match_summary(events: list[TraceEvent]) -> dict[str, obje
         "hunter_plan_count": len(hunter_plans),
         "hunter_search_wave_count": len(hunter_waves),
         "hunter_funnel_complete_count": len(hunter_funnels),
+        "hunter_first_at": hunter_first_at,
+        "hunter_latest_at": hunter_latest_at,
         "query_planned_count": len(query_plans),
         "search_gateway_attempt_count": len(search_gateway_attempts),
+        "query_first_at": query_first_at,
+        "query_latest_at": query_latest_at,
         "suggestion_attempt_count": len(suggestion_attempts),
+        "suggestion_first_at": suggestion_first_at,
+        "suggestion_latest_at": suggestion_latest_at,
         "corpus_state": corpus_state,
         "corpus_ready_for_match_evaluation": bool(suggestions and query_plans),
         "suggestion_count": len(suggestions),
