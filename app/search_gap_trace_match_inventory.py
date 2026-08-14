@@ -38,6 +38,14 @@ def _query_digest(value: str) -> str:
     return hashlib.sha256(_canonical_query(value).encode("utf-8")).hexdigest()[:16]
 
 
+def _attempts(events: list[TraceEvent], *, component: str, operation: str | None = None) -> set[tuple[str, str]]:
+    return {
+        (event.mission_id, event.attempt_id)
+        for event in events
+        if event.component == component and (operation is None or event.operation == operation)
+    }
+
+
 def find_shadow_query_matches(events: list[TraceEvent]) -> list[ShadowQueryMatch]:
     suggestions: list[tuple[TraceEvent, str]] = []
     planned: list[tuple[TraceEvent, str]] = []
@@ -98,6 +106,27 @@ def build_shadow_query_match_summary(events: list[TraceEvent]) -> dict[str, obje
         and event.operation == "follow_up_query_suggested"
         and _canonical_query(str(event.metadata.get("query_text") or ""))
     ]
+    query_plans = [
+        event
+        for event in events
+        if event.component == "search_gateway"
+        and event.operation == "query_planned"
+        and _canonical_query(str(event.metadata.get("query_text") or ""))
+    ]
+    hunter_plans = [
+        event for event in events if event.component == "hunter" and event.operation == "hunt_plan"
+    ]
+    hunter_waves = [
+        event
+        for event in events
+        if event.component == "hunter" and event.operation == "hunt_search_wave_observed"
+    ]
+    hunter_funnels = [
+        event
+        for event in events
+        if event.component == "hunter" and event.operation == "hunt_funnel_complete"
+    ]
+
     matches = find_shadow_query_matches(events)
     usable_by_suggestion: set[tuple[str, str, int]] = set()
     buckets: dict[str, dict[str, int]] = defaultdict(
@@ -130,8 +159,35 @@ def build_shadow_query_match_summary(events: list[TraceEvent]) -> dict[str, obje
         else:
             buckets[key]["same_attempt_prior_collisions"] += 1
 
+    hunter_attempts = _attempts(events, component="hunter")
+    search_gateway_attempts = _attempts(events, component="search_gateway", operation="query_planned")
+    suggestion_attempts = _attempts(
+        events,
+        component="search_refinement_shadow",
+        operation="follow_up_query_suggested",
+    )
+
+    if not hunter_attempts:
+        corpus_state = "no_hunter_traffic"
+    elif not query_plans:
+        corpus_state = "hunter_without_query_plans"
+    elif not suggestions:
+        corpus_state = "query_plans_without_shadow_suggestions"
+    else:
+        corpus_state = "shadow_suggestions_present"
+
     return {
         "evidence_kind": "search_gap_shadow_query_match_inventory",
+        "hunter_event_count": sum(event.component == "hunter" for event in events),
+        "hunter_attempt_count": len(hunter_attempts),
+        "hunter_plan_count": len(hunter_plans),
+        "hunter_search_wave_count": len(hunter_waves),
+        "hunter_funnel_complete_count": len(hunter_funnels),
+        "query_planned_count": len(query_plans),
+        "search_gateway_attempt_count": len(search_gateway_attempts),
+        "suggestion_attempt_count": len(suggestion_attempts),
+        "corpus_state": corpus_state,
+        "corpus_ready_for_match_evaluation": bool(suggestions and query_plans),
         "suggestion_count": len(suggestions),
         "matched_suggestion_count": len(usable_by_suggestion),
         "unmatched_suggestion_count": max(0, len(suggestions) - len(usable_by_suggestion)),
