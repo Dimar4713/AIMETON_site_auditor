@@ -1,152 +1,162 @@
-# Three-Level Usage Architecture v0.1
+# Arrow Usage Architecture v0.2
 
 **Date:** 2026-08-15  
-**Parent:** #660  
+**Parent:** #660 / #669  
 **Architecture reference:** `Dimar4713/aimeton-architecture` ADR-019
 
 ## Product principle
 
-Hunter SHALL expose three levels of use over one canonical mission/capability/evidence model.
+Hunter SHALL NOT develop Preset, Guided and Professional as three parallel product streams.
 
-### Level 1 — Preset / One-click
-For a mass user who wants a business result with minimal configuration.
-
-- choose a ready service;
-- provide minimal context;
-- see expected output, limits and cost envelope;
-- press one main action;
-- receive a saved, evidence-backed result.
-
-Examples:
-- find the strongest target companies in a region;
-- map competitors;
-- find suppliers;
-- refresh a saved list and show changes.
-
-The preset is a versioned validated configuration, not a hardcoded UI shortcut.
-
-### Level 2 — Guided / Tunable
-For an advanced user who wants to influence the result without building the workflow.
-
-- start from a preset or simple mission;
-- refine goal with AI consultant;
-- tune geography, industry, include/exclude criteria;
-- choose Auto / Крупная рыба / Баланс / Золотой песок;
-- select result form and research depth;
-- inspect intermediate findings;
-- narrow, broaden or deepen the mission;
-- preserve Mission Brief revisions and dialogue provenance.
-
-### Level 3 — Professional Constructor
-For analyst/researcher/integrator/power user.
-
-- compose research stages/capabilities;
-- select source/provider roles within policy;
-- define evidence targets;
-- configure stop/refine/checkpoint logic;
-- define output schema and review gates;
-- set allowed resource/cost envelope within entitlement;
-- save reusable professional recipes/templates;
-- promote successful recipes into validated presets after acceptance.
-
-Professional mode never bypasses security, tenancy, budget, provider or execution policies.
-
-## Canonical architecture
+Canonical dependency:
 
 ```text
-Preset UI ───────────┐
-Guided UI ───────────┼─> canonical Mission Brief / capability configuration
-Constructor UI ──────┘                │
-                                      v
-                             validation + policy
-                                      │
-                                      v
-                              SearchGateway / tools
-                                      │
-                                      v
-                             Evidence + Results
+Professional Core / Constructor
+        ↓ package + constrain + explain
+Guided Specialist Mode
+        ↓ standardize + validate + freeze defaults
+One-click Mass Presets
 ```
 
-All levels use the same:
-- Workspace/Project;
-- Mission and Mission Brief revisions;
-- run history;
-- candidates and evidence;
-- decisions/notes/shortlists;
-- cost/usage;
+The professional layer is the semantic/capability superset. Guided and Preset are projections of that same lower-layer model.
+
+## Foundation — Professional Core
+
+Professional Core owns the canonical product semantics:
+- versioned configuration schema;
+- research stages/capabilities;
+- source/provider roles within policy;
+- evidence targets and sufficiency;
+- stop/continue/refine/checkpoint logic;
+- output contract/schema;
+- research depth;
+- human gates;
+- resource/cost envelope;
+- reusable versioned recipes;
+- deterministic validation/resolution to configuration snapshot;
+- one SearchGateway/policy execution boundary.
+
+This layer is implemented first. It is not merely an advanced screen; it is the source of truth for what Hunter can do.
+
+## Packaging — Guided Specialist Mode
+
+Guided mode exposes a safe, understandable subset of Professional Core:
+- start from a recipe/profile or simple Mission Brief;
+- AI consultant clarifies content/form/depth;
+- tune geography, industry, include/exclude;
+- choose Auto / Крупная рыба / Баланс / Золотой песок;
+- tune result size/form and research depth;
+- review intermediate findings;
+- narrow, broaden or deepen the mission;
+- preserve Mission Brief/configuration revisions and dialogue provenance;
+- preview material scope/cost expansion before execution.
+
+Every Guided control MUST map to canonical Professional Core configuration semantics.
+
+## Standard packaging — One-click Presets
+
+Preset is built only from a proven lower-layer configuration:
+- ready business service;
+- minimum required inputs;
+- expected output contract;
+- known limits/cost envelope;
+- one primary launch action;
+- exact preset/lower-layer recipe version;
+- canonical resolved configuration snapshot;
+- saved evidence-backed result.
+
+Examples for later validation:
+- strongest target companies in a region;
+- competitor map;
+- supplier discovery;
+- refresh saved list and show changes.
+
+A preset is a validated versioned projection of the lower layer, never custom search code.
+
+## Normative implementation order
+
+```text
+Professional Core contract
+ -> expert scenario works
+ -> Guided projection
+ -> specialist UX/quality validation
+ -> Preset standardization
+ -> mass-use validation
+```
+
+Implementation issues follow this order:
+- #672 — Professional Core / Constructor foundation;
+- #671 — Guided Specialist Packaging, blocked on #672 contracts;
+- #670 — One-click Presets, blocked on validated lower layers.
+
+## Canonical state
+
+All layers share exactly the same object graph:
+- Workspace / Project;
+- Mission + Mission Brief revisions;
+- canonical configuration schema/version;
+- resolved configuration snapshot;
+- consultation history;
+- Search/Analysis Run;
+- Candidate + Evidence;
+- decisions / notes / overrides;
+- shortlists / saved result sets;
+- cost / usage;
 - admin policy provenance;
 - audit trail.
 
-The levels differ only in how much configuration is visible/editable.
+## Progressive disclosure
 
-## UX rule — progressive disclosure
+User navigation is visually top-down:
 
-The user can move deeper without losing context:
+`One-click -> Настроить -> Guided -> Профессиональный режим -> Constructor`.
 
-`one-click service -> Настроить -> guided mode -> Профессиональный режим -> constructor`.
+But product construction is bottom-up:
 
-Returning to a simpler view does not discard advanced configuration; it presents an understandable summary and marks non-default choices.
+`Constructor -> Guided packaging -> Preset`.
 
-## Preset lifecycle
+This distinction is critical: UI reveals complexity downward while engineering packages capability upward.
 
-`draft -> tested -> accepted -> published -> deprecated -> retired`.
+## Anti-divergence requirements
 
-A preset requires:
-- customer job;
-- input contract;
-- output contract;
-- validated configuration;
-- quality evidence;
-- cost/resource envelope;
-- tariff mapping;
-- telemetry;
-- version and rollback/deprecation path.
-
-## Expert-to-mass product flywheel
-
-```text
-professional recipe
- -> repeated successful use
- -> quality/economic evidence
- -> normalize/configure defaults
- -> acceptance
- -> publish as one-click preset
-```
-
-This is a core product-capital loop for AIMETON: expert know-how becomes a scalable service rather than remaining bespoke work.
+Acceptance SHALL prove:
+1. equivalent Preset, Guided and Professional inputs resolve to equivalent canonical configuration snapshots;
+2. all levels execute via the same SearchGateway/policy path;
+3. entering a deeper mode reveals the same mission rather than cloning it;
+4. returning to a simpler view preserves advanced state/provenance;
+5. no Preset/Guided capability exists outside the Professional Core contract;
+6. security, tenancy, budget, entitlements and admin policies are enforced below all views;
+7. every run stores exact Mission Brief + configuration provenance.
 
 ## Persistence implications
 
-Add/plan entities:
-- `service_preset`;
-- `service_preset_version`;
+Plan/implement:
+- `configuration_schema_version`;
 - `configuration_snapshot`;
-- `professional_recipe` / reusable template;
-- `recipe_version`;
+- `professional_recipe` / `recipe_version`;
+- `guided_profile` / `guided_profile_version`;
+- `service_preset` / `service_preset_version`;
+- explicit mapping/projection relations between layers;
 - `preset_acceptance_evidence`;
 - `preset_entitlement_binding`.
 
-Every Search Run references the exact resolved configuration used, regardless of which UI level produced it.
+## Product-capital flywheel
 
-## Acceptance requirements
+```text
+professional recipe
+ -> repeated expert success
+ -> guided packaging
+ -> specialist validation
+ -> normalized defaults
+ -> accepted one-click preset
+ -> mass-use evidence
+ -> improve professional core
+```
 
-### Preset
-A novice can obtain a useful saved result without understanding search mechanics.
-
-### Guided
-A user can improve content/form/depth through bounded controls and dialogue without rebuilding the mission.
-
-### Professional
-A power user can build and reuse a custom research recipe, while validation and policy prevent unsafe/unauthorized execution.
-
-### Cross-level
-The same mission can be opened at another level without losing history, evidence, settings or provenance.
+This is the key anti-fragmentation mechanism: expert know-how becomes mass-market simplicity through packaging, not through rewriting the service.
 
 ## Commercial implication
 
-This naturally supports a product ladder:
-- preset = lowest friction / fastest time-to-value;
-- guided = more adaptation and value;
-- professional = highest flexibility and organizational value.
+The architecture supports different customer sophistication levels while protecting one product core. Tariffs may expose different layers/resources, but entitlement MUST NOT fork business logic or state.
 
-Tariffs may gate advanced levels and resources, but must not fork the underlying product domain model.
+The shortest route to a sellable preset therefore begins with a sufficiently expressive and proven Professional Core, then deliberately compresses it into Guided and finally into One-click form.
