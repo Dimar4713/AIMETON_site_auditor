@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 
+from app.search_gap_shadow_decision import decide_shadow_second_wave
 from app.search_gap_shadow_refinement import ShadowRefinementPlan
 from app.search_regime_utility import SearchRegime
 from app.trace_ledger import RetentionClass, TraceEventCreate, TraceState
@@ -38,6 +39,7 @@ def persist_shadow_follow_up_suggestions(
     except Exception:
         return 0
 
+    decision = decide_shadow_second_wave(plan)
     persisted = 0
     for index, suggestion in enumerate(plan.suggestions):
         try:
@@ -87,6 +89,8 @@ def persist_shadow_follow_up_suggestions(
                 },
                 metadata={
                     "effective_regime": effective_regime,
+                    "shadow_action": decision.action,
+                    "shadow_action_reason": decision.reason_code,
                     "routing_changed": False,
                     "steering_enabled": False,
                     "promotion_activated": False,
