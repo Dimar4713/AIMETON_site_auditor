@@ -43,6 +43,21 @@ def test_duplicate_pressure_requires_lower_waste_and_new_unique_domains():
     assert result.verdict == GapHindsightVerdict.CONTRADICTED
 
 
+def test_duplicate_pressure_repeat_only_follow_up_is_contradicted():
+    result = assess_gap_hindsight(
+        gap_code="duplicate_or_excluded_pressure",
+        effective_regime="balanced",
+        evidence=evidence(
+            added_raw_results=8,
+            added_unique_domains=0,
+            duplicate_results=0,
+            excluded_results=0,
+        ),
+    )
+    assert result.verdict == GapHindsightVerdict.CONTRADICTED
+    assert result.reason_code == "follow_up_added_no_new_unique_domains"
+
+
 def test_region_gap_closes_only_with_explicit_region_evidence():
     result = assess_gap_hindsight(
         gap_code="region_confirmation_missing",

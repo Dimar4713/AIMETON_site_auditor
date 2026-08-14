@@ -66,6 +66,8 @@ def assess_gap_hindsight(
     elif gap_code == "duplicate_or_excluded_pressure":
         if evidence.added_raw_results > 0 and evidence.added_unique_domains > 0 and evidence.waste_ratio < 0.45:
             verdict, reason = GapHindsightVerdict.SUPPORTED, "waste_pressure_reduced"
+        elif evidence.added_raw_results > 0 and evidence.added_unique_domains == 0:
+            verdict, reason = GapHindsightVerdict.CONTRADICTED, "follow_up_added_no_new_unique_domains"
         elif evidence.added_raw_results > 0 and evidence.waste_ratio >= 0.45:
             verdict, reason = GapHindsightVerdict.CONTRADICTED, "waste_pressure_persisted"
 
