@@ -133,6 +133,25 @@ def test_deep_redirect_keeps_original_search_domain_quality_lineage():
     assert industry_case.to_retained_outcome().assess().verdict == GapHindsightVerdict.SUPPORTED
 
 
+def test_rejected_pre_score_industry_match_is_not_quality_evidence():
+    events = [
+        _planned(1, 3, "стоматология Красноярск"),
+        _result(2, 3, "https://weak.ru/"),
+        _pre_scored(3, "https://weak.ru/", industry=25),
+    ]
+    case = replay_case_from_trace(
+        events,
+        gap_code="industry_confirmation_missing",
+        effective_regime="balanced",
+        suggested_follow_up_query="стоматология Красноярск",
+    )
+    assert case is not None
+    outcome = case.to_retained_outcome()
+    assert outcome.evidence.added_qualified_candidates == 0
+    assert outcome.evidence.industry_confirmed_candidates == 0
+    assert outcome.assess().verdict != GapHindsightVerdict.SUPPORTED
+
+
 def test_quality_replay_fails_closed_when_candidate_domain_has_multi_query_lineage():
     events = [
         _planned(1, 1, "first query"),
