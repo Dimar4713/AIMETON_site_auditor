@@ -1,7 +1,10 @@
 from pathlib import Path
 
 from app.search_observer_quality_policy import QualityFirstPromotionPolicy
-from app.search_quality_policy_settings import SearchQualityPolicyRepository
+from app.search_quality_policy_settings import (
+    SearchQualityPolicyRepository,
+    load_search_quality_policy_readonly,
+)
 
 
 def test_search_quality_policy_round_trip(tmp_path: Path):
@@ -29,3 +32,25 @@ def test_search_quality_policy_default_is_conservative(tmp_path: Path):
     assert record.policy.max_direct_or_official_yield_drop_ratio == 0.0
     assert record.policy.max_waste_ratio_increase == 0.0
     assert record.policy.resource_policy_mode == "existing_hard_caps"
+
+
+def test_readonly_loader_reports_persisted_policy(tmp_path: Path):
+    db = tmp_path / "runtime.sqlite3"
+    policy = QualityFirstPromotionPolicy(max_waste_ratio_increase=0.15)
+    SearchQualityPolicyRepository(db).save(policy, actor_id=9, reason="stage policy")
+
+    loaded = load_search_quality_policy_readonly(db)
+
+    assert loaded.persisted is True
+    assert loaded.record.policy == policy
+    assert loaded.record.updated_by == 9
+
+
+def test_readonly_loader_does_not_invent_missing_policy(tmp_path: Path):
+    db = tmp_path / "runtime.sqlite3"
+    SearchQualityPolicyRepository(db)
+
+    loaded = load_search_quality_policy_readonly(db)
+
+    assert loaded.persisted is False
+    assert loaded.record.policy.max_waste_ratio_increase == 0.0
