@@ -413,6 +413,8 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             counters=funnel.model_dump(),
         )
         return HuntResult(
+            trace_mission_id=mission_id,
+            trace_attempt_id=correlation_id,
             region=effective_req.region,
             search_zone=req.search_zone,
             queries=queries,
@@ -755,6 +757,8 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         counters=funnel.model_dump(),
     )
     return HuntResult(
+        trace_mission_id=mission_id,
+        trace_attempt_id=correlation_id,
         region=effective_req.region,
         search_zone=req.search_zone,
         queries=queries,

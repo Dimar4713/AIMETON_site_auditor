@@ -249,6 +249,8 @@ class HuntResult(BaseModel):
     funnel: HuntFunnel = Field(default_factory=HuntFunnel)
     notes: list[str] = Field(default_factory=list)
     search: SearchDiagnostics | None = None
+    trace_mission_id: str | None = Field(default=None, exclude=True, repr=False)
+    trace_attempt_id: str | None = Field(default=None, exclude=True, repr=False)
 
 
 SourceKind = Literal[

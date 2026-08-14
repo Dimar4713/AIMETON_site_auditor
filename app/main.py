@@ -56,6 +56,7 @@ from app.runtime_core.api import router as runtime_router
 from app.scraper import FetchError, fetch_site
 from app.search_gateway import get_search_gateway, search_policy_from_env
 from app.search_gap_shadow_refinement import build_shadow_follow_up_queries
+from app.search_gap_shadow_trace import persist_shadow_follow_up_suggestions
 from app.search_regime_shadow import resolve_auto_search_regime
 from app.sef.company_profile import (
     CompanyProfileBuildRequest,
@@ -490,6 +491,15 @@ async def hunt(req: HuntRequest, request: Request):
         "routing_changed": False,
         "steering_enabled": False,
     }
+    trace_mission_id = getattr(result, "trace_mission_id", None)
+    trace_attempt_id = getattr(result, "trace_attempt_id", None)
+    if trace_mission_id and trace_attempt_id:
+        persist_shadow_follow_up_suggestions(
+            mission_id=trace_mission_id,
+            attempt_id=trace_attempt_id,
+            effective_regime=effective_regime,
+            plan=refinement,
+        )
     return payload
 
 
