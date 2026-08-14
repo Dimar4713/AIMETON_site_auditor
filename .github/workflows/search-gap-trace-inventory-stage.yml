@@ -7,6 +7,8 @@ on:
         description: Exact deployed source SHA to inventory
         required: true
         type: string
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -17,6 +19,12 @@ concurrency:
 
 jobs:
   inventory:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.comment.user.login == 'Dimar4713' &&
+       github.event.issue.number == 632 &&
+       startsWith(github.event.comment.body, '/inventory-search-gap-trace-stage '))
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
@@ -24,6 +32,8 @@ jobs:
       STACK_DIR: /opt/aimeton/auditor-stack
       CONTAINER: aimeton-auditor
       TRACE_DB: /app/data/runtime-core.sqlite3
+      COMMENT_BODY: ${{ github.event.comment.body || '' }}
+      INPUT_SHA: ${{ inputs.expected_sha || '' }}
 
     steps:
       - name: Resolve exact expected SHA
@@ -31,7 +41,13 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          expected='${{ inputs.expected_sha }}'
+          if [[ "$GITHUB_EVENT_NAME" == "issue_comment" ]]; then
+            body="$COMMENT_BODY"
+            [[ "$body" =~ ^/inventory-search-gap-trace-stage[[:space:]]+([0-9a-f]{40})$ ]]
+            expected="${BASH_REMATCH[1]}"
+          else
+            expected="$INPUT_SHA"
+          fi
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
           echo "sha=$expected" >> "$GITHUB_OUTPUT"
 
