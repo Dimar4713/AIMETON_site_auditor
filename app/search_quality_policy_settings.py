@@ -21,6 +21,11 @@ class SearchQualityPolicyRecord(BaseModel):
     reason: str | None = None
 
 
+class ReadOnlySearchQualityPolicy(BaseModel):
+    record: SearchQualityPolicyRecord
+    persisted: bool = False
+
+
 class SearchQualityPolicyRepository:
     """Persistent owner/admin policy for search quality promotion guards.
 
@@ -78,6 +83,32 @@ class SearchQualityPolicyRepository:
                 (SETTINGS_KEY, record.model_dump_json()),
             )
         return record
+
+
+def load_search_quality_policy_readonly(path: str | Path) -> ReadOnlySearchQualityPolicy:
+    """Read an existing runtime policy without creating or mutating SQLite state."""
+    db_path = Path(path).expanduser().resolve()
+    if not db_path.is_file():
+        raise FileNotFoundError(db_path)
+    uri = f"{db_path.as_uri()}?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=5.0) as db:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA query_only = ON")
+        table = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_meta'"
+        ).fetchone()
+        if table is None:
+            return ReadOnlySearchQualityPolicy(record=SearchQualityPolicyRecord(), persisted=False)
+        row = db.execute("SELECT value FROM runtime_meta WHERE key = ?", (SETTINGS_KEY,)).fetchone()
+    if row is None:
+        return ReadOnlySearchQualityPolicy(record=SearchQualityPolicyRecord(), persisted=False)
+    try:
+        return ReadOnlySearchQualityPolicy(
+            record=SearchQualityPolicyRecord.model_validate_json(row["value"]),
+            persisted=True,
+        )
+    except Exception:
+        return ReadOnlySearchQualityPolicy(record=SearchQualityPolicyRecord(), persisted=False)
 
 
 def get_search_quality_policy_repository() -> SearchQualityPolicyRepository:
