@@ -56,7 +56,9 @@ jobs:
 
           docker exec "$CONTAINER" test -f /app/scripts/search_gap_trace_match_inventory.py
           docker exec "$CONTAINER" test -f "$TRACE_DB"
-          docker exec -w /app "$CONTAINER" \
+          docker exec -w /app -e PYTHONPATH=/app "$CONTAINER" \
+            python -c 'import app.search_gap_trace_match_inventory'
+          docker exec -w /app -e PYTHONPATH=/app "$CONTAINER" \
             python scripts/search_gap_trace_match_inventory.py "$TRACE_DB" \
             > "$report"
 
@@ -116,6 +118,7 @@ jobs:
           ]
           Path(summary_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
+          cat "$summary"
           cat "$summary" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized inventory evidence
