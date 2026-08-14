@@ -6,10 +6,10 @@
     institutional_candidate: 'Институциональная организация',
   };
   const REGIME_LABELS = {
-    auto: 'Авто',
-    precision: 'Лучшее',
-    balanced: 'Баланс',
-    discovery: 'Редкое / не упустить',
+    auto: 'Авто — AIMETON выбирает тактику',
+    precision: 'Крупная рыба — самые сильные компании',
+    balanced: 'Баланс — сильные кандидаты + разумный охват',
+    discovery: 'Золотой песок — не пропустить редкие находки',
   };
   const REGIME_REASON_LABELS = {
     auto_balanced_default: 'автоматическая классификация ещё в shadow; безопасный базовый режим — баланс',
@@ -100,7 +100,7 @@
     const requested = REGIME_LABELS[metadata.requested] || metadata.requested || '—';
     const effective = REGIME_LABELS[metadata.effective] || metadata.effective || '—';
     const reason = REGIME_REASON_LABELS[metadata.reason] || metadata.reason || 'без причины';
-    node.textContent = `Запрошено: ${requested}. Shadow-режим: ${effective}. Причина: ${reason}. Production routing не изменён.`;
+    node.textContent = `Запрошено: ${requested}. Shadow-тактика AIMETON: ${effective}. Причина: ${reason}. Production routing не изменён.`;
   }
 
   const originalFetch = window.fetch.bind(window);
@@ -122,7 +122,7 @@
     const node = document.querySelector('#hunterSearchRegimeStatus');
     if (!node) return;
     const requested = REGIME_LABELS[event.target.value] || event.target.value;
-    node.textContent = `Выбрано: ${requested}. Настройка будет записана как shadow intent при следующем поиске; production routing пока не меняется.`;
+    node.textContent = `Выбрано: ${requested}. Это пользовательское намерение поиска; AIMETON сопоставит его внутреннему режиму и admin-policy. Пока active steering не включён.`;
   });
 
   document.addEventListener('click', event => {
