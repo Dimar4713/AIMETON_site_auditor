@@ -19,7 +19,10 @@ def read_inventory_events_readonly(trace_db: Path) -> list[TraceEvent]:
             """
             SELECT * FROM mission_trace_events
             WHERE
-                (component = 'search_refinement_shadow' AND operation = 'follow_up_query_suggested')
+                (
+                    component = 'search_refinement_shadow'
+                    AND operation IN ('follow_up_query_suggested', 'refinement_observed')
+                )
                 OR
                 (component = 'search_gateway' AND operation = 'query_planned')
                 OR
