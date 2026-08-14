@@ -57,7 +57,7 @@ jobs:
           docker exec "$CONTAINER" test -f /app/scripts/search_gap_trace_match_inventory.py
           docker exec "$CONTAINER" test -f "$TRACE_DB"
           docker exec -w /app -e PYTHONPATH=/app "$CONTAINER" \
-            python -c 'import app.search_gap_trace_match_inventory, app.search_provider_attribution'
+            python -c 'import app.search_gap_trace_match_inventory, app.search_gap_shadow_action_inventory, app.search_provider_attribution'
           docker exec -w /app -e PYTHONPATH=/app "$CONTAINER" \
             python scripts/search_gap_trace_match_inventory.py "$TRACE_DB" \
             > "$report"
@@ -104,6 +104,7 @@ jobs:
               "same_attempt_prior_collision_count",
               "buckets",
               "provider_attribution",
+              "shadow_action_inventory",
               "routing_changed",
               "steering_enabled",
               "promotion_activated",
@@ -133,6 +134,22 @@ jobs:
           assert attribution_required <= set(attribution)
           assert attribution["evidence_kind"] == "search_provider_attribution_inventory"
           assert attribution["routing_changed"] is False
+
+          actions = data["shadow_action_inventory"]
+          action_required = {
+              "shadow_action_observation_count",
+              "shadow_action_counts",
+              "latest_shadow_action",
+              "latest_shadow_action_reason",
+              "latest_shadow_effective_regime",
+              "routing_changed",
+              "steering_enabled",
+              "promotion_activated",
+          }
+          assert action_required <= set(actions)
+          assert actions["routing_changed"] is False
+          assert actions["steering_enabled"] is False
+          assert actions["promotion_activated"] is False
 
           forbidden = {
               "query_text", "result_url", "mission_id", "attempt_id", "query_digest"
@@ -179,6 +196,16 @@ jobs:
               f"- historical noncausal candidates: {data['historical_noncausal_candidate_count']}",
               f"- same-attempt prior collisions: {data['same_attempt_prior_collision_count']}",
               "",
+              "### Runtime shadow second-wave decision",
+              f"- retained decisions: {actions['shadow_action_observation_count']}",
+              f"- action counts: {actions['shadow_action_counts']}",
+              f"- latest action: {actions['latest_shadow_action']}",
+              f"- latest reason: {actions['latest_shadow_action_reason']}",
+              f"- latest effective regime: {actions['latest_shadow_effective_regime']}",
+              "- routing changed: no",
+              "- steering enabled: no",
+              "- promotion activated: no",
+              "",
               "### Latest substantial Hunter provider attribution",
               f"- qualifying attempt found: {str(attribution['qualifying_attempt_found']).lower()}",
               f"- query count: {attribution['query_count']}",
@@ -190,9 +217,6 @@ jobs:
               f"- retained primary-provider domains: {attribution['retained_primary_provider_domain_count']}",
               f"- retained provider-support domains: {attribution['retained_provider_support_domain_count']}",
               f"- retained corroborated domains: {attribution['retained_corroborated_domain_count']}",
-              "- routing changed: no",
-              "- steering enabled: no",
-              "- promotion activated: no",
               "- raw query text exported: no",
               "- result URLs/domains exported: no",
               "- trace identifiers exported: no",
