@@ -9,6 +9,7 @@ from pathlib import Path
 from app.search_gap_shadow_action_inventory import summarize_shadow_actions
 from app.search_gap_trace_match_inventory import build_shadow_query_match_summary
 from app.search_provider_attribution import build_latest_hunter_provider_attribution
+from app.search_quality_policy_settings import load_search_quality_policy_readonly
 from app.trace_ledger import SQLiteTraceLedger, TraceEvent
 
 
@@ -46,6 +47,15 @@ def build_inventory_report(trace_db: Path) -> dict[str, object]:
     report = build_shadow_query_match_summary(events)
     report["provider_attribution"] = build_latest_hunter_provider_attribution(events)
     report["shadow_action_inventory"] = summarize_shadow_actions(events)
+    loaded_policy = load_search_quality_policy_readonly(trace_db)
+    report["admin_quality_policy"] = {
+        "persisted": loaded_policy.persisted,
+        "policy": loaded_policy.record.policy.model_dump(mode="json"),
+        "updated_at": loaded_policy.record.updated_at,
+        "routing_changed": False,
+        "steering_enabled": False,
+        "promotion_activated": False,
+    }
     return report
 
 
