@@ -6,6 +6,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from app.search_gap_shadow_action_inventory import summarize_shadow_actions
 from app.search_gap_trace_match_inventory import build_shadow_query_match_summary
 from app.search_provider_attribution import build_latest_hunter_provider_attribution
 from app.trace_ledger import SQLiteTraceLedger, TraceEvent
@@ -44,6 +45,7 @@ def build_inventory_report(trace_db: Path) -> dict[str, object]:
     events = read_inventory_events_readonly(trace_db)
     report = build_shadow_query_match_summary(events)
     report["provider_attribution"] = build_latest_hunter_provider_attribution(events)
+    report["shadow_action_inventory"] = summarize_shadow_actions(events)
     return report
 
 
