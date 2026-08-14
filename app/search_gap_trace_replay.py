@@ -145,16 +145,20 @@ def replay_case_from_trace(
         source_role = str(quality.get("source_role") or "")
         region_value = quality.get("region_confirmed")
         industry_value = quality.get("industry_match")
+        industry_confirmed = (
+            qualified
+            and isinstance(industry_value, (int, float))
+            and not isinstance(industry_value, bool)
+            and industry_value > 0
+        )
         results.append(
             ReplaySearchResult(
                 url=result_url,
                 qualified=qualified,
                 direct_or_official=qualified and source_role == "direct_candidate",
                 excluded=domain in excluded_domains,
-                region_confirmed=region_value is True,
-                industry_confirmed=isinstance(industry_value, (int, float))
-                and not isinstance(industry_value, bool)
-                and industry_value > 0,
+                region_confirmed=qualified and region_value is True,
+                industry_confirmed=industry_confirmed,
                 novel_entity=None,
                 rare_hit=None,
             )
