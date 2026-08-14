@@ -92,3 +92,10 @@
   refresh?.addEventListener('click', load);
   load();
 })();
+
+(() => {
+  const script = document.createElement('script');
+  script.src = '/static/admin-search-quality-policy.js?v=20260814a';
+  script.defer = true;
+  document.head.append(script);
+})();
