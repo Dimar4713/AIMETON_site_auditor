@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aimeton:site-auditor:professional-configuration:v0.1",
+  "title": "AIMETON Hunter Professional Configuration v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mission_binding",
+    "target",
+    "strategy",
+    "stages",
+    "evidence_policy",
+    "refinement_policy",
+    "interaction_policy",
+    "output_contract",
+    "resource_envelope",
+    "policy_refs",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "recipe_ref": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["recipe_id", "recipe_version"],
+      "properties": {
+        "recipe_id": {"type": "string", "minLength": 1},
+        "recipe_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "mission_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mission_id", "mission_brief_revision"],
+      "properties": {
+        "mission_id": {"type": "string", "minLength": 1},
+        "mission_brief_revision": {"type": "string", "minLength": 1}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["geographies", "industries", "entity_types", "include", "exclude"],
+      "properties": {
+        "geographies": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "industries": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "entity_types": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+        "include": {"type": "array", "items": {"type": "string"}},
+        "exclude": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested_intent", "effective_regime", "research_depth"],
+      "properties": {
+        "requested_intent": {"enum": ["auto", "precision", "balanced", "discovery"]},
+        "effective_regime": {"enum": ["precision", "balanced", "discovery"]},
+        "research_depth": {"enum": ["quick", "working", "deep"]}
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "capability", "enabled"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "capability": {"type": "string", "minLength": 1},
+          "enabled": {"type": "boolean"},
+          "depends_on": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "provider_roles": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "parameters": {"type": "object"}
+        }
+      }
+    },
+    "evidence_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targets", "minimum_direct_sources", "require_provenance"],
+      "properties": {
+        "targets": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "minimum_direct_sources": {"type": "integer", "minimum": 0},
+        "require_provenance": {"type": "boolean"},
+        "sufficiency_rule": {"type": ["string", "null"]}
+      }
+    },
+    "refinement_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "max_additional_waves", "allowed_actions"],
+      "properties": {
+        "mode": {"enum": ["off", "shadow", "bounded_active"]},
+        "max_additional_waves": {"type": "integer", "minimum": 0},
+        "allowed_actions": {
+          "type": "array",
+          "items": {"enum": ["continue", "refine", "stop"]},
+          "uniqueItems": true
+        }
+      }
+    },
+    "interaction_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["consultation_enabled", "checkpoints", "material_scope_change_requires_preview"],
+      "properties": {
+        "consultation_enabled": {"type": "boolean"},
+        "checkpoints": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "material_scope_change_requires_preview": {"type": "boolean"}
+      }
+    },
+    "output_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "max_results", "sections"],
+      "properties": {
+        "format": {"enum": ["table", "shortlist", "cards", "report", "comparison", "export_bundle"]},
+        "max_results": {"type": "integer", "minimum": 1},
+        "sections": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "sort_by": {"type": ["string", "null"]},
+        "group_by": {"type": ["string", "null"]}
+      }
+    },
+    "resource_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_cost_rub", "max_duration_seconds", "max_provider_calls"],
+      "properties": {
+        "max_cost_rub": {"type": "number", "minimum": 0},
+        "max_duration_seconds": {"type": "integer", "minimum": 1},
+        "max_provider_calls": {"type": "integer", "minimum": 0}
+      }
+    },
+    "policy_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["admin_search_policy_version", "quality_policy_version", "entitlement_version"],
+      "properties": {
+        "admin_search_policy_version": {"type": "string", "minLength": 1},
+        "quality_policy_version": {"type": "string", "minLength": 1},
+        "entitlement_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["created_by", "created_at", "source_layer"],
+      "properties": {
+        "created_by": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "format": "date-time"},
+        "source_layer": {"enum": ["professional", "guided", "preset"]},
+        "source_preset_version": {"type": ["string", "null"]},
+        "source_guided_profile_version": {"type": ["string", "null"]}
+      }
+    }
+  }
+}
