@@ -121,6 +121,12 @@ async def test_hunter_forensic_trace_explains_candidate_losses(tmp_path: Path, m
     assert rejected.metadata["candidate_url"] == "https://irrelevant.ru/"
     assert rejected.counters["pre_score"] < rejected.counters["minimum_pre_score"]
 
+    returned_event = next(event for event in hunter_events if event.operation == "candidate_returned")
+    omitted_event = next(event for event in hunter_events if event.operation == "candidate_output_omitted")
+    for candidate_event in (returned_event, omitted_event):
+        assert candidate_event.metadata["region_confirmed"] is True
+        assert candidate_event.metadata["industry_match"] == 25
+
     final = hunter_events[-1]
     assert final.counters == {
         "raw_results": 5,

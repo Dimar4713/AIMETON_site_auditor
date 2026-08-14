@@ -708,6 +708,8 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 metadata={
                     "qualification": candidate.qualification,
                     "deep_analysis_performed": candidate.deep_analysis_performed,
+                    "region_confirmed": candidate.region_confirmed,
+                    "industry_match": candidate.pre_score_factors.get("industry_match"),
                     "source_role": _candidate_rank_role(candidate),
                     "lead_fit": candidate.lead_fit,
                     "lead_fit_reason": candidate.lead_fit_reason,
@@ -726,6 +728,8 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 counters={"qualified_rank": rank, "output_limit": req.output_limit},
                 metadata={
                     "qualification": candidate.qualification,
+                    "region_confirmed": candidate.region_confirmed,
+                    "industry_match": candidate.pre_score_factors.get("industry_match"),
                     "source_role": _candidate_rank_role(candidate),
                     "lead_fit": candidate.lead_fit,
                     "lead_fit_reason": candidate.lead_fit_reason,
