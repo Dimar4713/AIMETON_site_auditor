@@ -92,24 +92,34 @@ Observed structural defects:
 
 ## 5. TO-BE business process
 
+The target process is conversational and iterative rather than a one-shot search form.
+
 ```text
 Workspace / Project
-  -> create Research Mission
-  -> define target + constraints + user search intent
-  -> run Search Run v1
+  -> describe business need in natural language
+  -> AI consultant clarifies goal / criteria / output form / research depth when needed
+  -> versioned Mission Brief
+  -> choose usage level: Preset / Guided / Professional Constructor
+  -> run Search / Analysis iteration
   -> observe progress
+  -> inspect intermediate findings + gaps + evidence
+  -> user feedback: narrow / broaden / deepen / change form
+  -> revised Mission Brief / configuration
+  -> reuse retained evidence where possible
+  -> run additional governed research only when needed
   -> inspect Candidate Companies + Evidence
   -> qualify / reject / defer
   -> add notes / manual overrides
   -> assemble Saved Shortlist
   -> export / hand off
   -> return later
-  -> rerun as Search Run v2
-  -> compare v2 vs v1
-  -> review new / changed / disappeared candidates
-  -> preserve old decisions and evidence
+  -> rerun / update / deepen
+  -> compare new run vs previous run
+  -> preserve old decisions, dialogue and evidence
   -> update shortlist
 ```
+
+The loop continues until the result is acceptable by **content, form and depth**, not merely until a provider call completes.
 
 ### User-visible search intent
 
@@ -121,6 +131,61 @@ The user selects the goal, not technical coefficients:
 - **Золотой песок** — search deeper for rare or easy-to-miss candidates.
 
 Technical thresholds remain administrator-owned policy.
+
+## 5.1 Three-level usage architecture
+
+Hunter SHALL expose three levels of interaction over the same canonical mission, evidence and execution model.
+
+### Level 1 — Preset / One-click
+
+For the mass user who wants the result, not the mechanics.
+
+- choose a ready business service;
+- provide minimum context;
+- one primary launch action;
+- receive a saved evidence-backed result;
+- default search strategy, depth, output form and resource envelope come from a versioned accepted preset.
+
+Examples:
+- find strongest target companies in a region;
+- map competitors;
+- find suppliers;
+- refresh a saved list and show changes.
+
+### Level 2 — Guided / Tunable
+
+For a user who wants to influence the task without designing the workflow.
+
+- start from a preset or simple Mission Brief;
+- use AI consultant to clarify goal;
+- tune geography, industry, include/exclude, intent, depth, output form and bounded scope;
+- review intermediate findings;
+- narrow, broaden or deepen the mission;
+- keep all clarification history and Mission Brief revisions.
+
+### Level 3 — Professional Constructor
+
+For analysts, researchers, integrators and power users.
+
+- compose research stages/capabilities;
+- configure source/provider roles inside allowed policy;
+- define evidence targets, checkpoints and stop/refine logic;
+- define output schema;
+- configure resource/cost envelope within entitlement;
+- save reusable professional recipes;
+- promote proven recipes into versioned mass-market presets after evidence and acceptance.
+
+Professional mode MUST NOT bypass security, tenancy, budget, provider or execution governance.
+
+### Progressive disclosure
+
+The same mission can move deeper without losing context:
+
+`Preset -> Настроить -> Guided -> Профессиональный режим -> Constructor`.
+
+All three levels resolve into the same canonical configuration and run through the same validation/policy/execution core.
+
+Reference: `docs/THREE_LEVEL_USAGE_ARCHITECTURE_V0.1.md` and architecture ADR-019.
 
 ## 6. Product state model
 
@@ -157,6 +222,40 @@ Minimum fields:
 
 Mission is mutable as a business object, but historical runs retain the exact mission snapshot used for execution.
 
+### Mission Brief revision
+
+Versioned formalization of the current task produced by user input and consultation.
+
+Stores:
+- business objective;
+- success criteria;
+- content requirements;
+- output contract;
+- research depth;
+- constraints;
+- accepted scope changes;
+- relation to prior revision.
+
+### Consultation Thread / Dialogue Turn
+
+Mission-relevant dialogue is durable state and provenance, not transient UI decoration.
+
+### Resolved Configuration Snapshot
+
+The normalized execution configuration produced from a preset, guided controls or professional constructor.
+
+Every Search Run references the exact resolved configuration used.
+
+### Service Preset / Preset Version
+
+A published, accepted, versioned configuration for one-click use.
+
+Lifecycle: `draft -> tested -> accepted -> published -> deprecated -> retired`.
+
+### Professional Recipe / Recipe Version
+
+Reusable expert configuration that can be rerun, shared where entitled, and potentially promoted into a preset after acceptance.
+
 ### Search Run
 
 Immutable execution/version of a mission.
@@ -165,7 +264,8 @@ Minimum fields:
 - run id;
 - mission id;
 - parent/prior run id when rerun;
-- mission snapshot;
+- mission snapshot / brief revision;
+- resolved configuration snapshot;
 - requested and effective regime;
 - source code/deployment identity where useful for provenance;
 - started/completed timestamps;
@@ -279,7 +379,12 @@ The user must be able to:
 
 - create mission;
 - save draft;
+- clarify mission through AI dialogue;
 - edit mission before run;
+- choose/open a preset;
+- switch from preset to guided without losing context;
+- switch from guided to professional constructor without losing context;
+- save/reuse a professional recipe;
 - execute mission;
 - observe progress/status;
 - open completed run;
@@ -290,7 +395,7 @@ The user must be able to:
 - add/remove candidate from shortlist;
 - save named shortlist;
 - duplicate mission;
-- rerun/update mission;
+- rerun/update/deepen mission;
 - compare runs;
 - preserve manual decisions across reruns;
 - archive/restore where applicable;
@@ -303,25 +408,26 @@ The user must be able to:
 
 Shows active projects/missions, status, last run, saved shortlist count and next useful action.
 
-### New Mission Wizard
+Also exposes a catalog of one-click services/presets as the simplest entry point.
 
-Steps:
-1. business target;
-2. geography;
-3. include/exclude criteria;
-4. search intent;
-5. review expected scope/cost boundary;
-6. launch.
+### New Mission / Service Entry
+
+Three progressive entry paths:
+1. **Ready service** — select preset and launch with minimum context;
+2. **Настроить** — guided mission with AI consultant and bounded controls;
+3. **Профессиональный режим** — constructor for reusable research recipes.
 
 ### Mission Workspace
 
-Persistent screen with tabs/sections:
-- Overview;
+Persistent screen with:
+- Consultation / AI consultant;
+- Mission Brief;
 - Runs;
 - Candidates;
 - Shortlists;
 - Notes/Activity;
-- Exports.
+- Exports;
+- Configuration summary / recipe where applicable.
 
 ### Running Mission View
 
@@ -370,6 +476,10 @@ Must not imply that a company ceased to exist merely because a provider did not 
 6. DB migrations are explicit and tested.
 7. Backup/restore preserves user-visible state and audit linkage.
 8. Admin policy changes affect future behavior according to policy semantics and do not rewrite historical evidence.
+9. Dialogue changes create versioned Mission Brief revisions.
+10. Preset, guided and constructor modes resolve to the same canonical configuration model.
+11. Switching interaction level never loses mission state, evidence or provenance.
+12. Professional recipes cannot override security/budget/authorization policy.
 
 ## 11. Quality acceptance model
 
@@ -386,6 +496,7 @@ Search quality alone is insufficient. Product acceptance measures four layers.
 - task completion rate;
 - time to first useful shortlist;
 - number of user corrections required;
+- clarification success rate;
 - rerun success;
 - delta correctness.
 
@@ -393,10 +504,14 @@ Search quality alone is insufficient. Product acceptance measures four layers.
 - saved state survives restart/relogin;
 - edits survive rerun;
 - historical run remains immutable;
-- negative authorization passes.
+- negative authorization passes;
+- dialogue/brief/configuration provenance survives mode switching.
 
 ### Usability quality
-A representative user can complete the core path without developer assistance and can explain what to do next from the interface itself.
+- novice can complete a preset service without understanding search mechanics;
+- guided user can refine content/form/depth without rebuilding a mission;
+- professional user can build and reuse a recipe without bypassing governance;
+- a representative user can explain what to do next from the interface itself.
 
 ## 12. Commercial readiness sequence
 
@@ -406,7 +521,7 @@ The dependency order is normative for this productization mission:
 pain validation
  -> business-process fit
  -> product state/business logic
- -> UX workspace
+ -> three-level UX + conversational loop
  -> quality acceptance
  -> durable DB + admin + tenancy
  -> billing/entitlements
@@ -430,16 +545,18 @@ These must be answered by observation/interviews/tests, not by architecture alon
 8. Is a mission primarily individual or collaborative?
 9. What candidate identity fields are necessary to reliably compare reruns?
 10. What error is more expensive for the target user: missing a good company or including a bad one?
+11. Which customer jobs deserve a one-click preset first?
+12. Which controls belong in Guided mode and which should remain Professional-only?
 
-The last question directly determines whether «Крупная рыба» or «Золотой песок» should be the default for a particular workflow.
+The last two questions determine the first sellable service catalog and progression path.
 
 ## 14. Immediate engineering backlog derived from this blueprint
 
 ### PRODUCT-01B / #662
-Translate this process into wireflow/UI contracts and persistence schema/backlog.
+Translate this process into wireflow/UI contracts and persistence schema/backlog, including Preset / Guided / Professional modes.
 
 ### PRODUCT-01C / #663
-Define representative acceptance scenarios and measurable pass/fail thresholds for the complete product workflow.
+Define representative acceptance scenarios and measurable pass/fail thresholds for the complete product workflow and all three interaction levels.
 
 ### PRODUCT-01D / #664
 Implement durable product state, tenancy and admin control plane after the UX/state contracts stabilize.
@@ -452,4 +569,4 @@ Start marketing readiness only when the end-to-end user and payment paths are ac
 
 ## 15. Current boundary
 
-The existing Hunter search technology is a strong execution engine, not yet the complete sellable product. Search research work remains valuable, but productization priority is now the durable customer workflow around that engine.
+The existing Hunter search technology is a strong execution engine, not yet the complete sellable product. Search research work remains valuable, but productization priority is now the durable customer workflow around that engine, exposed through a three-level progressive interaction architecture.
