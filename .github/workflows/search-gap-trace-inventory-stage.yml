@@ -1,0 +1,129 @@
+name: Search Gap Trace Inventory Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to inventory
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aimeton-search-gap-trace-inventory-stage
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      TRACE_DB: /app/data/runtime-core.sqlite3
+
+    steps:
+      - name: Resolve exact expected SHA
+        id: expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact deployed SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          [[ "$deployed" == "${{ steps.expected.outputs.sha }}" ]]
+          docker inspect "$CONTAINER" >/dev/null
+
+      - name: Build sanitized read-only trace inventory
+        id: inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          report="$RUNNER_TEMP/search-gap-trace-inventory.json"
+          summary="$RUNNER_TEMP/search-gap-trace-inventory.md"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+
+          docker exec "$CONTAINER" test -f /app/scripts/search_gap_trace_match_inventory.py
+          docker exec "$CONTAINER" test -f "$TRACE_DB"
+          docker exec "$CONTAINER" \
+            python /app/scripts/search_gap_trace_match_inventory.py "$TRACE_DB" \
+            > "$report"
+
+          python_bin="$(command -v python3 || command -v python)"
+          "$python_bin" - "$report" "$summary" '${{ steps.expected.outputs.sha }}' <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report_path, summary_path, expected_sha = sys.argv[1:]
+          data = json.loads(Path(report_path).read_text(encoding="utf-8"))
+          required = {
+              "evidence_kind",
+              "suggestion_count",
+              "matched_suggestion_count",
+              "unmatched_suggestion_count",
+              "same_attempt_causal_candidate_count",
+              "historical_noncausal_candidate_count",
+              "same_attempt_prior_collision_count",
+              "buckets",
+              "routing_changed",
+              "steering_enabled",
+              "promotion_activated",
+          }
+          assert required <= set(data)
+          assert data["evidence_kind"] == "search_gap_shadow_query_match_inventory"
+          assert data["routing_changed"] is False
+          assert data["steering_enabled"] is False
+          assert data["promotion_activated"] is False
+          forbidden = {"query_text", "mission_id", "attempt_id", "query_digest"}
+
+          def walk(value):
+              if isinstance(value, dict):
+                  assert forbidden.isdisjoint(value)
+                  for item in value.values():
+                      walk(item)
+              elif isinstance(value, list):
+                  for item in value:
+                      walk(item)
+
+          walk(data)
+          lines = [
+              "## Search gap trace inventory — Stage",
+              "",
+              f"- exact deployed SHA: `{expected_sha}`",
+              f"- suggestions: {data['suggestion_count']}",
+              f"- matched suggestions: {data['matched_suggestion_count']}",
+              f"- unmatched suggestions: {data['unmatched_suggestion_count']}",
+              f"- same-attempt causal candidates: {data['same_attempt_causal_candidate_count']}",
+              f"- historical noncausal candidates: {data['historical_noncausal_candidate_count']}",
+              f"- same-attempt prior collisions: {data['same_attempt_prior_collision_count']}",
+              "- routing changed: no",
+              "- steering enabled: no",
+              "- promotion activated: no",
+              "- raw query text exported: no",
+              "- trace identifiers exported: no",
+          ]
+          Path(summary_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized inventory evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-gap-trace-inventory-${{ github.run_id }}
+          path: |
+            ${{ steps.inventory.outputs.report }}
+            ${{ steps.inventory.outputs.summary }}
+          if-no-files-found: error
+          retention-days: 30
