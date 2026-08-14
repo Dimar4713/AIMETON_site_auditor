@@ -10,8 +10,10 @@ def test_sparse_gap_and_discovery_gap_are_explicit():
 
 
 def test_suggestions_are_bounded_deduped_and_non_steering():
-    plan = build_shadow_follow_up_queries(req=HuntRequest(region="Krasnoyarsk", industries=["dentistry"]), funnel=HuntFunnel(raw_results=2, unique_candidates=1, qualified_candidates=0), executed_queries=["dentistry Krasnoyarsk contacts"], effective_regime="balanced", candidates=[], max_suggestions=2)
+    executed = "dentistry Krasnoyarsk контакты"
+    plan = build_shadow_follow_up_queries(req=HuntRequest(region="Krasnoyarsk", industries=["dentistry"]), funnel=HuntFunnel(raw_results=2, unique_candidates=1, qualified_candidates=0), executed_queries=[executed], effective_regime="balanced", candidates=[], max_suggestions=2)
     assert len(plan.suggestions) <= 2
+    assert all(item.query.casefold() != executed.casefold() for item in plan.suggestions)
     assert len({item.query.casefold() for item in plan.suggestions}) == len(plan.suggestions)
     assert plan.routing_changed is False
     assert plan.steering_enabled is False
