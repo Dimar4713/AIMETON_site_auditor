@@ -45,6 +45,8 @@ from app.models import (
     AnalyzeRequest,
     ChatRequest,
     CompanyIntelligenceRequest,
+    HuntCandidate,
+    HuntFunnel,
     HuntRequest,
     SiteAnalysis,
 )
@@ -53,6 +55,7 @@ from app.retention_runtime import build_retention_runner
 from app.runtime_core.api import router as runtime_router
 from app.scraper import FetchError, fetch_site
 from app.search_gateway import get_search_gateway, search_policy_from_env
+from app.search_gap_shadow_refinement import build_shadow_follow_up_queries
 from app.search_regime_shadow import resolve_auto_search_regime
 from app.sef.company_profile import (
     CompanyProfileBuildRequest,
@@ -433,6 +436,57 @@ async def hunt(req: HuntRequest, request: Request):
         "requested": requested_regime,
         "effective": effective_regime,
         "reason": regime_reason,
+        "routing_changed": False,
+        "steering_enabled": False,
+    }
+
+    refinement_funnel = (
+        result.funnel
+        if hasattr(result, "funnel")
+        else HuntFunnel.model_validate(payload.get("funnel") or {})
+    )
+    executed_queries = (
+        list(result.queries)
+        if hasattr(result, "queries")
+        else [str(item) for item in (payload.get("queries") or [])]
+    )
+    source_candidates = (
+        list(result.candidates)
+        if hasattr(result, "candidates")
+        else list(payload.get("candidates") or [])
+    )
+    refinement_candidates: list[HuntCandidate] = []
+    for item in source_candidates:
+        if isinstance(item, HuntCandidate):
+            refinement_candidates.append(item)
+            continue
+        try:
+            refinement_candidates.append(HuntCandidate.model_validate(item))
+        except (TypeError, ValueError):
+            continue
+
+    refinement = build_shadow_follow_up_queries(
+        req=effective,
+        funnel=refinement_funnel,
+        executed_queries=executed_queries,
+        effective_regime=effective_regime,
+        candidates=refinement_candidates,
+    )
+    payload["search_refinement_shadow"] = {
+        "gap_count": len(refinement.gaps),
+        "gaps": [
+            {"code": gap.code, "evidence_target": gap.evidence_target, "reason": gap.reason}
+            for gap in refinement.gaps
+        ],
+        "suggestion_count": len(refinement.suggestions),
+        "suggestions": [
+            {
+                "query": item.query,
+                "reason_code": item.reason_code,
+                "evidence_target": item.evidence_target,
+            }
+            for item in refinement.suggestions
+        ],
         "routing_changed": False,
         "steering_enabled": False,
     }
