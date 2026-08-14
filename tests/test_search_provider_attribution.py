@@ -1,7 +1,9 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from app.search_provider_attribution import build_latest_hunter_provider_attribution
-from app.trace_ledger import TraceEvent, TraceState
+from app.trace_ledger import SQLiteTraceLedger, TraceEvent, TraceEventCreate, TraceState
+from scripts.search_gap_trace_match_inventory import build_inventory_report
 
 
 def _event(
@@ -130,3 +132,78 @@ def test_provider_attribution_exports_no_query_urls_or_trace_identity():
     assert "secret.example" not in text
     assert "hunt-test" not in text
     assert "corr-test" not in text
+
+
+def test_readonly_inventory_includes_latest_substantial_provider_attribution(tmp_path: Path):
+    db = tmp_path / "runtime.sqlite3"
+    ledger = SQLiteTraceLedger(db)
+    mission = "hunt-live"
+    attempt = "corr-live"
+    for index in range(20):
+        ledger.append(
+            TraceEventCreate(
+                mission_id=mission,
+                attempt_id=attempt,
+                component="search_gateway",
+                operation="query_planned",
+                state=TraceState.STARTED,
+                reason_code="query_planned",
+                metadata={"query_text": f"hidden query {index}", "query_index": index},
+                event_key=f"query-{index}",
+            )
+        )
+    ledger.append(
+        TraceEventCreate(
+            mission_id=mission,
+            attempt_id=attempt,
+            component="search_gateway",
+            operation="response_received",
+            state=TraceState.SUCCEEDED,
+            reason_code="results_received",
+            provider="yandex",
+            counters={"results_received": 20},
+            metadata={"cost_amount": "0.01", "cost_currency": "RUB", "query_index": 0},
+            event_key="response-yandex",
+        )
+    )
+    ledger.append(
+        TraceEventCreate(
+            mission_id=mission,
+            attempt_id=attempt,
+            component="search_gateway",
+            operation="result_item",
+            state=TraceState.SUCCEEDED,
+            reason_code="normalized_search_result",
+            provider="yandex",
+            metadata={
+                "result_url": "https://hidden.example/path",
+                "corroborated_by": ["yandex"],
+                "query_index": 0,
+            },
+            event_key="result-yandex",
+        )
+    )
+    ledger.append(
+        TraceEventCreate(
+            mission_id=mission,
+            attempt_id=attempt,
+            component="hunter",
+            operation="hunt_funnel_complete",
+            state=TraceState.SUCCEEDED,
+            reason_code="hunt_funnel_complete",
+            event_key="funnel",
+        )
+    )
+
+    report = build_inventory_report(db)
+    attribution = report["provider_attribution"]
+    assert attribution["qualifying_attempt_found"] is True
+    assert attribution["query_count"] == 20
+    assert attribution["provider_call_count"] == {"yandex": 1}
+    assert attribution["provider_raw_result_count"] == {"yandex": 20}
+    assert attribution["provider_cost_by_currency"] == {"yandex": {"RUB": "0.01"}}
+    assert attribution["retained_unique_domain_count"] == 1
+    assert "hidden query" not in repr(report)
+    assert "hidden.example" not in repr(report)
+    assert mission not in repr(report)
+    assert attempt not in repr(report)
