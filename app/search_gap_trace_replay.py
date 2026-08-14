@@ -87,24 +87,51 @@ def replay_case_from_trace(
         if domain and isinstance(index, int):
             domain_query_indexes[domain].add(index)
 
-    candidate_by_domain: dict[str, TraceEvent] = {}
+    quality_by_domain: dict[str, dict[str, object]] = defaultdict(dict)
     excluded_domains: set[str] = set()
     for event in events:
         if event.component != "hunter":
             continue
+
         candidate_url = str(event.metadata.get("candidate_url") or "")
-        domain = _domain(candidate_url)
-        if not domain:
+        candidate_domain = _domain(candidate_url)
+        if event.operation == "candidate_excluded" and candidate_domain:
+            excluded_domains.add(candidate_domain)
             continue
-        if event.operation in {"candidate_returned", "candidate_output_omitted"}:
-            candidate_by_domain[domain] = event
-        elif event.operation == "candidate_excluded":
-            excluded_domains.add(domain)
+
+        if event.operation == "candidate_pre_scored" and candidate_domain:
+            quality_by_domain[candidate_domain]["industry_match"] = event.metadata.get(
+                "factor_industry_match"
+            )
+            continue
+
+        if event.operation == "candidate_deep_audit_completed":
+            source_host = str(event.metadata.get("source_host") or "").casefold().removeprefix("www.")
+            if source_host:
+                quality_by_domain[source_host].update(
+                    {
+                        "qualified": True,
+                        "source_role": event.metadata.get("source_role"),
+                        "region_confirmed": event.metadata.get("region_confirmed"),
+                    }
+                )
+            continue
+
+        if event.operation in {"candidate_returned", "candidate_output_omitted"} and candidate_domain:
+            quality_by_domain[candidate_domain].update(
+                {
+                    "qualified": True,
+                    "source_role": event.metadata.get("source_role"),
+                    "region_confirmed": event.metadata.get("region_confirmed"),
+                    "industry_match": event.metadata.get("industry_match"),
+                }
+            )
 
     if gap_code in QUALITY_SENSITIVE_GAPS:
         for event in result_events:
             domain = _domain(str(event.metadata.get("result_url") or ""))
-            if domain in candidate_by_domain and len(domain_query_indexes.get(domain, set())) != 1:
+            quality = quality_by_domain.get(domain, {})
+            if quality.get("qualified") is True and len(domain_query_indexes.get(domain, set())) != 1:
                 return None
 
     results: list[ReplaySearchResult] = []
@@ -113,11 +140,11 @@ def replay_case_from_trace(
         if not result_url:
             continue
         domain = _domain(result_url)
-        candidate = candidate_by_domain.get(domain)
-        qualified = candidate is not None
-        source_role = str(candidate.metadata.get("source_role") or "") if candidate else ""
-        region_value = candidate.metadata.get("region_confirmed") if candidate else None
-        industry_value = candidate.metadata.get("industry_match") if candidate else None
+        quality = quality_by_domain.get(domain, {})
+        qualified = quality.get("qualified") is True
+        source_role = str(quality.get("source_role") or "")
+        region_value = quality.get("region_confirmed")
+        industry_value = quality.get("industry_match")
         results.append(
             ReplaySearchResult(
                 url=result_url,
@@ -125,7 +152,9 @@ def replay_case_from_trace(
                 direct_or_official=qualified and source_role == "direct_candidate",
                 excluded=domain in excluded_domains,
                 region_confirmed=region_value is True,
-                industry_confirmed=isinstance(industry_value, (int, float)) and industry_value > 0,
+                industry_confirmed=isinstance(industry_value, (int, float))
+                and not isinstance(industry_value, bool)
+                and industry_value > 0,
                 novel_entity=None,
                 rare_hit=None,
             )
