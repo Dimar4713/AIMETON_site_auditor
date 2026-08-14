@@ -44,6 +44,29 @@ def _candidate(seq: int, url: str, *, region: bool | None = None, industry: int 
     )
 
 
+def _pre_scored(seq: int, url: str, *, industry: int | None) -> TraceEvent:
+    return _event(
+        seq,
+        "hunter",
+        "candidate_pre_scored",
+        {"candidate_url": url, "factor_industry_match": industry},
+    )
+
+
+def _deep_completed(seq: int, final_url: str, *, source_host: str, region: bool) -> TraceEvent:
+    return _event(
+        seq,
+        "hunter",
+        "candidate_deep_audit_completed",
+        {
+            "candidate_url": final_url,
+            "source_host": source_host,
+            "source_role": "direct_candidate",
+            "region_confirmed": region,
+        },
+    )
+
+
 def test_sparse_replay_uses_exact_retained_query_and_new_domain_yield():
     events = [
         _planned(1, 7, "стоматология Красноярск официальный сайт"),
@@ -68,6 +91,30 @@ def test_region_and_industry_replay_use_final_candidate_quality_evidence():
         _planned(1, 4, "стоматология Красноярск"),
         _result(2, 4, "https://clinic.ru/"),
         _candidate(3, "https://clinic.ru/", region=True, industry=25),
+    ]
+    region_case = replay_case_from_trace(
+        events,
+        gap_code="region_confirmation_missing",
+        effective_regime="balanced",
+        suggested_follow_up_query="стоматология Красноярск",
+    )
+    industry_case = replay_case_from_trace(
+        events,
+        gap_code="industry_confirmation_missing",
+        effective_regime="balanced",
+        suggested_follow_up_query="стоматология Красноярск",
+    )
+    assert region_case is not None and industry_case is not None
+    assert region_case.to_retained_outcome().assess().verdict == GapHindsightVerdict.SUPPORTED
+    assert industry_case.to_retained_outcome().assess().verdict == GapHindsightVerdict.SUPPORTED
+
+
+def test_deep_redirect_keeps_original_search_domain_quality_lineage():
+    events = [
+        _planned(1, 9, "стоматология Красноярск"),
+        _result(2, 9, "https://clinic.ru/start"),
+        _pre_scored(3, "https://clinic.ru/start", industry=25),
+        _deep_completed(4, "https://brand.example/final", source_host="clinic.ru", region=True),
     ]
     region_case = replay_case_from_trace(
         events,
