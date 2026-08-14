@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from pathlib import Path
 from typing import get_args
 
@@ -10,7 +11,25 @@ from app.search_gap_retained_evidence import build_gap_hindsight_report
 from app.search_gap_shadow_refinement import GapCode
 from app.search_gap_trace_replay import replay_case_from_trace
 from app.search_regime_utility import SearchRegime
-from app.trace_ledger import SQLiteTraceLedger
+from app.trace_ledger import SQLiteTraceLedger, TraceEvent
+
+
+def read_attempt_readonly(
+    trace_db: Path,
+    mission_id: str,
+    attempt_id: str,
+) -> list[TraceEvent]:
+    """Read an existing trace attempt without migration, WAL changes, or writes."""
+    uri = f"{trace_db.expanduser().resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=5.0) as db:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA query_only = ON")
+        rows = db.execute(
+            "SELECT * FROM mission_trace_events "
+            "WHERE mission_id = ? AND attempt_id = ? ORDER BY sequence",
+            (mission_id, attempt_id),
+        ).fetchall()
+    return [SQLiteTraceLedger._row(row) for row in rows]
 
 
 def build_trace_replay_report(
@@ -23,7 +42,7 @@ def build_trace_replay_report(
     suggested_follow_up_query: str,
     baseline_domains: list[str] | None = None,
 ) -> dict[str, object]:
-    events = SQLiteTraceLedger(trace_db).list_attempt(mission_id, attempt_id)
+    events = read_attempt_readonly(trace_db, mission_id, attempt_id)
     case = replay_case_from_trace(
         events,
         gap_code=gap_code,
