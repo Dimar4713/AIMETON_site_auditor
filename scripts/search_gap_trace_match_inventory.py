@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 from app.search_gap_trace_match_inventory import build_shadow_query_match_summary
+from app.search_provider_attribution import build_latest_hunter_provider_attribution
 from app.trace_ledger import SQLiteTraceLedger, TraceEvent
 
 
@@ -24,7 +25,10 @@ def read_inventory_events_readonly(trace_db: Path) -> list[TraceEvent]:
                     AND operation IN ('follow_up_query_suggested', 'refinement_observed')
                 )
                 OR
-                (component = 'search_gateway' AND operation = 'query_planned')
+                (
+                    component = 'search_gateway'
+                    AND operation IN ('query_planned', 'response_received', 'result_item')
+                )
                 OR
                 (
                     component = 'hunter'
@@ -37,7 +41,10 @@ def read_inventory_events_readonly(trace_db: Path) -> list[TraceEvent]:
 
 
 def build_inventory_report(trace_db: Path) -> dict[str, object]:
-    return build_shadow_query_match_summary(read_inventory_events_readonly(trace_db))
+    events = read_inventory_events_readonly(trace_db)
+    report = build_shadow_query_match_summary(events)
+    report["provider_attribution"] = build_latest_hunter_provider_attribution(events)
+    return report
 
 
 def main() -> int:

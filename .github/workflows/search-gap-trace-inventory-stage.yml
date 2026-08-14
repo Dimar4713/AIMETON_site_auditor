@@ -57,7 +57,7 @@ jobs:
           docker exec "$CONTAINER" test -f /app/scripts/search_gap_trace_match_inventory.py
           docker exec "$CONTAINER" test -f "$TRACE_DB"
           docker exec -w /app -e PYTHONPATH=/app "$CONTAINER" \
-            python -c 'import app.search_gap_trace_match_inventory'
+            python -c 'import app.search_gap_trace_match_inventory, app.search_provider_attribution'
           docker exec -w /app -e PYTHONPATH=/app "$CONTAINER" \
             python scripts/search_gap_trace_match_inventory.py "$TRACE_DB" \
             > "$report"
@@ -103,6 +103,7 @@ jobs:
               "historical_noncausal_candidate_count",
               "same_attempt_prior_collision_count",
               "buckets",
+              "provider_attribution",
               "routing_changed",
               "steering_enabled",
               "promotion_activated",
@@ -112,7 +113,30 @@ jobs:
           assert data["routing_changed"] is False
           assert data["steering_enabled"] is False
           assert data["promotion_activated"] is False
-          forbidden = {"query_text", "mission_id", "attempt_id", "query_digest"}
+
+          attribution = data["provider_attribution"]
+          attribution_required = {
+              "evidence_kind",
+              "qualifying_attempt_found",
+              "minimum_query_count",
+              "query_count",
+              "provider_call_count",
+              "provider_raw_result_count",
+              "provider_cost_by_currency",
+              "retained_result_item_count",
+              "retained_unique_domain_count",
+              "retained_primary_provider_domain_count",
+              "retained_provider_support_domain_count",
+              "retained_corroborated_domain_count",
+              "routing_changed",
+          }
+          assert attribution_required <= set(attribution)
+          assert attribution["evidence_kind"] == "search_provider_attribution_inventory"
+          assert attribution["routing_changed"] is False
+
+          forbidden = {
+              "query_text", "result_url", "mission_id", "attempt_id", "query_digest"
+          }
 
           def walk(value):
               if isinstance(value, dict):
@@ -154,10 +178,23 @@ jobs:
               f"- same-attempt causal candidates: {data['same_attempt_causal_candidate_count']}",
               f"- historical noncausal candidates: {data['historical_noncausal_candidate_count']}",
               f"- same-attempt prior collisions: {data['same_attempt_prior_collision_count']}",
+              "",
+              "### Latest substantial Hunter provider attribution",
+              f"- qualifying attempt found: {str(attribution['qualifying_attempt_found']).lower()}",
+              f"- query count: {attribution['query_count']}",
+              f"- provider calls: {attribution['provider_call_count']}",
+              f"- provider raw results: {attribution['provider_raw_result_count']}",
+              f"- provider cost by currency: {attribution['provider_cost_by_currency']}",
+              f"- retained result items: {attribution['retained_result_item_count']}",
+              f"- retained unique domains: {attribution['retained_unique_domain_count']}",
+              f"- retained primary-provider domains: {attribution['retained_primary_provider_domain_count']}",
+              f"- retained provider-support domains: {attribution['retained_provider_support_domain_count']}",
+              f"- retained corroborated domains: {attribution['retained_corroborated_domain_count']}",
               "- routing changed: no",
               "- steering enabled: no",
               "- promotion activated: no",
               "- raw query text exported: no",
+              "- result URLs/domains exported: no",
               "- trace identifiers exported: no",
           ]
           Path(summary_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
