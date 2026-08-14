@@ -71,6 +71,10 @@ def test_shadow_follow_up_suggestion_and_aggregate_outcome_are_retained(tmp_path
         "persisted_suggestion_count": 1,
     }
     assert observation.metadata["effective_regime"] == "discovery"
+    assert observation.metadata["shadow_action"] == "continue"
+    assert observation.metadata["shadow_action_reason"] == (
+        "shadow_continue_unresolved_gap_with_bounded_follow_up"
+    )
     assert observation.metadata["routing_changed"] is False
     assert observation.metadata["steering_enabled"] is False
     assert observation.metadata["promotion_activated"] is False
@@ -96,4 +100,9 @@ def test_empty_shadow_plan_still_records_decisive_aggregate_observation(tmp_path
         "suggestion_count": 0,
         "persisted_suggestion_count": 0,
     }
+    assert observation.metadata["shadow_action"] == "skip"
+    assert observation.metadata["shadow_action_reason"] == "shadow_no_bounded_follow_up_available"
+    assert observation.metadata["routing_changed"] is False
+    assert observation.metadata["steering_enabled"] is False
+    assert observation.metadata["promotion_activated"] is False
     assert "query_text" not in observation.metadata
