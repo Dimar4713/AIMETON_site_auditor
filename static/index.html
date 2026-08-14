@@ -115,19 +115,19 @@
 
   <section class="panel service-panel" data-service-panel="hunter" hidden>
     <h2>Поиск клиентов</h2>
-    <p class="service-panel__intro">Задайте территорию и отрасль. AIMETON найдёт и предварительно ранжирует кандидатов.</p>
+    <p class="service-panel__intro">Задайте территорию и отрасль, затем выберите тактику поиска. AIMETON найдёт и предварительно ранжирует кандидатов.</p>
     <form id="hunterForm" class="service-form">
       <label>Регион<input id="hunterRegion" minlength="2" maxlength="160" required placeholder="Красноярск"></label>
       <label>Отрасль<input id="hunterIndustry" maxlength="160" placeholder="Стоматология"></label>
-      <label>Режим поиска
+      <label>Тактика поиска
         <select id="hunterSearchRegime" name="search_regime">
-          <option value="auto" selected>Авто — AIMETON определяет по контексту</option>
-          <option value="precision">Лучшее — меньше мусора, сильный shortlist</option>
-          <option value="balanced">Баланс — качество и покрытие</option>
-          <option value="discovery">Редкое / не упустить — просеивать глубже</option>
+          <option value="auto" selected>Авто — AIMETON сам выбирает тактику</option>
+          <option value="precision">🎣 Крупная рыба — самые сильные компании из косяка</option>
+          <option value="balanced">⚖️ Баланс — сильные кандидаты и разумный охват</option>
+          <option value="discovery">✨ Золотой песок — промывать глубже, не упуская редкие находки</option>
         </select>
       </label>
-      <p id="hunterSearchRegimeStatus" class="service-form__wide service-status" role="status" aria-live="polite">Режим: Авто. Сейчас это shadow-настройка: она фиксирует намерение пользователя, но не меняет production routing.</p>
+      <p id="hunterSearchRegimeStatus" class="service-form__wide service-status" role="status" aria-live="polite">Тактика: Авто. Пользователь выбирает цель поиска, а внутренние пороги качества, стоимости и допустимых потерь задаются администратором.</p>
       <button type="submit">Найти компании</button>
     </form>
     <p id="hunterStatus" class="service-status" role="status" aria-live="polite"></p>
@@ -164,7 +164,7 @@
 <script src="/static/business-audit-workspace.js?v=20260808a"></script>
 <script src="/static/workspace-legacy-result-compat.js?v=20260812a"></script>
 <script src="/static/service-catalog.js?v=20260804b"></script>
-<script src="/static/hunter-company-handoff-context.js?v=20260808a"></script>
+<script src="/static/hunter-company-handoff-context.js?v=20260814b"></script>
 <script src="/static/analyze-response-guard.js?v=20260803b"></script>
 <script src="/static/sources.js?v=20260720e"></script>
 </body>
