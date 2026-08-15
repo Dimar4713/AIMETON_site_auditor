@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 
-from app.external_sources import run_enriched_site_analysis
+from app.async_enriched_analysis import run_enriched_site_analysis
 from app.heuristics import heuristic_analysis
 from app.mission_orchestrator import (
     EntryPoint,
@@ -124,7 +124,7 @@ def _trace_ledger_for(path: str) -> SQLiteTraceLedger:
 
 
 def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
-    """Return a small fail-open projection of the durable provider trace.
+    """Return a small fail-open projection of durable search and LLM trace.
 
     This projection intentionally excludes query text, URLs, prompts and raw
     provider payloads. It is safe to expose through the public read-only MCP
@@ -136,6 +136,11 @@ def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
         "provider_calls_finished": 0,
         "provider_failures": 0,
         "active_provider_calls": [],
+        "llm_state": None,
+        "llm_provider": None,
+        "llm_elapsed_seconds": None,
+        "llm_budget_seconds": None,
+        "llm_overdue": False,
     }
     try:
         events = _trace_ledger_for(_trace_db_path()).list_attempt(mission_id, attempt_id)
@@ -147,6 +152,8 @@ def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
     provider_calls_finished = 0
     provider_failures = 0
     active: dict[tuple[int, str], Any] = {}
+    llm_started = None
+    llm_terminal = None
 
     for event in events:
         query_index_raw = event.metadata.get("query_index")
@@ -166,6 +173,11 @@ def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
             provider_calls_finished += 1
             if event.state.value in {"failed", "blocked"}:
                 provider_failures += 1
+        elif event.operation == "llm_started":
+            llm_started = event
+            llm_terminal = None
+        elif event.operation in {"llm_finished", "llm_timeout"}:
+            llm_terminal = event
 
     now = _canonical_now()
     active_calls: list[dict[str, Any]] = []
@@ -190,12 +202,65 @@ def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
             }
         )
 
+    llm_state = None
+    llm_provider = None
+    llm_elapsed_seconds = None
+    llm_budget_seconds = None
+    llm_overdue = False
+    if llm_started is not None:
+        llm_provider = llm_started.provider or "routerai"
+        budget_raw = llm_started.metadata.get("budget_seconds")
+        try:
+            llm_budget_seconds = max(0.0, float(budget_raw))
+        except (TypeError, ValueError):
+            llm_budget_seconds = None
+
+        if llm_terminal is None:
+            llm_state = "running"
+            llm_elapsed_seconds = max(
+                0.0,
+                (now - llm_started.created_at.astimezone(UTC)).total_seconds(),
+            )
+            llm_overdue = bool(
+                llm_budget_seconds
+                and llm_elapsed_seconds > llm_budget_seconds + 2.0
+            )
+        else:
+            llm_state = (
+                "timeout"
+                if llm_terminal.operation == "llm_timeout"
+                else llm_terminal.state.value
+            )
+            if llm_terminal.duration_ms is not None:
+                llm_elapsed_seconds = llm_terminal.duration_ms / 1000.0
+            else:
+                llm_elapsed_seconds = max(
+                    0.0,
+                    (
+                        llm_terminal.created_at.astimezone(UTC)
+                        - llm_started.created_at.astimezone(UTC)
+                    ).total_seconds(),
+                )
+
     return {
         "queries_planned": len(planned_queries),
         "queries_finished": len(finished_queries),
         "provider_calls_finished": provider_calls_finished,
         "provider_failures": provider_failures,
         "active_provider_calls": active_calls[:8],
+        "llm_state": llm_state,
+        "llm_provider": llm_provider,
+        "llm_elapsed_seconds": (
+            round(llm_elapsed_seconds, 1)
+            if llm_elapsed_seconds is not None
+            else None
+        ),
+        "llm_budget_seconds": (
+            round(llm_budget_seconds, 1)
+            if llm_budget_seconds is not None
+            else None
+        ),
+        "llm_overdue": llm_overdue,
     }
 
 
@@ -318,6 +383,18 @@ def _heartbeat_detail(snapshot: dict[str, Any]) -> str:
     finished = int(snapshot.get("queries_finished") or 0)
     provider_finished = int(snapshot.get("provider_calls_finished") or 0)
     failures = int(snapshot.get("provider_failures") or 0)
+    llm_state = snapshot.get("llm_state")
+
+    if llm_state == "running":
+        elapsed = snapshot.get("llm_elapsed_seconds")
+        budget = snapshot.get("llm_budget_seconds")
+        elapsed_text = f"{float(elapsed or 0):.1f}s"
+        budget_text = f"/{float(budget):.0f}s" if budget else ""
+        return (
+            f"Поисковые ветви завершены {finished}/{planned or '?'}. "
+            f"LLM synthesis: {snapshot.get('llm_provider') or 'routerai'} "
+            f"{elapsed_text}{budget_text}."
+        )
 
     if active:
         rendered = ", ".join(
@@ -330,6 +407,14 @@ def _heartbeat_detail(snapshot: dict[str, Any]) -> str:
             f"provider calls завершено {provider_finished}, ошибок {failures}; "
             f"сейчас активны: {rendered}."
         )
+
+    if llm_state in {"timeout", "failed", "degraded"}:
+        return (
+            f"Поиск завершён {finished}/{planned or '?'}. "
+            f"LLM synthesis завершился состоянием {llm_state}; "
+            "готовится резервный результат."
+        )
+
     return (
         f"Внешнее обогащение продолжается: поисковые ветви {finished}/{planned or '?'}, "
         f"provider calls завершено {provider_finished}, ошибок {failures}."
@@ -350,24 +435,40 @@ async def _heartbeat_loop(
         except asyncio.TimeoutError:
             snapshot = _trace_runtime_snapshot(mission_id, analysis_id)
             active = snapshot.get("active_provider_calls") or []
-            overdue = any(bool(item.get("overdue")) for item in active)
+            llm_running = snapshot.get("llm_state") == "running"
+            overdue = (
+                any(bool(item.get("overdue")) for item in active)
+                or bool(snapshot.get("llm_overdue"))
+            )
             _append_event(
                 analysis_id,
-                phase="company_profile_running",
+                phase=(
+                    "llm_synthesis_running"
+                    if llm_running
+                    else "company_profile_running"
+                ),
                 event_code="flow.gap_detected" if overdue else "external.waiting",
                 state="stalled" if overdue else "running",
                 icon_key="alert-triangle" if overdue else "clock",
                 message=(
-                    "Внешний источник превысил ожидаемый бюджет времени."
+                    "Текущий внешний этап превысил ожидаемый бюджет времени."
                     if overdue
-                    else "Продолжается внешнее обогащение профиля."
+                    else (
+                        "RouterAI выполняет аналитический синтез."
+                        if llm_running
+                        else "Продолжается внешнее обогащение профиля."
+                    )
                 ),
                 detail=_heartbeat_detail(snapshot),
                 heartbeat=True,
                 next_action=(
                     "Дождаться bounded deadline или перейти на резервный результат."
                     if overdue
-                    else "Дождаться оставшихся поисковых ветвей и синтеза."
+                    else (
+                        "Дождаться результата LLM или его локального fallback."
+                        if llm_running
+                        else "Дождаться оставшихся поисковых ветвей и синтеза."
+                    )
                 ),
             )
 
