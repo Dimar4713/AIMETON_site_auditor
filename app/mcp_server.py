@@ -9,6 +9,7 @@ from app.company_intelligence import run_company_intelligence
 from app.discovery import run_hunt
 from app.heuristics import heuristic_analysis
 from app.llm import analyze_with_routerai
+from app.mcp_security import browser_mcp_origins
 from app.mission_orchestrator import (
     EntryPoint,
     default_site_mission_request,
@@ -58,6 +59,7 @@ MCP_TRANSPORT_SECURITY = TransportSecuritySettings(
     ],
     allowed_origins=[
         *_DEFAULT_ALLOWED_ORIGINS,
+        *browser_mcp_origins(),
         *_additional_allowlist_values("AIMETON_MCP_ALLOWED_ORIGINS"),
     ],
 )
