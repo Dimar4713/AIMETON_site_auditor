@@ -10,8 +10,13 @@ WRITER = ROOT / "scripts" / "write_stage_convergence_marker.py"
 MCP_SERVER = ROOT / "app" / "mcp_server.py"
 
 
-def test_convergence_workflow_waits_for_all_required_automatic_gates() -> None:
+def test_convergence_workflow_starts_from_deploy_and_waits_for_all_required_gates() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
+    trigger_prefix = text.split("permissions:", 1)[0]
+    assert "workflow_run:" in trigger_prefix
+    assert "- Deploy Stage" in trigger_prefix
+    assert "- Stage Auth Persistence Guard" not in trigger_prefix
+    assert "Automatic convergence requires a successful main Deploy Stage run" in text
     for workflow_name in (
         "Deploy Stage",
         "Configure DaData Stage",
