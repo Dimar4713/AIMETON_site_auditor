@@ -8,7 +8,7 @@ A successful `Deploy Stage` is not by itself proof that the Stage runtime is saf
 
 The immediate DaData race was fixed in #692. This document defines the wider convergence boundary so future agents and acceptance jobs do not infer stability from the deploy job alone.
 
-## Canonical automatic convergence chain
+## Canonical automatic convergence topology
 
 For one exact application SHA, Stage is `converged` only after all of these have succeeded:
 
@@ -16,9 +16,11 @@ For one exact application SHA, Stage is `converged` only after all of these have
 2. `Configure DaData Stage` — parallel post-deploy provider reconcile; unchanged material must be verify-only.
 3. `Runtime Persistence Reconcile` — verifies persistent `/app/data`; performs a controlled recreate only when the invariant is broken.
 4. `Stage Auth Persistence Guard` — verifies persistent auth and live admin login; repairs auth data only when the invariant is broken.
-5. `Stage Convergence` — waits for the four gates above, re-verifies live exact SHA/runtime health/persistence/auth/DaData, and atomically publishes the convergence marker.
+5. `Stage Convergence` — **starts from the successful `Deploy Stage` event in parallel with the post-deploy branches**, waits until DaData + Runtime Persistence + Auth Guard for the same exact SHA have completed successfully, then re-verifies live exact SHA/runtime health/persistence/auth/DaData and atomically publishes the convergence marker.
 
-`Stage Convergence` is the only workflow in this chain allowed to publish the machine-readable `converged` state.
+The convergence workflow is intentionally triggered from `Deploy Stage`, not from `Stage Auth Persistence Guard`. GitHub Actions limits `workflow_run` chains to three levels; the existing `Baseline → Deploy → Runtime Persistence → Auth Guard` path already reaches that limit. Starting convergence from Deploy keeps the workflow within the supported depth while preserving the requirement that marker publication waits for all downstream gates.
+
+`Stage Convergence` is the only workflow in this topology allowed to publish the machine-readable `converged` state.
 
 ## Restart-aware marker
 
@@ -71,6 +73,7 @@ Recommended agent contract:
 | Configure DaData Stage | `workflow_run: Deploy Stage` | conditional recreate only when DaData material changes | required parallel gate |
 | Runtime Persistence Reconcile | `workflow_run: Deploy Stage` | conditional recreate only when persistence invariant is broken | required gate |
 | Stage Auth Persistence Guard | `workflow_run: Runtime Persistence Reconcile` | normally verify-only; may mutate auth DB when invariant is broken | required terminal gate |
+| Stage Convergence | `workflow_run: Deploy Stage` | verify-only; waits for all required gates and publishes marker | admission gate |
 
 ### Explicit/manual repair or provisioning paths
 
