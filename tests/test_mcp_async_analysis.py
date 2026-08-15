@@ -65,14 +65,16 @@ async def test_public_mcp_discovers_async_analysis_tools():
         "analysis.events",
         "start_search_mission",
         "runtime.time",
+        "runtime.convergence",
         "runtime.wait.status",
         "runtime.deadline.check",
         "hunt_companies",
         "company_intelligence",
     } <= set(tools)
-    assert len(tools) == 10
+    assert len(tools) == 11
     assert "poll" in tools["analysis.status"]["inputSchema"]["properties"]
     assert "poll" in tools["analysis.events"]["inputSchema"]["properties"]
+    assert tools["runtime.convergence"]["inputSchema"].get("required", []) == []
 
 
 def test_shared_analysis_runtime_starts_queued_with_canonical_event():

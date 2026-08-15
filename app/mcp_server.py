@@ -24,6 +24,7 @@ from app.mission_orchestrator import (
     record_legacy_site_turn,
 )
 from app.models import CompanyIntelligenceRequest, HuntRequest
+from app.runtime_convergence import runtime_convergence_snapshot
 from app.runtime_time import runtime_time_snapshot
 from app.scraper import fetch_site
 from app.temporal_mcp_tools import deadline_check_payload, wait_status_payload
@@ -78,6 +79,7 @@ mcp = FastMCP(
         "company hunting and source-traceable company intelligence. Unconfirmed mentions must "
         "not be presented as facts. Prefer analysis.start/status/events for browser MCP clients "
         "with short request timeouts; analyze_site remains available for backward compatibility. "
+        "Check runtime.convergence before a long mission when deployment stability matters. "
         "When polling analysis.status or analysis.events repeatedly, increment the poll argument "
         "using next_poll from the previous response so clients that deduplicate identical tool "
         "calls still send each poll."
@@ -214,6 +216,12 @@ async def runtime_time() -> dict:
     return runtime_time_snapshot().model_dump(mode="json")
 
 
+@mcp.tool(name="runtime.convergence")
+async def runtime_convergence() -> dict:
+    """Return restart-aware exact-SHA Stage convergence for long mission admission."""
+    return runtime_convergence_snapshot()
+
+
 @mcp.tool(name="runtime.wait.status")
 async def runtime_wait_status(wait_id: str) -> dict:
     """Read one persisted temporal intent without changing its state."""
@@ -277,6 +285,7 @@ async def security_profile() -> dict:
             "analysis.events",
             "start_search_mission",
             "runtime.time",
+            "runtime.convergence",
             "runtime.wait.status",
             "runtime.deadline.check",
             "hunt_companies",

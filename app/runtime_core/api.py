@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from app.agent_activity_api import router as activity_router
+from app.runtime_convergence import runtime_convergence_snapshot
 from app.runtime_core.models import (
     Event,
     EventCreate,
@@ -43,6 +44,12 @@ def runtime_time() -> RuntimeTimeSnapshot:
 @router.get("/time/health", response_model=RuntimeTimeHealth)
 def runtime_time_status() -> RuntimeTimeHealth:
     return runtime_time_health()
+
+
+@router.get("/convergence")
+def runtime_convergence() -> dict[str, object]:
+    """Return restart-aware Stage convergence without exposing secrets."""
+    return runtime_convergence_snapshot()
 
 
 @router.get("/umel")
