@@ -1,0 +1,30 @@
+name: Ops Recover Infrastructure Runner
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-recover-infrastructure-runner.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    if: github.actor == 'Dimar4713'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    steps:
+      - name: Restart only infrastructure runner service
+        shell: bash
+        run: |
+          set -euo pipefail
+          unit='actions.runner.Dimar4713-aimeton-infrastructure.aimeton-main-server.service'
+          before="$(systemctl show -p MainPID --value "$unit")"
+          sudo systemctl restart "$unit"
+          sleep 3
+          systemctl is-active --quiet "$unit"
+          after="$(systemctl show -p MainPID --value "$unit")"
+          test -n "$after"
+          test "$after" != '0'
+          printf 'infrastructure_runner_recovery=ok\nbefore_pid=%s\nafter_pid=%s\n' "$before" "$after"
