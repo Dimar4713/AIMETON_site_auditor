@@ -7,7 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 import app.analysis_async_api as async_api
 from app.analysis_async_api import AnalysisNotFoundError
-from app.mcp_server import mcp
+from app.mcp_server import analysis_events, analysis_status, mcp
 from app.mission_orchestrator import EntryPoint
 
 
@@ -53,7 +53,10 @@ async def test_public_mcp_discovers_async_analysis_tools():
                 headers=BASE_HEADERS,
             )
             assert listed.status_code == 200, listed.text
-            names = {tool["name"] for tool in listed.json()["result"]["tools"]}
+            tools = {
+                tool["name"]: tool
+                for tool in listed.json()["result"]["tools"]
+            }
 
     assert {
         "analyze_site",
@@ -66,8 +69,10 @@ async def test_public_mcp_discovers_async_analysis_tools():
         "runtime.deadline.check",
         "hunt_companies",
         "company_intelligence",
-    } <= names
-    assert len(names) == 10
+    } <= set(tools)
+    assert len(tools) == 10
+    assert "poll" in tools["analysis.status"]["inputSchema"]["properties"]
+    assert "poll" in tools["analysis.events"]["inputSchema"]["properties"]
 
 
 def test_shared_analysis_runtime_starts_queued_with_canonical_event():
@@ -93,6 +98,41 @@ def test_unknown_analysis_id_is_explicit_and_sanitized():
         async_api.get_analysis_status_payload("missing-analysis")
     with pytest.raises(AnalysisNotFoundError, match="^analysis_not_found$"):
         async_api.get_analysis_events_payload("missing-analysis")
+
+
+@pytest.mark.asyncio
+async def test_poll_sequence_changes_arguments_and_returns_next_poll():
+    started = async_api.create_analysis_runtime(
+        "https://example.com",
+        entry_point=EntryPoint.MCP,
+    )
+
+    first_status = await analysis_status(started.analysis_id, poll=1)
+    second_status = await analysis_status(started.analysis_id, poll=2)
+    first_events = await analysis_events(started.analysis_id, poll=1)
+    second_events = await analysis_events(started.analysis_id, poll=2)
+
+    assert first_status["poll"] == 1
+    assert first_status["next_poll"] == 2
+    assert second_status["poll"] == 2
+    assert second_status["next_poll"] == 3
+    assert first_events["poll"] == 1
+    assert first_events["next_poll"] == 2
+    assert second_events["poll"] == 2
+    assert second_events["next_poll"] == 3
+    assert first_events["events"][0]["event_code"] == "mission.received"
+
+
+@pytest.mark.asyncio
+async def test_negative_poll_is_rejected():
+    started = async_api.create_analysis_runtime(
+        "https://example.com",
+        entry_point=EntryPoint.MCP,
+    )
+    with pytest.raises(ValueError, match="^poll_must_be_non_negative$"):
+        await analysis_status(started.analysis_id, poll=-1)
+    with pytest.raises(ValueError, match="^poll_must_be_non_negative$"):
+        await analysis_events(started.analysis_id, poll=-1)
 
 
 @pytest.mark.asyncio
