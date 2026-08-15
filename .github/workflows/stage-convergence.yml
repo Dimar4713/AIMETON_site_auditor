@@ -3,7 +3,7 @@ name: Stage Convergence
 on:
   workflow_run:
     workflows:
-      - Stage Auth Persistence Guard
+      - Deploy Stage
     types:
       - completed
   workflow_dispatch:
@@ -56,8 +56,13 @@ jobs:
             }
             if (context.eventName !== 'workflow_dispatch') {
               const trigger = context.payload.workflow_run;
-              if (!trigger || trigger.conclusion !== 'success' || trigger.head_branch !== 'main') {
-                core.setFailed('Automatic convergence requires a successful main Stage Auth Persistence Guard run');
+              if (
+                !trigger ||
+                trigger.name !== 'Deploy Stage' ||
+                trigger.conclusion !== 'success' ||
+                trigger.head_branch !== 'main'
+              ) {
+                core.setFailed('Automatic convergence requires a successful main Deploy Stage run');
                 return;
               }
             }
@@ -92,11 +97,7 @@ jobs:
               );
               const dadata = latest(afterDeploy('Configure DaData Stage'));
               const persistence = latest(afterDeploy('Runtime Persistence Reconcile'));
-              let auth = latest(afterDeploy('Stage Auth Persistence Guard'));
-              if (context.eventName !== 'workflow_dispatch') {
-                const trigger = context.payload.workflow_run;
-                auth = trigger && trigger.conclusion === 'success' ? trigger : auth;
-              }
+              const auth = latest(afterDeploy('Stage Auth Persistence Guard'));
 
               if (dadata && persistence && auth) {
                 core.setOutput('sha', targetSha);
