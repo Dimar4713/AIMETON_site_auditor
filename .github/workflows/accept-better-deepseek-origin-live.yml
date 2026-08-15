@@ -1,0 +1,55 @@
+name: Better DeepSeek Origin Live Acceptance
+
+on:
+  push:
+    branches:
+      - fix/better-deepseek-extension-origin
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify live Stage accepts official Better DeepSeek extension origin
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          origin='chrome-extension://aabiopennjmopfippagcalmkdjlepdhh'
+          url='https://stage-auditor.aimeton.ru/mcp/'
+          payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"better-deepseek-live-acceptance","version":"1"}}}'
+
+          mkdir -p evidence
+          status="$(curl --silent --show-error --max-time 30 \
+            --dump-header evidence/headers.txt \
+            --output evidence/body.txt \
+            --write-out '%{http_code}' \
+            --request POST "$url" \
+            --header "Origin: $origin" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data "$payload")"
+
+          echo "status=$status"
+          cat evidence/headers.txt
+          cat evidence/body.txt
+
+          [[ "$status" == "200" ]] || {
+            echo "Expected MCP initialize 200, got $status" >&2
+            exit 1
+          }
+          grep -Fqi "access-control-allow-origin: $origin" evidence/headers.txt
+          ! grep -Fqi 'Invalid Origin' evidence/body.txt
+          grep -Fq '"jsonrpc"' evidence/body.txt
+          echo 'Better DeepSeek official extension Origin accepted by live Stage'
+
+      - name: Upload live acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: better-deepseek-origin-live-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
