@@ -16,11 +16,17 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 LOGGER = logging.getLogger("aimeton.mcp.security")
 
-DEFAULT_BROWSER_MCP_ORIGINS = ("https://chat.deepseek.com",)
+BETTER_DEEPSEEK_CHROME_EXTENSION_ORIGIN = (
+    "chrome-extension://aabiopennjmopfippagcalmkdjlepdhh"
+)
+DEFAULT_BROWSER_MCP_ORIGINS = (
+    "https://chat.deepseek.com",
+    BETTER_DEEPSEEK_CHROME_EXTENSION_ORIGIN,
+)
 _CORS_ALLOW_METHODS = "GET, POST, DELETE, OPTIONS"
 _CORS_ALLOW_HEADERS = (
     "Accept, Authorization, Content-Type, Last-Event-ID, "
-    "MCP-Protocol-Version, MCP-Session-Id, X-Request-ID"
+    "MCP-Protocol-Version, MCP-Session-Id, X-API-Key, X-Request-ID"
 )
 _CORS_EXPOSE_HEADERS = "MCP-Session-Id, X-Request-ID"
 
