@@ -67,6 +67,12 @@ def build_marker(
             "stage_auth_persistence_guard": True,
             "runtime_exact_sha": True,
             "runtime_instance_bound": True,
+            "runtime_health": True,
+            "runtime_persistent_mount": True,
+            "runtime_db_integrity": True,
+            "auth_db_integrity": True,
+            "active_admin_present": True,
+            "dadata_health": True,
         },
         "secret_values_exposed": False,
     }
