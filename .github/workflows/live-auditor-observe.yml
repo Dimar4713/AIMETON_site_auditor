@@ -1,0 +1,65 @@
+name: Live Auditor Observe
+
+on:
+  push:
+    branches:
+      - ops/live-auditor-observe-20260815
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - stage
+      - auditor
+    timeout-minutes: 5
+    steps:
+      - name: Read-only live Stage snapshot
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "snapshot_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "-- containers --"
+          docker ps --filter name=aimeton-auditor --format 'name={{.Names}} image={{.Image}} status={{.Status}}'
+
+          mapfile -t candidates < <(docker ps --filter name=aimeton-auditor --format '{{.Names}}')
+          app=""
+          for c in "${candidates[@]}"; do
+            if docker inspect "$c" --format '{{json .Config.Cmd}} {{json .Config.Entrypoint}}' 2>/dev/null | grep -Eqi 'uvicorn|gunicorn|fastapi'; then
+              app="$c"
+              break
+            fi
+          done
+          if [[ -z "$app" ]]; then
+            for c in "${candidates[@]}"; do
+              if [[ "$c" == *app* || "$c" == *api* ]]; then app="$c"; break; fi
+            done
+          fi
+          [[ -n "$app" ]] || { echo 'app_container=not_found'; exit 1; }
+          echo "app_container=$app"
+
+          echo "-- resource snapshot --"
+          docker stats --no-stream --format 'name={{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} net={{.NetIO}} pids={{.PIDs}}' "$app"
+          echo "established_tcp_count=$(docker exec "$app" sh -lc 'if command -v ss >/dev/null 2>&1; then ss -tn state established 2>/dev/null | tail -n +2 | wc -l; else echo unavailable; fi' 2>/dev/null || echo unavailable)"
+
+          echo "-- process snapshot --"
+          docker top "$app" -eo pid,ppid,etime,pcpu,pmem,args 2>/dev/null | head -n 30 || true
+
+          echo "-- health --"
+          curl --fail --silent --show-error --max-time 10 https://stage-auditor.aimeton.ru/api/health || true
+          echo
+
+          echo "-- sanitized relevant logs, last 30m --"
+          docker logs --since 30m "$app" 2>&1 \
+            | tail -n 2000 \
+            | grep -Eai 'mcp|analy|aimeton\.ru|routerai|provider|timeout|timed out|error|exception|traceback|POST|GET' \
+            | sed -E 's/(Authorization:?[[:space:]]*|Bearer[[:space:]]+)[A-Za-z0-9._~+\/=:-]+/\1[REDACTED]/Ig' \
+            | sed -E 's/([?&](token|key|api_key|access_token)=)[^&[:space:]]+/\1[REDACTED]/Ig' \
+            | tail -n 160 || true
+
+          echo "-- sqlite runtime file metadata only --"
+          docker exec "$app" sh -lc 'find /app/data -maxdepth 1 -type f \( -name "*runtime*.sqlite3" -o -name "*activity*.sqlite3" \) -printf "%f size=%s mtime=%TY-%Tm-%TdT%TH:%TM:%TSZ\n" 2>/dev/null | sort' || true
