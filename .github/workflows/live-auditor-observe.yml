@@ -24,7 +24,7 @@ jobs:
           set -Eeuo pipefail
           echo "snapshot_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           echo "-- containers --"
-          docker ps --filter name=aimeton-auditor --format 'name={{.Names}} image={{.Image}} status={{.Status}}'
+          docker ps --format 'name={{.Names}} image={{.Image}} status={{.Status}}' | grep -E 'aimeton|auditor|caddy|searx|valkey' || true
 
           mapfile -t candidates < <(docker ps --filter name=aimeton-auditor --format '{{.Names}}')
           app=""
@@ -44,7 +44,40 @@ jobs:
 
           echo "-- resource snapshot --"
           docker stats --no-stream --format 'name={{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} net={{.NetIO}} pids={{.PIDs}}' "$app"
-          echo "established_tcp_count=$(docker exec "$app" sh -lc 'if command -v ss >/dev/null 2>&1; then ss -tn state established 2>/dev/null | tail -n +2 | wc -l; else echo unavailable; fi' 2>/dev/null || echo unavailable)"
+
+          echo "-- socket state summary; no addresses emitted --"
+          docker exec "$app" python - <<'PY' || true
+          from collections import Counter
+          from pathlib import Path
+
+          states = {
+              '01': 'ESTABLISHED', '02': 'SYN_SENT', '03': 'SYN_RECV', '04': 'FIN_WAIT1',
+              '05': 'FIN_WAIT2', '06': 'TIME_WAIT', '07': 'CLOSE', '08': 'CLOSE_WAIT',
+              '09': 'LAST_ACK', '0A': 'LISTEN', '0B': 'CLOSING'
+          }
+          total = Counter()
+          inbound_5000 = Counter()
+          outbound_443 = Counter()
+          for filename in ('/proc/net/tcp', '/proc/net/tcp6'):
+              p = Path(filename)
+              if not p.exists():
+                  continue
+              for line in p.read_text().splitlines()[1:]:
+                  parts = line.split()
+                  if len(parts) < 4:
+                      continue
+                  local_port = int(parts[1].split(':')[1], 16)
+                  remote_port = int(parts[2].split(':')[1], 16)
+                  state = states.get(parts[3], parts[3])
+                  total[state] += 1
+                  if local_port == 5000:
+                      inbound_5000[state] += 1
+                  if remote_port == 443:
+                      outbound_443[state] += 1
+          print('tcp_states=' + ','.join(f'{k}:{v}' for k,v in sorted(total.items())))
+          print('local_port_5000=' + ','.join(f'{k}:{v}' for k,v in sorted(inbound_5000.items())))
+          print('outbound_remote_443=' + ','.join(f'{k}:{v}' for k,v in sorted(outbound_443.items())))
+          PY
 
           echo "-- process snapshot --"
           docker top "$app" -eo pid,ppid,etime,pcpu,pmem,args 2>/dev/null | head -n 30 || true
@@ -53,7 +86,7 @@ jobs:
           curl --fail --silent --show-error --max-time 10 https://stage-auditor.aimeton.ru/api/health || true
           echo
 
-          echo "-- sanitized relevant logs, last 30m --"
+          echo "-- sanitized relevant app logs, last 30m --"
           docker logs --since 30m "$app" 2>&1 \
             | tail -n 2000 \
             | grep -Eai 'mcp|analy|aimeton\.ru|routerai|provider|timeout|timed out|error|exception|traceback|POST|GET' \
