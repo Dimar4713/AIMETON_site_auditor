@@ -1,0 +1,57 @@
+name: RouterAI Input Metrics Observe
+
+on:
+  push:
+    branches:
+      - ops/routerai-input-observe-20260816
+    paths:
+      - .github/workflows/routerai-input-observe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 3
+    steps:
+      - name: Read allowlisted RouterAI metrics from live Runtime Core
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i aimeton-auditor python - <<'PY'
+          import json
+          import sqlite3
+
+          mission_id = "mission_3c2246ba6e624bdcadfed458c0a7d92d"
+          db = sqlite3.connect("/app/data/runtime-core.sqlite3")
+          row = db.execute(
+              """
+              SELECT mission_id, attempt_id, metadata_json, created_at
+              FROM mission_trace_events
+              WHERE mission_id = ? AND operation = 'llm_started'
+              ORDER BY created_at DESC
+              LIMIT 1
+              """,
+              (mission_id,),
+          ).fetchone()
+          if row is None:
+              raise SystemExit("llm_started_trace_not_found")
+          metadata = json.loads(row[2])
+          allowed = [
+              "model",
+              "official_text_chars",
+              "external_context_chars",
+              "external_source_count",
+              "schema_chars",
+              "dynamic_input_chars",
+              "budget_seconds",
+          ]
+          metrics = {key: metadata.get(key) for key in allowed}
+          print(json.dumps({
+              "mission_id": row[0],
+              "created_at": row[3],
+              "metrics": metrics,
+          }, ensure_ascii=False, sort_keys=True))
+          PY
