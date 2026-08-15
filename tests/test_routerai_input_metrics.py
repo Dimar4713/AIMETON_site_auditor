@@ -20,6 +20,14 @@ def test_routerai_input_metrics_are_bounded_and_content_free() -> None:
 
     metrics = routerai_input_metrics(text, sources)
 
+    assert set(metrics) == {
+        "model",
+        "official_text_chars",
+        "external_context_chars",
+        "external_source_count",
+        "schema_chars",
+        "dynamic_input_chars",
+    }
     assert metrics["official_text_chars"] == 30000
     assert 0 < metrics["external_context_chars"] <= 52000
     assert metrics["external_source_count"] == 2
