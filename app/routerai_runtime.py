@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from functools import lru_cache
@@ -8,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from app.llm import analyze_with_routerai
+from app.llm import MODEL, analyze_with_routerai
 from app.models import SiteAnalysis
 from app.trace_context import current_trace_identity
 from app.trace_ledger import TraceEventCreate, TraceState
@@ -42,6 +43,31 @@ def routerai_analysis_timeout_seconds() -> float:
     )
 
 
+def routerai_input_metrics(
+    text: str,
+    external_sources: list[dict] | None,
+) -> dict[str, Any]:
+    """Return safe aggregate request-size metrics without retaining prompt content."""
+    sources = external_sources or []
+    official_text_chars = len(text[:30000])
+    external_context_chars = len(
+        json.dumps(sources, ensure_ascii=False, indent=2)[:52000]
+    )
+    schema_chars = len(
+        json.dumps(SiteAnalysis.model_json_schema(), ensure_ascii=False)
+    )
+    return {
+        "model": MODEL[:160],
+        "official_text_chars": official_text_chars,
+        "external_context_chars": external_context_chars,
+        "external_source_count": len(sources),
+        "schema_chars": schema_chars,
+        "dynamic_input_chars": (
+            official_text_chars + external_context_chars + schema_chars
+        ),
+    }
+
+
 def _trace_db_path() -> str:
     return os.getenv(
         "AIMETON_TRACE_DB",
@@ -63,6 +89,7 @@ def _trace(
     duration_ms: int | None = None,
     budget_seconds: float,
     error_type: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Append a safe LLM span event when a mission trace identity is bound."""
     identity = current_trace_identity()
@@ -72,6 +99,8 @@ def _trace(
         "budget_seconds": round(budget_seconds, 3),
         "model_family": "routerai",
     }
+    if extra_metadata:
+        metadata.update(extra_metadata)
     if error_type:
         metadata["error_type"] = error_type[:128]
     try:
@@ -107,6 +136,7 @@ async def run_bounded_routerai_analysis(
 ) -> SiteAnalysis:
     """Run one RouterAI analysis with a hard wall-clock deadline and trace span."""
     budget_seconds = routerai_analysis_timeout_seconds()
+    input_metrics = routerai_input_metrics(text, external_sources)
     started = time.perf_counter()
     _trace(
         operation="llm_started",
@@ -114,6 +144,7 @@ async def run_bounded_routerai_analysis(
         reason_code="llm_request_inflight",
         summary="RouterAI analytical synthesis started",
         budget_seconds=budget_seconds,
+        extra_metadata=input_metrics,
     )
     try:
         result = await asyncio.wait_for(
@@ -130,6 +161,7 @@ async def run_bounded_routerai_analysis(
             duration_ms=duration_ms,
             budget_seconds=budget_seconds,
             error_type=type(exc).__name__,
+            extra_metadata=input_metrics,
         )
         raise TimeoutError("routerai_analysis_deadline_exceeded") from exc
     except Exception as exc:
@@ -142,6 +174,7 @@ async def run_bounded_routerai_analysis(
             duration_ms=duration_ms,
             budget_seconds=budget_seconds,
             error_type=type(exc).__name__,
+            extra_metadata=input_metrics,
         )
         raise
 
@@ -153,5 +186,6 @@ async def run_bounded_routerai_analysis(
         summary="RouterAI analytical synthesis completed",
         duration_ms=duration_ms,
         budget_seconds=budget_seconds,
+        extra_metadata=input_metrics,
     )
     return result
