@@ -1,4 +1,4 @@
-name: Force Cancel BIS Ghost Run
+name: Force Cancel BIS Stalled CI Run
 
 on:
   pull_request:
@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 5
     env:
       PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
-      TARGET_RUN_ID: '31870572999'
+      TARGET_RUN_ID: '31870855628'
     steps:
       - name: Force-cancel superseded BIS CI run
         shell: bash
