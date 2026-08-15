@@ -1,0 +1,16 @@
+name: Live Progress MCP Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify live progress and bounded completion from outside Stage
+        run: python3 scripts/accept_live_progress_mcp.py
