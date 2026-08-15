@@ -46,7 +46,7 @@ jobs:
           docker stats --no-stream --format 'name={{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} net={{.NetIO}} pids={{.PIDs}}' "$app"
 
           echo "-- socket state summary; no addresses emitted --"
-          docker exec "$app" python - <<'PY' || true
+          docker exec -i "$app" python - <<'PY' || true
           from collections import Counter
           from pathlib import Path
 
