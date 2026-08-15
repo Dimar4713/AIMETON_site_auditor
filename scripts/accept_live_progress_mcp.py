@@ -11,7 +11,7 @@ ORIGIN = "chrome-extension://aabiopennjmopfippagcalmkdjlepdhh"
 PROTOCOL_VERSION = "2025-06-18"
 TARGET = "https://aimeton.ru"
 REQUEST_TIMEOUT = 25
-MISSION_DEADLINE = 225
+MISSION_DEADLINE = 140
 POLL_SECONDS = 4
 
 
@@ -91,7 +91,7 @@ def main() -> None:
             "params": {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "aimeton-bds-live-progress-acceptance", "version": "1"},
+                "clientInfo": {"name": "aimeton-bds-live-progress-acceptance", "version": "2"},
             },
         }
     )
@@ -117,6 +117,9 @@ def main() -> None:
     observed_heartbeat = False
     observed_stalled = False
     observed_degraded = False
+    observed_llm_running = False
+    observed_llm_timeout = False
+    observed_llm_succeeded = False
     max_queries_planned = 0
     max_queries_finished = 0
     snapshots: list[dict[str, Any]] = []
@@ -147,17 +150,23 @@ def main() -> None:
         planned = int(progress.get("queries_planned") or 0)
         finished = int(progress.get("queries_finished") or 0)
         active = progress.get("active_provider_calls") or []
+        llm_state = progress.get("llm_state")
         max_queries_planned = max(max_queries_planned, planned)
         max_queries_finished = max(max_queries_finished, finished)
         observed_progress = observed_progress or planned > 0 or finished > 0
         observed_active_provider = observed_active_provider or bool(active)
+        observed_llm_running = observed_llm_running or llm_state == "running"
+        observed_llm_timeout = observed_llm_timeout or llm_state == "timeout"
+        observed_llm_succeeded = observed_llm_succeeded or llm_state == "succeeded"
 
         events = last_events.get("events") or []
         codes = {event.get("event_code") for event in events}
         states = {event.get("state") for event in events}
+        phases = {event.get("phase") for event in events}
         observed_heartbeat = observed_heartbeat or "external.waiting" in codes
         observed_stalled = observed_stalled or "stalled" in states or "flow.gap_detected" in codes
         observed_degraded = observed_degraded or "service.degraded" in codes
+        observed_llm_running = observed_llm_running or "llm_synthesis_running" in phases
 
         snapshots.append(
             {
@@ -167,6 +176,10 @@ def main() -> None:
                 "phase": last_status.get("phase"),
                 "queries": f"{finished}/{planned}",
                 "active": active[:4],
+                "llm_state": llm_state,
+                "llm_elapsed_seconds": progress.get("llm_elapsed_seconds"),
+                "llm_budget_seconds": progress.get("llm_budget_seconds"),
+                "llm_overdue": progress.get("llm_overdue"),
                 "event_count": last_events.get("event_count"),
                 "status_s": round(status_seconds, 3),
                 "events_s": round(events_seconds, 3),
@@ -179,6 +192,11 @@ def main() -> None:
         time.sleep(POLL_SECONDS)
 
     elapsed_total = time.monotonic() - started_at
+    final_progress = last_status.get("progress") or {}
+    final_llm_state = final_progress.get("llm_state")
+    observed_llm_timeout = observed_llm_timeout or final_llm_state == "timeout"
+    observed_llm_succeeded = observed_llm_succeeded or final_llm_state == "succeeded"
+
     evidence = {
         "endpoint": URL,
         "origin": ORIGIN,
@@ -197,9 +215,12 @@ def main() -> None:
         "observed_heartbeat": observed_heartbeat,
         "observed_stalled": observed_stalled,
         "observed_degraded": observed_degraded,
+        "observed_llm_running": observed_llm_running,
+        "observed_llm_timeout": observed_llm_timeout,
+        "observed_llm_succeeded": observed_llm_succeeded,
         "max_queries_planned": max_queries_planned,
         "max_queries_finished": max_queries_finished,
-        "final_progress": last_status.get("progress"),
+        "final_progress": final_progress,
         "snapshots": snapshots,
     }
     print(json.dumps(evidence, ensure_ascii=False, indent=2))
@@ -208,6 +229,9 @@ def main() -> None:
     assert last_status.get("result") is not None, evidence
     assert observed_progress, evidence
     assert max_queries_planned > 0, evidence
+    assert observed_llm_running or final_llm_state in {"succeeded", "timeout", "failed"}, evidence
+    # The dedicated RouterAI budget must prevent another ~185 s field run.
+    assert elapsed_total < 120, evidence
     # A mission that lasts beyond one heartbeat interval must visibly report life.
     if elapsed_total >= 20:
         assert observed_heartbeat or observed_stalled or observed_degraded, evidence
