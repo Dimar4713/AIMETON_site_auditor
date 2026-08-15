@@ -1,0 +1,165 @@
+name: Durable Analysis Restart Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact converged Stage application SHA
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: aimeton-durable-analysis-restart-acceptance
+  cancel-in-progress: false
+
+env:
+  STAGE_URL: https://stage-auditor.aimeton.ru
+  CONTAINER: aimeton-auditor
+
+jobs:
+  start-live-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    outputs:
+      analysis_id: ${{ steps.start.outputs.analysis_id }}
+      mission_id: ${{ steps.start.outputs.mission_id }}
+      next_poll: ${{ steps.start.outputs.next_poll }}
+      old_runtime_instance: ${{ steps.start.outputs.old_runtime_instance }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start external MCP analysis and wait for active LLM phase
+        id: start
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          python3 scripts/accept_durable_analysis_restart.py start \
+            --expected-sha "$EXPECTED_SHA"
+
+  controlled-restart:
+    needs: start-live-analysis
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 5
+    steps:
+      - name: Prove analysis is active immediately before restart
+        shell: bash
+        env:
+          ANALYSIS_ID: ${{ needs.start-live-analysis.outputs.analysis_id }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$ANALYSIS_ID"
+          health="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/health")"
+          python3 - "$health" "$EXPECTED_SHA" <<'PY'
+          import json,sys
+          payload=json.loads(sys.argv[1])
+          assert payload.get('status') == 'ok', payload
+          assert payload.get('deployment_sha') == sys.argv[2], payload
+          PY
+
+      - name: Perform exactly one controlled application restart
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker restart "$CONTAINER" >/dev/null
+          deadline=$((SECONDS + 180))
+          while (( SECONDS < deadline )); do
+            state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+            if [[ "$state" == healthy ]]; then
+              break
+            fi
+            if [[ "$state" == unhealthy || "$state" == exited || "$state" == dead ]]; then
+              echo "container_state=$state" >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          test "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" = healthy
+          curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/health" >/dev/null
+
+  verify-durable-identity:
+    needs: [start-live-analysis, controlled-restart]
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the same analysis id after restart through external MCP
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          ANALYSIS_ID: ${{ needs.start-live-analysis.outputs.analysis_id }}
+          MISSION_ID: ${{ needs.start-live-analysis.outputs.mission_id }}
+          NEXT_POLL: ${{ needs.start-live-analysis.outputs.next_poll }}
+          OLD_RUNTIME_INSTANCE: ${{ needs.start-live-analysis.outputs.old_runtime_instance }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/accept_durable_analysis_restart.py verify \
+            --expected-sha "$EXPECTED_SHA" \
+            --analysis-id "$ANALYSIS_ID" \
+            --mission-id "$MISSION_ID" \
+            --poll "$NEXT_POLL" \
+            --old-runtime-instance "$OLD_RUNTIME_INSTANCE"
+
+  restore-convergence:
+    if: always() && needs.controlled-restart.result == 'success'
+    needs: [start-live-analysis, controlled-restart, verify-durable-identity]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Dispatch canonical Stage reconvergence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -Eeuo pipefail
+          body="$(python3 - "$EXPECTED_SHA" <<'PY'
+          import json,sys
+          print(json.dumps({'ref':'main','inputs':{'commit_sha':sys.argv[1]}}))
+          PY
+          )"
+          curl --fail --silent --show-error --max-time 30 \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            --data "$body" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/stage-convergence.yml/dispatches"
+
+      - name: Wait until the exact-SHA runtime is converged again
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -Eeuo pipefail
+          deadline=$((SECONDS + 360))
+          while (( SECONDS < deadline )); do
+            snapshot="$(curl --silent --show-error --max-time 20 "$STAGE_URL/api/runtime/convergence" || true)"
+            if python3 - "$snapshot" "$EXPECTED_SHA" <<'PY'
+          import json,sys
+          try:
+              payload=json.loads(sys.argv[1])
+          except Exception:
+              raise SystemExit(1)
+          if (
+              payload.get('state') == 'converged'
+              and payload.get('deployment_sha') == sys.argv[2]
+              and payload.get('marker_deployment_sha') == sys.argv[2]
+              and payload.get('marker_error') is None
+              and payload.get('secrets_exposed') is False
+          ):
+              raise SystemExit(0)
+          raise SystemExit(1)
+          PY
+            then
+              echo "$snapshot"
+              exit 0
+            fi
+            sleep 8
+          done
+          echo "Stage did not reconverge in time" >&2
+          exit 1
