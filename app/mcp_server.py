@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from app.analysis_async_api import (
+    AnalysisNotFoundError,
+    create_analysis_runtime,
+    get_analysis_events_payload,
+    get_analysis_status_payload,
+    run_analysis_runtime,
+)
 from app.company_intelligence import run_company_intelligence
 from app.discovery import run_hunt
 from app.heuristics import heuristic_analysis
@@ -16,10 +25,14 @@ from app.mission_orchestrator import (
     get_mission_orchestrator,
     record_legacy_site_turn,
 )
-from app.models import CompanyIntelligenceRequest, HuntRequest
+from app.models import AnalyzeRequest, CompanyIntelligenceRequest, HuntRequest
 from app.runtime_time import runtime_time_snapshot
 from app.scraper import fetch_site
 from app.temporal_mcp_tools import deadline_check_payload, wait_status_payload
+
+
+_LOGGER = logging.getLogger(__name__)
+_MCP_ANALYSIS_TASKS: set[asyncio.Task[None]] = set()
 
 
 def _additional_allowlist_values(variable_name: str) -> list[str]:
@@ -30,6 +43,22 @@ def _additional_allowlist_values(variable_name: str) -> list[str]:
         if value and "*" not in value:
             values.append(value)
     return values
+
+
+def _release_mcp_analysis_task(task: asyncio.Task[None]) -> None:
+    """Keep fire-and-observe tasks alive and consume unexpected task exceptions."""
+    _MCP_ANALYSIS_TASKS.discard(task)
+    if task.cancelled():
+        return
+    try:
+        error = task.exception()
+    except asyncio.CancelledError:
+        return
+    if error is not None:
+        _LOGGER.error(
+            "MCP async analysis task failed unexpectedly: %s",
+            type(error).__name__,
+        )
 
 
 _DEFAULT_ALLOWED_HOSTS = [
@@ -68,7 +97,9 @@ mcp = FastMCP(
     "AIMETON Site Auditor",
     instructions=(
         "Public read-only economic intelligence profile: site analysis, company hunting and "
-        "source-traceable company intelligence. Unconfirmed mentions must not be presented as facts."
+        "source-traceable company intelligence. Use the analysis.* lifecycle for long site "
+        "analysis so clients can receive mission identity immediately and poll progress. "
+        "Unconfirmed mentions must not be presented as facts."
     ),
     stateless_http=True,
     json_response=True,
@@ -91,7 +122,7 @@ admin_mcp = FastMCP(
 
 @mcp.tool()
 async def analyze_site(url: str) -> dict:
-    """Analyze one public website and propose commercially useful AI solutions."""
+    """Analyze one public website synchronously for backward compatibility."""
     orchestrator = get_mission_orchestrator()
     mission = orchestrator.create_mission(
         default_site_mission_request(url),
@@ -132,6 +163,60 @@ async def analyze_site(url: str) -> dict:
             "analysis_id": mission.contract.analysis_id,
         }
     ).model_dump(mode="json")
+
+
+@mcp.tool(name="analysis.start")
+async def analysis_start(url: str) -> dict:
+    """Queue a site analysis and immediately return canonical mission/analysis identity."""
+    source_url = str(AnalyzeRequest(url=url).url).strip()
+    started = create_analysis_runtime(
+        source_url,
+        entry_point=EntryPoint.MCP,
+    )
+    task = asyncio.create_task(
+        run_analysis_runtime(
+            source_url=source_url,
+            mission_id=started.mission_id,
+            analysis_id=started.analysis_id,
+        ),
+        name=f"mcp-analysis-{started.analysis_id}",
+    )
+    _MCP_ANALYSIS_TASKS.add(task)
+    task.add_done_callback(_release_mcp_analysis_task)
+    return started.model_dump(mode="json")
+
+
+@mcp.tool(name="analysis.status")
+async def analysis_status(analysis_id: str) -> dict:
+    """Return the current state and completed result for one queued analysis."""
+    try:
+        payload = get_analysis_status_payload(analysis_id)
+    except AnalysisNotFoundError:
+        return {
+            "found": False,
+            "analysis_id": analysis_id,
+            "error": "analysis_not_found",
+        }
+    return {"found": True, **payload}
+
+
+@mcp.tool(name="analysis.events")
+async def analysis_events(analysis_id: str) -> dict:
+    """Return the canonical progress-event snapshot for one queued analysis."""
+    try:
+        events = get_analysis_events_payload(analysis_id)
+    except AnalysisNotFoundError:
+        return {
+            "found": False,
+            "analysis_id": analysis_id,
+            "error": "analysis_not_found",
+            "events": [],
+        }
+    return {
+        "found": True,
+        "analysis_id": analysis_id,
+        "events": events,
+    }
 
 
 @mcp.tool()
@@ -208,6 +293,9 @@ async def security_profile() -> dict:
         "authentication": "bearer-token",
         "public_tools": [
             "analyze_site",
+            "analysis.start",
+            "analysis.status",
+            "analysis.events",
             "start_search_mission",
             "runtime.time",
             "runtime.wait.status",
