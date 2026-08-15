@@ -514,6 +514,23 @@ async def _run_analysis(
             detail="Проверьте адрес сайта и повторите запуск.",
             next_action="Повторить анализ после проверки доступности сайта.",
         )
+    except Exception as exc:
+        record_legacy_site_turn(
+            orchestrator,
+            mission_id,
+            final_url=final_url,
+            succeeded=False,
+        )
+        _append_event(
+            analysis_id,
+            phase="failed",
+            event_code="mission.failed",
+            state="failed",
+            icon_key="alert-triangle",
+            message="Анализ остановлен внутренней ошибкой.",
+            detail=f"Санитизированный тип ошибки: {type(exc).__name__}.",
+            next_action="Проверить trace по mission_id и повторить после устранения причины.",
+        )
     finally:
         if heartbeat_stop is not None:
             heartbeat_stop.set()
