@@ -8,6 +8,7 @@ from app.external_sources import (
 )
 from app.heuristics import heuristic_analysis
 from app.models import SiteAnalysis
+from app.routerai_context import compact_routerai_sources
 from app.routerai_runtime import run_bounded_routerai_analysis
 
 
@@ -16,12 +17,11 @@ async def run_enriched_site_analysis(
     title: str,
     text: str,
 ) -> SiteAnalysis:
-    """Async-analysis variant with a bounded, observable LLM synthesis step.
+    """Async-analysis variant with bounded, observable LLM synthesis.
 
-    The external search/evidence path remains identical to the established
-    implementation. Only the final RouterAI synthesis is wrapped in its own
-    deadline/span so an MCP mission does not consume the whole global mission
-    budget waiting on one LLM call.
+    Search and the authoritative source model remain unchanged. Only the LLM
+    projection of discovery hints is compacted before RouterAI synthesis so a
+    long OSINT tail does not dominate the model input budget.
     """
     company_hint = title.split("—")[0].split("|")[0].strip() or _host(url)
     anchors = extract_identity_anchors(text, url)
@@ -32,12 +32,13 @@ async def run_enriched_site_analysis(
         max_sources=60,
         anchors=anchors,
     )
+    llm_sources = compact_routerai_sources(to_llm_sources(external_sources))
     try:
         analysis = await run_bounded_routerai_analysis(
             url,
             title,
             text,
-            to_llm_sources(external_sources),
+            llm_sources,
         )
     except Exception as exc:
         analysis = heuristic_analysis(url, title, text)
