@@ -1,0 +1,127 @@
+name: Controlled Convergence Restart Acceptance
+
+on:
+  push:
+    branches:
+      - ops/convergence-restart-acceptance-20260815
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: aimeton-controlled-convergence-restart
+  cancel-in-progress: false
+
+env:
+  STAGE_URL: https://stage-auditor.aimeton.ru
+  CONTAINER: aimeton-auditor
+  EXPECTED_SHA: 1b1f9a2b69106b0a7da56af4d8a6c114f700c672
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    steps:
+      - name: Require a converged exact-SHA runtime before restart
+        id: before
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          snapshot="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/runtime/convergence")"
+          python3 - "$snapshot" "$EXPECTED_SHA" <<'PY'
+          import json, re, sys
+          payload=json.loads(sys.argv[1])
+          assert payload.get('state') == 'converged', payload
+          assert payload.get('deployment_sha') == sys.argv[2], payload
+          instance=payload.get('runtime_instance_id') or ''
+          assert re.fullmatch(r'[0-9a-f]{32}', instance), payload
+          assert payload.get('marker_error') is None, payload
+          assert payload.get('secrets_exposed') is False, payload
+          print(f"instance={instance}")
+          PY
+          old_instance="$(python3 - "$snapshot" <<'PY'
+          import json,sys
+          print(json.loads(sys.argv[1])['runtime_instance_id'])
+          PY
+          )"
+          echo "old_instance=$old_instance" >> "$GITHUB_OUTPUT"
+
+      - name: Perform one controlled Stage restart
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker restart "$CONTAINER" >/dev/null
+          deadline=$((SECONDS + 180))
+          while (( SECONDS < deadline )); do
+            state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+            if [[ "$state" == healthy ]]; then
+              break
+            fi
+            if [[ "$state" == unhealthy || "$state" == exited || "$state" == dead ]]; then
+              echo "container_state=$state" >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          test "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")" = healthy
+          health="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/health")"
+          python3 - "$health" "$EXPECTED_SHA" <<'PY'
+          import json,sys
+          payload=json.loads(sys.argv[1])
+          assert payload.get('status') == 'ok', payload
+          assert payload.get('deployment_sha') == sys.argv[2], payload
+          PY
+
+      - name: Prove the persistent marker self-invalidates after restart
+        shell: bash
+        env:
+          OLD_INSTANCE: ${{ steps.before.outputs.old_instance }}
+        run: |
+          set -Eeuo pipefail
+          snapshot="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/runtime/convergence")"
+          python3 - "$snapshot" "$EXPECTED_SHA" "$OLD_INSTANCE" <<'PY'
+          import json, re, sys
+          payload=json.loads(sys.argv[1])
+          expected_sha=sys.argv[2]
+          old_instance=sys.argv[3]
+          assert payload.get('state') == 'stale', payload
+          assert payload.get('marker_error') == 'runtime_instance_mismatch', payload
+          assert payload.get('deployment_sha') == expected_sha, payload
+          assert payload.get('marker_deployment_sha') == expected_sha, payload
+          current=payload.get('runtime_instance_id') or ''
+          assert re.fullmatch(r'[0-9a-f]{32}', current), payload
+          assert current != old_instance, payload
+          assert payload.get('marker_runtime_instance_id') == old_instance, payload
+          assert payload.get('secrets_exposed') is False, payload
+          print(json.dumps({
+            'state': payload['state'],
+            'marker_error': payload['marker_error'],
+            'deployment_sha': payload['deployment_sha'],
+            'old_instance': old_instance,
+            'new_instance': current,
+            'secrets_exposed': False,
+          }, sort_keys=True))
+          PY
+
+      - name: Request canonical reconvergence for the same SHA
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          body="$(python3 - "$EXPECTED_SHA" <<'PY'
+          import json,sys
+          print(json.dumps({'ref':'main','inputs':{'commit_sha':sys.argv[1]}}))
+          PY
+          )"
+          curl --fail --silent --show-error --max-time 30 \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            --data "$body" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/stage-convergence.yml/dispatches"
+          echo "reconvergence_dispatch=accepted"
