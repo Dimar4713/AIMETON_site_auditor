@@ -1,0 +1,18 @@
+name: Live Async MCP Acceptance
+
+on:
+  push:
+    branches:
+      - ops/live-async-mcp-acceptance-20260815
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify deployed async MCP lifecycle from outside Stage
+        run: python3 scripts/accept_live_async_mcp.py
