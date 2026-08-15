@@ -10,6 +10,7 @@ URL = "https://stage-auditor.aimeton.ru/mcp/"
 ORIGIN = "chrome-extension://aabiopennjmopfippagcalmkdjlepdhh"
 PROTOCOL_VERSION = "2025-06-18"
 TARGET = "https://aimeton.ru"
+EXPECTED_STAGE_SHA = "1b1f9a2b69106b0a7da56af4d8a6c114f700c672"
 REQUEST_TIMEOUT = 25
 MISSION_DEADLINE = 140
 POLL_SECONDS = 4
@@ -91,7 +92,7 @@ def main() -> None:
             "params": {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "aimeton-bds-live-progress-acceptance", "version": "2"},
+                "clientInfo": {"name": "aimeton-bds-live-progress-acceptance", "version": "3"},
             },
         }
     )
@@ -101,14 +102,26 @@ def main() -> None:
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, session_id
     )
     names = {item["name"] for item in rpc_result(listed).get("tools", [])}
-    assert {"analysis.start", "analysis.status", "analysis.events"} <= names, sorted(names)
+    assert {
+        "runtime.convergence",
+        "analysis.start",
+        "analysis.status",
+        "analysis.events",
+    } <= names, sorted(names)
 
-    start, start_seconds = call("analysis.start", {"url": TARGET}, 3, session_id)
+    convergence, convergence_seconds = call("runtime.convergence", {}, 3, session_id)
+    assert convergence.get("state") == "converged", convergence
+    assert convergence.get("deployment_sha") == EXPECTED_STAGE_SHA, convergence
+    assert convergence.get("marker_deployment_sha") == EXPECTED_STAGE_SHA, convergence
+    assert convergence.get("marker_error") is None, convergence
+    assert convergence.get("secrets_exposed") is False, convergence
+
+    start, start_seconds = call("analysis.start", {"url": TARGET}, 4, session_id)
     assert start["state"] == "queued", start
     analysis_id = start["analysis_id"]
     mission_id = start["mission_id"]
     poll = int(start["next_poll"])
-    request_id = 4
+    request_id = 5
     started_at = time.monotonic()
     deadline = started_at + MISSION_DEADLINE
 
@@ -201,6 +214,8 @@ def main() -> None:
         "endpoint": URL,
         "origin": ORIGIN,
         "target": TARGET,
+        "convergence_seconds": round(convergence_seconds, 3),
+        "convergence": convergence,
         "mission_id": mission_id,
         "analysis_id": analysis_id,
         "initialize_seconds": round(initialize_seconds, 3),
@@ -230,9 +245,7 @@ def main() -> None:
     assert observed_progress, evidence
     assert max_queries_planned > 0, evidence
     assert observed_llm_running or final_llm_state in {"succeeded", "timeout", "failed"}, evidence
-    # The dedicated RouterAI budget must prevent another ~185 s field run.
     assert elapsed_total < 120, evidence
-    # A mission that lasts beyond one heartbeat interval must visibly report life.
     if elapsed_total >= 20:
         assert observed_heartbeat or observed_stalled or observed_degraded, evidence
 
