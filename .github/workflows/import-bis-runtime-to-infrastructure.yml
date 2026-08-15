@@ -1,0 +1,137 @@
+name: Import exact BIS runtime to infrastructure
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/import-bis-runtime-to-infrastructure.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  import-runtime:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 10
+    env:
+      PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+      SOURCE_REPO: Dimar4713/BIS-N-EC
+      SOURCE_ARTIFACT_ID: '9243497553'
+      EXPECTED_SOURCE_SHA: '1c4d2b4368caae18b8e345621f2bd6b1706ef4f7'
+      TARGET_REPO: Dimar4713/aimeton-infrastructure
+      TARGET_BRANCH: agent/gnss-runtime-rebind-1c4d2b43
+    steps:
+      - name: Owner and credential gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_ACTOR}" = 'Dimar4713'
+          test -n "${PROJECTS_TOKEN}"
+
+      - name: Download exact private BIS artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/aimeton-bis-runtime-import
+          mkdir -p /tmp/aimeton-bis-runtime-import
+          code="$(curl -L --silent --show-error \
+            --output /tmp/aimeton-bis-runtime-import/runtime.zip \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${PROJECTS_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${SOURCE_REPO}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip")"
+          echo "artifact_download_http_status=${code}"
+          test "${code}" = '200'
+
+      - name: Verify, split and import immutable runtime bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, os, urllib.error, urllib.parse, urllib.request, zipfile
+          from pathlib import Path
+
+          root = Path('/tmp/aimeton-bis-runtime-import')
+          expected_source = os.environ['EXPECTED_SOURCE_SHA']
+          target_repo = os.environ['TARGET_REPO']
+          target_branch = os.environ['TARGET_BRANCH']
+          token = os.environ['PROJECTS_TOKEN']
+
+          with zipfile.ZipFile(root / 'runtime.zip') as zf:
+              bundle = json.loads(zf.read('runtime-bundle.json'))
+              assert bundle['source_repository'] == 'Dimar4713/BIS-N-EC'
+              assert bundle['source_commit_sha'] == expected_source
+              out = {}
+              for profile in ('orchestrator', 'worker'):
+                  meta = bundle['artifacts'][profile]
+                  encoded = ''.join(zf.read(meta['filename']).decode('ascii').split())
+                  raw = base64.b64decode(encoded, validate=True)
+                  assert len(raw) == int(meta['archive_bytes'])
+                  assert hashlib.sha256(raw).hexdigest() == meta['sha256']
+                  out[profile] = (encoded, meta)
+
+          orchestrator, ometa = out['orchestrator']
+          worker, wmeta = out['worker']
+          assert ometa['sha256'] == '0b6b2fc4160298a03546150e1c06ca8f4bc6fefbd55024775643c302b4cf7992'
+          assert wmeta['sha256'] == 'ec283a40912c4d6f116630b119f3f7076dd71bfc50a8b0308069e5516885fee9'
+          assert len(orchestrator) == 18440
+          assert len(worker) == 56748
+
+          parts = [worker[i:i+14000] for i in range(0, len(worker), 14000)]
+          assert [len(p) for p in parts] == [14000, 14000, 14000, 14000, 748]
+          # Preserve the established multi-part trusted-runner fetch pattern while
+          # keeping each GitHub Contents write comfortably small.
+          files = {
+              'provider/runtime/bis-n-ec-orchestrator-1c4d2b43.tar.xz.b64': orchestrator + '\n',
+          }
+          for idx, part in enumerate(parts, 1):
+              files[f'provider/runtime/bis-n-ec-worker-1c4d2b43.part{idx}.b64'] = part + '\n'
+
+          def request(method, url, body=None):
+              data = None if body is None else json.dumps(body).encode('utf-8')
+              req = urllib.request.Request(url, data=data, method=method)
+              req.add_header('Authorization', f'Bearer {token}')
+              req.add_header('Accept', 'application/vnd.github+json')
+              req.add_header('X-GitHub-Api-Version', '2022-11-28')
+              if data is not None:
+                  req.add_header('Content-Type', 'application/json')
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as response:
+                      return response.status, json.load(response)
+              except urllib.error.HTTPError as exc:
+                  # Never emit a response body: it may contain unnecessary details.
+                  raise RuntimeError(f'GitHub API {method} {url} failed HTTP {exc.code}') from None
+
+          for path, text in files.items():
+              quoted = urllib.parse.quote(path, safe='/')
+              url = f'https://api.github.com/repos/{target_repo}/contents/{quoted}'
+              # Fail closed if a path already exists on the target branch.
+              try:
+                  request('GET', url + '?ref=' + urllib.parse.quote(target_branch, safe=''))
+              except RuntimeError as exc:
+                  if 'HTTP 404' not in str(exc):
+                      raise
+              else:
+                  raise RuntimeError(f'target runtime path already exists: {path}')
+              status, _ = request('PUT', url, {
+                  'message': f'Import BIS runtime {expected_source[:8]}: {Path(path).name}',
+                  'content': base64.b64encode(text.encode('ascii')).decode('ascii'),
+                  'branch': target_branch,
+              })
+              assert status in (200, 201)
+              print(f'imported={path}')
+
+          status, branch = request('GET', f'https://api.github.com/repos/{target_repo}/branches/{target_branch}')
+          assert status == 200
+          head = branch['commit']['sha']
+          assert len(head) == 40
+          print(f'runtime_import_commit_sha={head}')
+          print('runtime_import=verified')
+          PY
+
+      - name: Remove local runtime bytes
+        if: always()
+        shell: bash
+        run: rm -rf /tmp/aimeton-bis-runtime-import
