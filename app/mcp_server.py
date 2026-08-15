@@ -77,7 +77,10 @@ mcp = FastMCP(
         "Public economic intelligence profile: site analysis, asynchronous analysis missions, "
         "company hunting and source-traceable company intelligence. Unconfirmed mentions must "
         "not be presented as facts. Prefer analysis.start/status/events for browser MCP clients "
-        "with short request timeouts; analyze_site remains available for backward compatibility."
+        "with short request timeouts; analyze_site remains available for backward compatibility. "
+        "When polling analysis.status or analysis.events repeatedly, increment the poll argument "
+        "using next_poll from the previous response so clients that deduplicate identical tool "
+        "calls still send each poll."
     ),
     stateless_http=True,
     json_response=True,
@@ -152,25 +155,47 @@ async def analysis_start(url: str) -> dict:
         mission_id=started.mission_id,
         analysis_id=started.analysis_id,
     )
-    return started.model_dump(mode="json")
+    payload = started.model_dump(mode="json")
+    payload["next_poll"] = 1
+    payload["polling_instruction"] = (
+        "Call analysis.status and/or analysis.events with poll=1, then use next_poll "
+        "from each response for the next request."
+    )
+    return payload
 
 
 @mcp.tool(name="analysis.status")
-async def analysis_status(analysis_id: str) -> dict:
-    """Read current asynchronous analysis state and final result when available."""
+async def analysis_status(analysis_id: str, poll: int = 0) -> dict:
+    """Read current state; increment poll on repeated calls to avoid client-side deduplication."""
+    if poll < 0:
+        raise ValueError("poll_must_be_non_negative")
     try:
-        return get_analysis_status_payload(analysis_id)
+        payload = get_analysis_status_payload(analysis_id)
     except AnalysisNotFoundError:
         raise ValueError("analysis_not_found") from None
+    return {
+        **payload,
+        "poll": poll,
+        "next_poll": poll + 1,
+    }
 
 
 @mcp.tool(name="analysis.events")
-async def analysis_events(analysis_id: str) -> list[dict]:
-    """Read the canonical UMEL progress-event snapshot for one analysis."""
+async def analysis_events(analysis_id: str, poll: int = 0) -> dict:
+    """Read UMEL progress events; increment poll on repeated calls to avoid client-side deduplication."""
+    if poll < 0:
+        raise ValueError("poll_must_be_non_negative")
     try:
-        return get_analysis_events_payload(analysis_id)
+        events = get_analysis_events_payload(analysis_id)
     except AnalysisNotFoundError:
         raise ValueError("analysis_not_found") from None
+    return {
+        "analysis_id": analysis_id,
+        "poll": poll,
+        "next_poll": poll + 1,
+        "event_count": len(events),
+        "events": events,
+    }
 
 
 @mcp.tool()
