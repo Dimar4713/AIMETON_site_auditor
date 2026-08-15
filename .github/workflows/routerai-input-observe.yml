@@ -24,7 +24,7 @@ jobs:
           import json
           import sqlite3
 
-          mission_id = "mission_3c2246ba6e624bdcadfed458c0a7d92d"
+          mission_id = "mission_9308825276a9481e8ee0a98e7ec24992"
           db = sqlite3.connect("/app/data/runtime-core.sqlite3")
           row = db.execute(
               """
