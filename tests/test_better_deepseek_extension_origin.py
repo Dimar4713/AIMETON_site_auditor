@@ -4,13 +4,14 @@ import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from mcp.server.fastmcp import FastMCP
 
 from app.mcp_security import (
     BETTER_DEEPSEEK_CHROME_EXTENSION_ORIGIN,
     McpSecurityMiddleware,
     browser_mcp_origins,
 )
-from app.mcp_server import mcp
+from app.mcp_server import MCP_TRANSPORT_SECURITY
 
 INIT_PAYLOAD = {
     "jsonrpc": "2.0",
@@ -30,8 +31,14 @@ BASE_HEADERS = {
 
 
 async def _post_initialize(origin: str):
-    mcp._session_manager = None
-    app = mcp.streamable_http_app()
+    test_mcp = FastMCP(
+        "Better DeepSeek origin test",
+        stateless_http=True,
+        json_response=True,
+        streamable_http_path="/",
+        transport_security=MCP_TRANSPORT_SECURITY,
+    )
+    app = test_mcp.streamable_http_app()
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://testserver") as client:
