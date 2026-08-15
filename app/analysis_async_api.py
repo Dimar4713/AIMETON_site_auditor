@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime
+from functools import lru_cache
 from threading import RLock
 from typing import Any, Literal
 
@@ -10,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 
 from app.external_sources import run_enriched_site_analysis
+from app.heuristics import heuristic_analysis
 from app.mission_orchestrator import (
     EntryPoint,
     default_site_mission_request,
@@ -20,6 +23,7 @@ from app.models import AnalyzeRequest
 from app.runtime_time import runtime_time_snapshot
 from app.scraper import FetchError, fetch_site
 from app.trace_context import bind_trace_identity
+from app.trace_ledger import SQLiteTraceLedger
 from app.umel import get_umel_event
 
 
@@ -27,6 +31,9 @@ router = APIRouter(prefix="/api/analyze", tags=["analysis-runtime"])
 _LOCK = RLock()
 _ANALYSES: dict[str, dict[str, Any]] = {}
 _MCP_TASKS: set[asyncio.Task[None]] = set()
+
+_DEFAULT_ANALYSIS_DEADLINE_SECONDS = 180.0
+_DEFAULT_HEARTBEAT_SECONDS = 15.0
 
 
 class AnalysisNotFoundError(LookupError):
@@ -72,6 +79,126 @@ def _canonical_now() -> datetime:
     return datetime.fromisoformat(value).astimezone(UTC)
 
 
+def _float_env(
+    name: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    try:
+        value = float(os.getenv(name, str(default)).strip())
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def _analysis_deadline_seconds() -> float:
+    return _float_env(
+        "ANALYSIS_ENRICHMENT_DEADLINE_SECONDS",
+        _DEFAULT_ANALYSIS_DEADLINE_SECONDS,
+        minimum=30.0,
+        maximum=900.0,
+    )
+
+
+def _heartbeat_seconds() -> float:
+    return _float_env(
+        "ANALYSIS_HEARTBEAT_SECONDS",
+        _DEFAULT_HEARTBEAT_SECONDS,
+        minimum=5.0,
+        maximum=120.0,
+    )
+
+
+def _trace_db_path() -> str:
+    return os.getenv(
+        "AIMETON_TRACE_DB",
+        os.getenv("AIMETON_RUNTIME_DB", "data/runtime-core.sqlite3"),
+    )
+
+
+@lru_cache(maxsize=4)
+def _trace_ledger_for(path: str) -> SQLiteTraceLedger:
+    return SQLiteTraceLedger(path)
+
+
+def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
+    """Return a small fail-open projection of the durable provider trace.
+
+    This projection intentionally excludes query text, URLs, prompts and raw
+    provider payloads. It is safe to expose through the public read-only MCP
+    status tool.
+    """
+    empty = {
+        "queries_planned": 0,
+        "queries_finished": 0,
+        "provider_calls_finished": 0,
+        "provider_failures": 0,
+        "active_provider_calls": [],
+    }
+    try:
+        events = _trace_ledger_for(_trace_db_path()).list_attempt(mission_id, attempt_id)
+    except Exception:
+        return empty
+
+    planned_queries: set[int] = set()
+    finished_queries: set[int] = set()
+    provider_calls_finished = 0
+    provider_failures = 0
+    active: dict[tuple[int, str], Any] = {}
+
+    for event in events:
+        query_index_raw = event.metadata.get("query_index")
+        try:
+            query_index = int(query_index_raw)
+        except (TypeError, ValueError):
+            query_index = -1
+
+        if event.operation == "query_planned" and query_index >= 0:
+            planned_queries.add(query_index)
+        elif event.operation == "query_finished" and query_index >= 0:
+            finished_queries.add(query_index)
+        elif event.operation == "provider_live_started" and event.provider and query_index >= 0:
+            active[(query_index, event.provider)] = event
+        elif event.operation == "provider_live_finished" and event.provider and query_index >= 0:
+            active.pop((query_index, event.provider), None)
+            provider_calls_finished += 1
+            if event.state.value in {"failed", "blocked"}:
+                provider_failures += 1
+
+    now = _canonical_now()
+    active_calls: list[dict[str, Any]] = []
+    for (query_index, provider), event in sorted(
+        active.items(),
+        key=lambda item: item[1].created_at,
+    ):
+        elapsed_seconds = max(0.0, (now - event.created_at.astimezone(UTC)).total_seconds())
+        budget_raw = event.metadata.get("provider_budget_seconds")
+        try:
+            budget_seconds = max(0.0, float(budget_raw))
+        except (TypeError, ValueError):
+            budget_seconds = 0.0
+        active_calls.append(
+            {
+                "provider": provider,
+                "query_index": query_index,
+                "elapsed_seconds": round(elapsed_seconds, 1),
+                "provider_budget_seconds": round(budget_seconds, 1) if budget_seconds else None,
+                "overdue": bool(budget_seconds and elapsed_seconds > budget_seconds + 2.0),
+                "secondary": bool(event.metadata.get("secondary", False)),
+            }
+        )
+
+    return {
+        "queries_planned": len(planned_queries),
+        "queries_finished": len(finished_queries),
+        "provider_calls_finished": provider_calls_finished,
+        "provider_failures": provider_failures,
+        "active_provider_calls": active_calls[:8],
+    }
+
+
 def _append_event(
     analysis_id: str,
     *,
@@ -107,6 +234,7 @@ def _append_event(
             ).model_dump(mode="json")
         )
         record["state"] = state
+        record["phase"] = phase
         record["updated_at"] = now.isoformat()
 
 
@@ -129,6 +257,7 @@ def create_analysis_runtime(
             "analysis_id": analysis_id,
             "mission_id": mission_id,
             "state": "queued",
+            "phase": "mission_accepted",
             "created_at": now,
             "updated_at": now,
             "events": [],
@@ -158,14 +287,20 @@ def get_analysis_status_payload(analysis_id: str) -> dict[str, Any]:
         record = _ANALYSES.get(analysis_id)
         if record is None:
             raise AnalysisNotFoundError("analysis_not_found")
-        return {
+        payload = {
             "analysis_id": record["analysis_id"],
             "mission_id": record["mission_id"],
             "state": record["state"],
+            "phase": record.get("phase"),
             "created_at": record["created_at"],
             "updated_at": record["updated_at"],
             "result": record["result"],
         }
+    payload["progress"] = _trace_runtime_snapshot(
+        str(payload["mission_id"]),
+        analysis_id,
+    )
+    return payload
 
 
 def get_analysis_events_payload(analysis_id: str) -> list[dict[str, Any]]:
@@ -177,6 +312,99 @@ def get_analysis_events_payload(analysis_id: str) -> list[dict[str, Any]]:
         return list(record["events"])
 
 
+def _heartbeat_detail(snapshot: dict[str, Any]) -> str:
+    active = snapshot.get("active_provider_calls") or []
+    planned = int(snapshot.get("queries_planned") or 0)
+    finished = int(snapshot.get("queries_finished") or 0)
+    provider_finished = int(snapshot.get("provider_calls_finished") or 0)
+    failures = int(snapshot.get("provider_failures") or 0)
+
+    if active:
+        rendered = ", ".join(
+            f"{item['provider']} q#{item['query_index']} {item['elapsed_seconds']}s"
+            + (" overdue" if item.get("overdue") else "")
+            for item in active[:4]
+        )
+        return (
+            f"Внешнее обогащение: поисковые ветви {finished}/{planned or '?'}, "
+            f"provider calls завершено {provider_finished}, ошибок {failures}; "
+            f"сейчас активны: {rendered}."
+        )
+    return (
+        f"Внешнее обогащение продолжается: поисковые ветви {finished}/{planned or '?'}, "
+        f"provider calls завершено {provider_finished}, ошибок {failures}."
+    )
+
+
+async def _heartbeat_loop(
+    *,
+    mission_id: str,
+    analysis_id: str,
+    stop: asyncio.Event,
+) -> None:
+    interval = _heartbeat_seconds()
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+            return
+        except asyncio.TimeoutError:
+            snapshot = _trace_runtime_snapshot(mission_id, analysis_id)
+            active = snapshot.get("active_provider_calls") or []
+            overdue = any(bool(item.get("overdue")) for item in active)
+            _append_event(
+                analysis_id,
+                phase="company_profile_running",
+                event_code="flow.gap_detected" if overdue else "external.waiting",
+                state="stalled" if overdue else "running",
+                icon_key="alert-triangle" if overdue else "clock",
+                message=(
+                    "Внешний источник превысил ожидаемый бюджет времени."
+                    if overdue
+                    else "Продолжается внешнее обогащение профиля."
+                ),
+                detail=_heartbeat_detail(snapshot),
+                heartbeat=True,
+                next_action=(
+                    "Дождаться bounded deadline или перейти на резервный результат."
+                    if overdue
+                    else "Дождаться оставшихся поисковых ветвей и синтеза."
+                ),
+            )
+
+
+async def _run_enriched_bounded(
+    *,
+    source_url: str,
+    title: str,
+    text: str,
+    analysis_id: str,
+):
+    deadline_seconds = _analysis_deadline_seconds()
+    try:
+        return await asyncio.wait_for(
+            run_enriched_site_analysis(source_url, title, text),
+            timeout=deadline_seconds,
+        )
+    except asyncio.TimeoutError:
+        _append_event(
+            analysis_id,
+            phase="company_profile_deadline",
+            event_code="service.degraded",
+            state="degraded",
+            icon_key="alert-triangle",
+            message="Внешнее обогащение достигло общего лимита времени.",
+            detail=f"Bounded deadline: {deadline_seconds:.0f} s. Используем резервный локальный анализ.",
+            next_action="Сформировать частичный результат вместо бесконечного ожидания.",
+        )
+        result = heuristic_analysis(source_url, title, text)
+        result.readiness.provider_states["external_enrichment"] = "deadline_exceeded"
+        result.risks_and_assumptions.append(
+            f"External enrichment exceeded the bounded {deadline_seconds:.0f}s runtime deadline; "
+            "the mission returned a local fallback instead of waiting indefinitely."
+        )
+        return result
+
+
 async def _run_analysis(
     *,
     source_url: str,
@@ -185,6 +413,8 @@ async def _run_analysis(
 ) -> None:
     orchestrator = get_mission_orchestrator()
     final_url = source_url
+    heartbeat_stop: asyncio.Event | None = None
+    heartbeat_task: asyncio.Task[None] | None = None
     try:
         _append_event(
             analysis_id,
@@ -217,12 +447,38 @@ async def _run_analysis(
             heartbeat=True,
             next_action="Синтезировать evidence и AI-возможности.",
         )
+        heartbeat_stop = asyncio.Event()
+        heartbeat_task = asyncio.create_task(
+            _heartbeat_loop(
+                mission_id=mission_id,
+                analysis_id=analysis_id,
+                stop=heartbeat_stop,
+            ),
+            name=f"aimeton-analysis-heartbeat:{analysis_id}",
+        )
         with bind_trace_identity(mission_id, analysis_id):
-            result = await run_enriched_site_analysis(
-                page["final_url"],
-                page["title"],
-                page["text"],
+            result = await _run_enriched_bounded(
+                source_url=page["final_url"],
+                title=page["title"],
+                text=page["text"],
+                analysis_id=analysis_id,
             )
+        if heartbeat_stop is not None:
+            heartbeat_stop.set()
+        if heartbeat_task is not None:
+            await heartbeat_task
+            heartbeat_task = None
+
+        _append_event(
+            analysis_id,
+            phase="company_profile_completed",
+            event_code="stage.completed",
+            state="running",
+            icon_key="check-circle",
+            message="Обогащение и аналитический синтез завершены.",
+            detail=_heartbeat_detail(_trace_runtime_snapshot(mission_id, analysis_id)),
+            next_action="Зафиксировать итоговый результат миссии.",
+        )
         record_legacy_site_turn(
             orchestrator,
             mission_id,
@@ -258,6 +514,32 @@ async def _run_analysis(
             detail="Проверьте адрес сайта и повторите запуск.",
             next_action="Повторить анализ после проверки доступности сайта.",
         )
+    except Exception as exc:
+        record_legacy_site_turn(
+            orchestrator,
+            mission_id,
+            final_url=final_url,
+            succeeded=False,
+        )
+        _append_event(
+            analysis_id,
+            phase="failed",
+            event_code="mission.failed",
+            state="failed",
+            icon_key="alert-triangle",
+            message="Анализ остановлен внутренней ошибкой.",
+            detail=f"Санитизированный тип ошибки: {type(exc).__name__}.",
+            next_action="Проверить trace по mission_id и повторить после устранения причины.",
+        )
+    finally:
+        if heartbeat_stop is not None:
+            heartbeat_stop.set()
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
 
 def schedule_analysis_runtime(

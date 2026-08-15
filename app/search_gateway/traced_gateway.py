@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from app.search_gateway.gateway import HARD_UPSTREAM_FAILURES, SearchGateway, request_fingerprint
 from app.search_gateway.models import (
+    AttemptState,
     FallbackReason,
+    GatewayState,
     SearchItem,
     SearchPolicy,
     SearchRequest,
@@ -27,6 +30,27 @@ _TRACE_URL_LIMIT = 1500
 def _diagnostic_url(item: SearchItem) -> str:
     parts = urlsplit(str(item.url))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))[:_TRACE_URL_LIMIT]
+
+
+def _provider_budget_seconds(policy: SearchPolicy) -> float:
+    backoff = sum(
+        min(
+            policy.retry_backoff_max_seconds,
+            policy.retry_backoff_base_seconds * (2 ** (retry - 1)),
+        )
+        for retry in range(1, policy.retries + 1)
+    )
+    return (policy.timeout_seconds * (policy.retries + 1)) + backoff
+
+
+def _attempt_trace_state(state: AttemptState) -> TraceState:
+    if state in {AttemptState.SUCCEEDED, AttemptState.CACHE_HIT}:
+        return TraceState.SUCCEEDED
+    if state == AttemptState.EMPTY:
+        return TraceState.DEGRADED
+    if state == AttemptState.SKIPPED:
+        return TraceState.SKIPPED
+    return TraceState.FAILED
 
 
 class TracedSearchGateway(SearchGateway):
@@ -55,6 +79,118 @@ class TracedSearchGateway(SearchGateway):
                 # coarse provider-wide circuit on the first CAPTCHA/403/429.
                 return
         await super()._record_failure(provider, reason)
+
+    async def _execute_provider(
+        self,
+        provider_name: str,
+        request: SearchRequest,
+        policy: SearchPolicy,
+        fingerprint: str,
+        *,
+        secondary: bool,
+        secondary_paid_allowed: bool,
+    ):
+        """Expose in-flight provider state before the provider returns.
+
+        The existing provider waterfall is persisted after a search call
+        finishes. These two live events fill the observability gap while a
+        provider is still in flight, without storing query text or raw payloads.
+        """
+        bound = current_trace_identity()
+        mission_id = bound.mission_id if bound else request.mission_id
+        attempt_id = bound.attempt_id if bound else request.correlation_id
+        normalized_fingerprint = fingerprint.removeprefix("sha256:")
+        query_index = int(hashlib.sha256(normalized_fingerprint.encode("ascii")).hexdigest()[:8], 16)
+        runtime_version = os.getenv("AIMETON_RUNTIME_VERSION") or None
+        provider_budget_seconds = _provider_budget_seconds(policy)
+        live_key = f"{mission_id}:{attempt_id}:query:{query_index}:{provider_name}:live"
+        started = time.perf_counter()
+
+        try:
+            self._trace_ledger.append(
+                TraceEventCreate(
+                    mission_id=mission_id,
+                    attempt_id=attempt_id,
+                    component="search_gateway",
+                    operation="provider_live_started",
+                    state=TraceState.STARTED,
+                    reason_code="provider_call_inflight",
+                    summary=f"Provider {provider_name} call is in flight",
+                    provider=provider_name,
+                    metadata={
+                        "query_index": query_index,
+                        "secondary": secondary,
+                        "timeout_seconds": policy.timeout_seconds,
+                        "retry_limit": policy.retries,
+                        "provider_budget_seconds": provider_budget_seconds,
+                    },
+                    event_key=f"{live_key}:started",
+                    runtime_version=runtime_version,
+                )
+            )
+        except Exception:
+            pass
+
+        try:
+            execution = await super()._execute_provider(
+                provider_name,
+                request,
+                policy,
+                fingerprint,
+                secondary=secondary,
+                secondary_paid_allowed=secondary_paid_allowed,
+            )
+        except Exception:
+            try:
+                self._trace_ledger.append(
+                    TraceEventCreate(
+                        mission_id=mission_id,
+                        attempt_id=attempt_id,
+                        component="search_gateway",
+                        operation="provider_live_finished",
+                        state=TraceState.FAILED,
+                        reason_code="provider_call_exception",
+                        summary=f"Provider {provider_name} call ended with an exception",
+                        provider=provider_name,
+                        duration_ms=max(0, round((time.perf_counter() - started) * 1000)),
+                        metadata={
+                            "query_index": query_index,
+                            "secondary": secondary,
+                            "provider_budget_seconds": provider_budget_seconds,
+                        },
+                        event_key=f"{live_key}:finished",
+                        runtime_version=runtime_version,
+                    )
+                )
+            except Exception:
+                pass
+            raise
+
+        try:
+            self._trace_ledger.append(
+                TraceEventCreate(
+                    mission_id=mission_id,
+                    attempt_id=attempt_id,
+                    component="search_gateway",
+                    operation="provider_live_finished",
+                    state=_attempt_trace_state(execution.attempt.state),
+                    reason_code=str(execution.attempt.reason or execution.attempt.state.value),
+                    summary=f"Provider {provider_name} live call finished",
+                    provider=provider_name,
+                    duration_ms=max(0, round((time.perf_counter() - started) * 1000)),
+                    counters={"results_received": len(execution.results)},
+                    metadata={
+                        "query_index": query_index,
+                        "secondary": secondary,
+                        "provider_budget_seconds": provider_budget_seconds,
+                    },
+                    event_key=f"{live_key}:finished",
+                    runtime_version=runtime_version,
+                )
+            )
+        except Exception:
+            pass
+        return execution
 
     async def search(
         self,
@@ -118,6 +254,35 @@ class TracedSearchGateway(SearchGateway):
                 attempt_id=attempt_id,
                 query_index=query_index,
                 runtime_version=runtime_version,
+            )
+        except Exception:
+            pass
+
+        try:
+            query_state = (
+                TraceState.SUCCEEDED
+                if response.diagnostics.state == GatewayState.SUCCESS
+                else TraceState.DEGRADED
+            )
+            self._trace_ledger.append(
+                TraceEventCreate(
+                    mission_id=mission_id,
+                    attempt_id=attempt_id,
+                    component="search_gateway",
+                    operation="query_finished",
+                    state=query_state,
+                    reason_code=f"query_{response.diagnostics.state.value}",
+                    summary="Bounded search query finished",
+                    provider=response.diagnostics.selected_provider,
+                    counters={"results_received": len(response.results)},
+                    metadata={
+                        "query_index": query_index,
+                        "fallback_used": response.diagnostics.fallback_used,
+                        "cache_hit": response.diagnostics.cache_hit,
+                    },
+                    event_key=f"{mission_id}:{attempt_id}:query:{query_index}:finished",
+                    runtime_version=runtime_version,
+                )
             )
         except Exception:
             pass

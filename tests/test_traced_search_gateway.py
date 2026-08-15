@@ -57,24 +57,45 @@ async def test_gateway_persists_bounded_query_and_provider_stages_without_secret
     )
     assert [event.operation for event in events] == [
         "query_planned",
+        "provider_live_started",
+        "provider_live_finished",
         "provider_selected",
         "request_started",
         "response_received",
         "normalized",
+        "query_finished",
         "result_item",
     ]
     assert events[0].provider is None
     assert events[0].metadata["query_text"] == "диагностический пользовательский запрос"
     assert events[0].counters == {"requested_limit": 5}
     assert all(event.provider == "searxng" for event in events[1:])
-    assert events[4].state.value == "succeeded"
-    assert events[4].reason_code == "search_items_normalized"
-    assert events[4].counters == {
+
+    live_started = events[1]
+    live_finished = events[2]
+    assert live_started.state.value == "started"
+    assert live_started.reason_code == "provider_call_inflight"
+    assert live_started.metadata["timeout_seconds"] == 15.0
+    assert live_started.metadata["retry_limit"] == 1
+    assert live_started.metadata["provider_budget_seconds"] == 30.5
+    assert live_finished.state.value == "succeeded"
+    assert live_finished.counters == {"results_received": 1}
+    assert live_finished.duration_ms is not None
+
+    normalized_event = events[6]
+    assert normalized_event.state.value == "succeeded"
+    assert normalized_event.reason_code == "search_items_normalized"
+    assert normalized_event.counters == {
         "results_received": 1,
         "results_normalized": 1,
     }
 
-    result_event = events[5]
+    query_finished = events[7]
+    assert query_finished.state.value == "succeeded"
+    assert query_finished.reason_code == "query_success"
+    assert query_finished.counters == {"results_received": 1}
+
+    result_event = events[8]
     assert result_event.reason_code == "normalized_search_result"
     assert result_event.metadata["result_rank"] == 1
     assert result_event.metadata["result_url"] == "https://example.ru/company"
