@@ -6,7 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app as main_app
-from app.mcp_security import McpSecurityMiddleware, SecurityConfig
+from app.mcp_security import McpSecurityMiddleware, SecurityConfig, browser_mcp_origins
 from app.mcp_server import MCP_TRANSPORT_SECURITY, _additional_allowlist_values, mcp
 
 INIT_PAYLOAD = {
@@ -65,6 +65,7 @@ async def test_evil_host_rejected():
     [
         ("auditor.aimeton.ru", "https://auditor.aimeton.ru"),
         ("stage-auditor.aimeton.ru", "https://stage-auditor.aimeton.ru"),
+        ("stage-auditor.aimeton.ru", "https://chat.deepseek.com"),
         ("git-hub-site-auditor.replit.app", "https://git-hub-site-auditor.replit.app"),
     ],
 )
@@ -95,6 +96,18 @@ def test_environment_allowlist_rejects_wildcards(monkeypatch):
         "stage.example",
         "stage.example:443",
     ]
+
+
+def test_browser_origin_allowlist_rejects_wildcards(monkeypatch):
+    monkeypatch.setenv(
+        "AIMETON_MCP_BROWSER_ORIGINS",
+        "https://client.example, https://*.unsafe.example, https://client.example/",
+    )
+    origins = browser_mcp_origins()
+    assert "https://chat.deepseek.com" in origins
+    assert "https://client.example" in origins
+    assert "https://*.unsafe.example" not in origins
+    assert origins.count("https://client.example") == 1
 
 
 @pytest.mark.asyncio
@@ -147,13 +160,30 @@ class EchoApp:
         await send({"type": "http.response.body", "body": b"ok"})
 
 
-async def _invoke_security(app, *, token: str | None = None):
+async def _invoke_security(
+    app,
+    *,
+    token: str | None = None,
+    method: str = "POST",
+    origin: str | None = None,
+    preflight_method: str | None = None,
+):
     headers = []
     if token is not None:
         headers.append((b"authorization", f"Bearer {token}".encode("ascii")))
+    if origin is not None:
+        headers.append((b"origin", origin.encode("ascii")))
+    if preflight_method is not None:
+        headers.append((b"access-control-request-method", preflight_method.encode("ascii")))
+        headers.append(
+            (
+                b"access-control-request-headers",
+                b"content-type,mcp-protocol-version,mcp-session-id,x-request-id",
+            )
+        )
     scope = {
         "type": "http",
-        "method": "POST",
+        "method": method,
         "path": "/",
         "headers": headers,
         "client": ("203.0.113.10", 12345),
@@ -187,6 +217,63 @@ async def test_public_profile_is_available_without_token():
     assert status == 200
     assert body == b"ok"
     assert b"x-request-id" in headers
+
+
+@pytest.mark.asyncio
+async def test_deepseek_public_mcp_cors_preflight_is_allowed():
+    middleware = McpSecurityMiddleware(EchoApp(), admin=False)
+    status, headers, body = await _invoke_security(
+        middleware,
+        method="OPTIONS",
+        origin="https://chat.deepseek.com",
+        preflight_method="POST",
+    )
+    assert status == 204
+    assert body == b""
+    assert headers[b"access-control-allow-origin"] == b"https://chat.deepseek.com"
+    assert b"POST" in headers[b"access-control-allow-methods"]
+    assert b"mcp-protocol-version" in headers[b"access-control-allow-headers"].lower()
+
+
+@pytest.mark.asyncio
+async def test_deepseek_public_mcp_response_exposes_cors_headers():
+    middleware = McpSecurityMiddleware(EchoApp(), admin=False)
+    status, headers, body = await _invoke_security(
+        middleware,
+        origin="https://chat.deepseek.com",
+    )
+    assert status == 200
+    assert body == b"ok"
+    assert headers[b"access-control-allow-origin"] == b"https://chat.deepseek.com"
+    assert b"x-request-id" in headers[b"access-control-expose-headers"].lower()
+
+
+@pytest.mark.asyncio
+async def test_unknown_browser_origin_preflight_is_rejected():
+    middleware = McpSecurityMiddleware(EchoApp(), admin=False)
+    status, headers, body = await _invoke_security(
+        middleware,
+        method="OPTIONS",
+        origin="https://evil.example",
+        preflight_method="POST",
+    )
+    assert status == 403
+    assert b"access-control-allow-origin" not in headers
+    assert json.loads(body)["error"] == "cors_origin_rejected"
+
+
+@pytest.mark.asyncio
+async def test_admin_profile_does_not_enable_deepseek_cors(monkeypatch):
+    monkeypatch.setenv("AIMETON_MCP_ADMIN_TOKEN", "correct-token")
+    middleware = McpSecurityMiddleware(EchoApp(), admin=True)
+    status, headers, body = await _invoke_security(
+        middleware,
+        token="correct-token",
+        origin="https://chat.deepseek.com",
+    )
+    assert status == 200
+    assert body == b"ok"
+    assert b"access-control-allow-origin" not in headers
 
 
 @pytest.mark.asyncio

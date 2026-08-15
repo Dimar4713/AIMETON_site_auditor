@@ -16,6 +16,24 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 LOGGER = logging.getLogger("aimeton.mcp.security")
 
+DEFAULT_BROWSER_MCP_ORIGINS = ("https://chat.deepseek.com",)
+_CORS_ALLOW_METHODS = "GET, POST, DELETE, OPTIONS"
+_CORS_ALLOW_HEADERS = (
+    "Accept, Authorization, Content-Type, Last-Event-ID, "
+    "MCP-Protocol-Version, MCP-Session-Id, X-Request-ID"
+)
+_CORS_EXPOSE_HEADERS = "MCP-Session-Id, X-Request-ID"
+
+
+def browser_mcp_origins() -> tuple[str, ...]:
+    """Return explicit browser origins allowed to call the public MCP endpoint."""
+    values = list(DEFAULT_BROWSER_MCP_ORIGINS)
+    for raw_value in os.getenv("AIMETON_MCP_BROWSER_ORIGINS", "").split(","):
+        value = raw_value.strip().rstrip("/")
+        if value and "*" not in value and value not in values:
+            values.append(value)
+    return tuple(values)
+
 
 @dataclass(frozen=True)
 class SecurityConfig:
@@ -69,6 +87,25 @@ async def _send_json(send: Send, status: int, payload: dict) -> None:
     await send({"type": "http.response.body", "body": body})
 
 
+async def _send_cors_preflight(send: Send, origin: str) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 204,
+            "headers": [
+                (b"content-length", b"0"),
+                (b"cache-control", b"no-store"),
+                (b"access-control-allow-origin", origin.encode("latin-1")),
+                (b"access-control-allow-methods", _CORS_ALLOW_METHODS.encode("ascii")),
+                (b"access-control-allow-headers", _CORS_ALLOW_HEADERS.encode("ascii")),
+                (b"access-control-max-age", b"600"),
+                (b"vary", b"Origin"),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": b""})
+
+
 def _header(scope: Scope, name: bytes) -> str:
     for key, value in scope.get("headers", []):
         if key.lower() == name:
@@ -108,12 +145,45 @@ class McpSecurityMiddleware:
         profile = "admin" if self.admin else "public"
         started = time.perf_counter()
 
+        origin = _header(scope, b"origin").rstrip("/")
+        browser_origin = origin if (not self.admin and origin in browser_mcp_origins()) else ""
+        is_preflight = (
+            scope.get("method", "").upper() == "OPTIONS"
+            and bool(_header(scope, b"access-control-request-method"))
+        )
+
+        if is_preflight:
+            if not browser_origin:
+                self._audit(actor, profile, request_id, "cors_origin_rejected", started)
+                await _send_json(
+                    send,
+                    403,
+                    {"error": "cors_origin_rejected", "request_id": request_id},
+                )
+                return
+            self._audit(actor, profile, request_id, "cors_preflight", started)
+            await _send_cors_preflight(send, browser_origin)
+            return
+
+        async def cors_send(message: Message) -> None:
+            if message["type"] == "http.response.start" and browser_origin:
+                headers = list(message.get("headers", []))
+                headers.extend(
+                    [
+                        (b"access-control-allow-origin", browser_origin.encode("latin-1")),
+                        (b"access-control-expose-headers", _CORS_EXPOSE_HEADERS.encode("ascii")),
+                        (b"vary", b"Origin"),
+                    ]
+                )
+                message = {**message, "headers": headers}
+            await send(message)
+
         if self.admin:
             expected = os.getenv("AIMETON_MCP_ADMIN_TOKEN", "")
             if not expected or token is None or not hmac.compare_digest(token, expected):
                 self._audit(actor, profile, request_id, "unauthorized", started)
                 await _send_json(
-                    send,
+                    cors_send,
                     401,
                     {"error": "unauthorized", "request_id": request_id},
                 )
@@ -123,7 +193,7 @@ class McpSecurityMiddleware:
         if not await self.limiter.allow(f"{profile}:{actor}", limit):
             self._audit(actor, profile, request_id, "rate_limited", started)
             await _send_json(
-                send,
+                cors_send,
                 429,
                 {"error": "rate_limited", "request_id": request_id},
             )
@@ -136,7 +206,7 @@ class McpSecurityMiddleware:
         except TimeoutError:
             self._audit(actor, profile, request_id, "concurrency_limited", started)
             await _send_json(
-                send,
+                cors_send,
                 503,
                 {"error": "concurrency_limited", "request_id": request_id},
             )
@@ -151,7 +221,7 @@ class McpSecurityMiddleware:
                 headers = list(message.get("headers", []))
                 headers.append((b"x-request-id", request_id.encode("ascii")))
                 message = {**message, "headers": headers}
-            await send(message)
+            await cors_send(message)
 
         try:
             await self.app(scope, receive, audited_send)
