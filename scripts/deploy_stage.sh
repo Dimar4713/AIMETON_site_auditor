@@ -85,6 +85,10 @@ configure_runtime_secrets() {
   {
     printf 'TAVILY_TOKEN=%s\n' "$TAVILY_TOKEN"
     printf 'YANDEX_SEARCH_API_KEY=%s\n' "$YANDEX_SEARCH_API_KEY"
+    if [[ -f "$RUNTIME_SECRETS_FILE" ]]; then
+      grep -E '^(DADATA_API|DADATA_SECRET|DADATA_TOKEN|DADATA_BACKOFF_BASE_SECONDS|DADATA_BACKOFF_MAX_SECONDS)=' \
+        "$RUNTIME_SECRETS_FILE" || true
+    fi
   } > "$secret_tmp"
   cat > "$override_tmp" <<EOF
 services:
@@ -113,7 +117,7 @@ EOF
   chmod 600 "$override_tmp"
   mv "$secret_tmp" "$RUNTIME_SECRETS_FILE"
   mv "$override_tmp" "$COMPOSE_OVERRIDE_FILE"
-  log "Runtime provider configuration and persistent /app/data mount installed without exposing credentials"
+  log "Runtime provider configuration and persistent /app/data mount installed; existing DaData material preserved without exposing credentials"
 }
 
 verify_runtime_persistence_mount() {

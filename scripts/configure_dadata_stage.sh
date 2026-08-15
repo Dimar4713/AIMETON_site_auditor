@@ -12,6 +12,7 @@ DADATA_SECRET="${DADATA_SECRET:-}"
 DADATA_SMOKE_QUERY="${DADATA_SMOKE_QUERY:-7707083893}"
 DADATA_PUBLIC_READY_ATTEMPTS="${DADATA_PUBLIC_READY_ATTEMPTS:-8}"
 DADATA_FIND_PARTY_URL="https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party"
+DADATA_RUNTIME_CHANGED=0
 
 log() {
   printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
@@ -64,16 +65,28 @@ target.write_text("\n".join(kept) + "\n", encoding="utf-8")
 PY
 
 chmod 600 "$tmp"
-mv "$tmp" "$RUNTIME_SECRETS_FILE"
-log "DaData runtime credentials installed without exposing values"
+if [[ -f "$RUNTIME_SECRETS_FILE" ]] && cmp -s "$tmp" "$RUNTIME_SECRETS_FILE"; then
+  rm -f "$tmp"
+  DADATA_RUNTIME_CHANGED=0
+  log "DaData runtime credentials already match desired state; preserving running container"
+else
+  mv "$tmp" "$RUNTIME_SECRETS_FILE"
+  DADATA_RUNTIME_CHANGED=1
+  log "DaData runtime credentials changed and were installed without exposing values"
+fi
 
-(
-  cd "$STACK_DIR"
-  docker compose \
-    -f docker-compose.yml \
-    -f "$COMPOSE_OVERRIDE_FILE" \
-    up -d --force-recreate "$SERVICE"
-)
+if (( DADATA_RUNTIME_CHANGED == 1 )); then
+  (
+    cd "$STACK_DIR"
+    docker compose \
+      -f docker-compose.yml \
+      -f "$COMPOSE_OVERRIDE_FILE" \
+      up -d --force-recreate "$SERVICE"
+  )
+  log "Auditor recreated because DaData runtime material changed"
+else
+  log "Auditor recreate skipped because DaData runtime material is unchanged"
+fi
 
 for _ in $(seq 1 36); do
   status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
