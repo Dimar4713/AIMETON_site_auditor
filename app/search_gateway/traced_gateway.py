@@ -99,7 +99,8 @@ class TracedSearchGateway(SearchGateway):
         bound = current_trace_identity()
         mission_id = bound.mission_id if bound else request.mission_id
         attempt_id = bound.attempt_id if bound else request.correlation_id
-        query_index = int(hashlib.sha256(fingerprint.encode("ascii")).hexdigest()[:8], 16)
+        normalized_fingerprint = fingerprint.removeprefix("sha256:")
+        query_index = int(hashlib.sha256(normalized_fingerprint.encode("ascii")).hexdigest()[:8], 16)
         runtime_version = os.getenv("AIMETON_RUNTIME_VERSION") or None
         provider_budget_seconds = _provider_budget_seconds(policy)
         live_key = f"{mission_id}:{attempt_id}:query:{query_index}:{provider_name}:live"
