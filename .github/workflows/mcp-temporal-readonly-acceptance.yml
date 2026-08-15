@@ -23,7 +23,10 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
-    runs-on: [self-hosted, Linux, X64]
+    # This acceptance only uses the public HTTPS MCP endpoint. Keeping it off
+    # the Stage self-hosted runner prevents a stuck acceptance from blocking
+    # exact-SHA deployments on the single stage executor.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       TARGET_REF: ${{ inputs.ref || github.event.workflow_run.head_sha }}
