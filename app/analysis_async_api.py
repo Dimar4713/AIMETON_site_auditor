@@ -11,6 +11,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 
+from app.analysis_runtime_projection import AnalysisProjection, AnalysisRuntimeProjectionStore
 from app.async_enriched_analysis import run_enriched_site_analysis
 from app.heuristics import heuristic_analysis
 from app.mission_orchestrator import (
@@ -20,6 +21,7 @@ from app.mission_orchestrator import (
     record_legacy_site_turn,
 )
 from app.models import AnalyzeRequest
+from app.runtime_convergence import runtime_instance_id
 from app.runtime_time import runtime_time_snapshot
 from app.scraper import FetchError, fetch_site
 from app.trace_context import bind_trace_identity
@@ -34,6 +36,7 @@ _MCP_TASKS: set[asyncio.Task[None]] = set()
 
 _DEFAULT_ANALYSIS_DEADLINE_SECONDS = 180.0
 _DEFAULT_HEARTBEAT_SECONDS = 15.0
+_TERMINAL_ANALYSIS_STATES = frozenset({"completed", "failed"})
 
 
 class AnalysisNotFoundError(LookupError):
@@ -111,16 +114,66 @@ def _heartbeat_seconds() -> float:
     )
 
 
+def _runtime_db_path() -> str:
+    return os.getenv("AIMETON_RUNTIME_DB", "data/runtime-core.sqlite3")
+
+
 def _trace_db_path() -> str:
     return os.getenv(
         "AIMETON_TRACE_DB",
-        os.getenv("AIMETON_RUNTIME_DB", "data/runtime-core.sqlite3"),
+        _runtime_db_path(),
     )
 
 
 @lru_cache(maxsize=4)
 def _trace_ledger_for(path: str) -> SQLiteTraceLedger:
     return SQLiteTraceLedger(path)
+
+
+@lru_cache(maxsize=4)
+def _analysis_projection_for(path: str) -> AnalysisRuntimeProjectionStore:
+    return AnalysisRuntimeProjectionStore(path)
+
+
+def _persist_projection(record: dict[str, Any]) -> None:
+    """Persist one observable analysis snapshot without breaking the live path."""
+    try:
+        _analysis_projection_for(_runtime_db_path()).upsert(
+            analysis_id=str(record["analysis_id"]),
+            mission_id=str(record["mission_id"]),
+            source_url=str(record["source_url"]),
+            state=str(record["state"]),
+            phase=str(record.get("phase") or "unknown"),
+            created_at=str(record["created_at"]),
+            updated_at=str(record["updated_at"]),
+            runtime_instance_id=str(record["runtime_instance_id"]),
+            result=record.get("result"),
+        )
+    except Exception:
+        # Durability is additive. A projection failure must not regress the
+        # established in-process analysis path.
+        return
+
+
+def _persist_projection_event(analysis_id: str, event: dict[str, Any]) -> None:
+    try:
+        _analysis_projection_for(_runtime_db_path()).append_event(analysis_id, event)
+    except Exception:
+        return
+
+
+def _projection_record(analysis_id: str) -> AnalysisProjection | None:
+    try:
+        return _analysis_projection_for(_runtime_db_path()).get(analysis_id)
+    except Exception:
+        return None
+
+
+def _projection_events(analysis_id: str) -> list[dict[str, Any]]:
+    try:
+        return _analysis_projection_for(_runtime_db_path()).events(analysis_id)
+    except Exception:
+        return []
 
 
 def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
@@ -264,6 +317,41 @@ def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
     }
 
 
+def _interrupted_progress(progress: dict[str, Any]) -> dict[str, Any]:
+    """Make old in-flight trace truthful after the owning process has died."""
+    projected = dict(progress)
+    active = list(projected.get("active_provider_calls") or [])
+    projected["interrupted_active_provider_calls"] = len(active)
+    projected["active_provider_calls"] = []
+    if projected.get("llm_state") == "running":
+        projected["llm_state"] = "interrupted"
+        projected["llm_overdue"] = False
+    return projected
+
+
+def _restart_interruption_event(
+    events: list[dict[str, Any]],
+    *,
+    previous_state: str,
+) -> dict[str, Any]:
+    umel = get_umel_event("flow.gap_detected")
+    if umel is None:
+        raise ValueError("unknown_umel_event:flow.gap_detected")
+    return AnalysisEvent(
+        sequence=len(events) + 1,
+        timestamp=_canonical_now(),
+        phase="runtime_restart_detected",
+        event_code="flow.gap_detected",
+        icon=umel.icon,
+        state="stalled",
+        icon_key="alert-triangle",
+        message="Runtime был перезапущен до завершения анализа.",
+        detail=f"Сохранённое состояние до restart: {previous_state}.",
+        heartbeat=False,
+        next_action="Требуется controlled resume; исходный analysis_id сохранён.",
+    ).model_dump(mode="json")
+
+
 def _append_event(
     analysis_id: str,
     *,
@@ -280,27 +368,31 @@ def _append_event(
     if umel is None:
         raise ValueError(f"unknown_umel_event:{event_code}")
     now = _canonical_now()
+    event_payload: dict[str, Any]
+    record_snapshot: dict[str, Any]
     with _LOCK:
         record = _ANALYSES[analysis_id]
         events = record["events"]
-        events.append(
-            AnalysisEvent(
-                sequence=len(events) + 1,
-                timestamp=now,
-                phase=phase,
-                event_code=event_code,
-                icon=umel.icon,
-                state=state,
-                icon_key=icon_key,
-                message=message,
-                detail=detail,
-                heartbeat=heartbeat,
-                next_action=next_action,
-            ).model_dump(mode="json")
-        )
+        event_payload = AnalysisEvent(
+            sequence=len(events) + 1,
+            timestamp=now,
+            phase=phase,
+            event_code=event_code,
+            icon=umel.icon,
+            state=state,
+            icon_key=icon_key,
+            message=message,
+            detail=detail,
+            heartbeat=heartbeat,
+            next_action=next_action,
+        ).model_dump(mode="json")
+        events.append(event_payload)
         record["state"] = state
         record["phase"] = phase
         record["updated_at"] = now.isoformat()
+        record_snapshot = dict(record)
+    _persist_projection(record_snapshot)
+    _persist_projection_event(analysis_id, event_payload)
 
 
 def create_analysis_runtime(
@@ -321,6 +413,8 @@ def create_analysis_runtime(
         _ANALYSES[analysis_id] = {
             "analysis_id": analysis_id,
             "mission_id": mission_id,
+            "source_url": source_url,
+            "runtime_instance_id": runtime_instance_id(),
             "state": "queued",
             "phase": "mission_accepted",
             "created_at": now,
@@ -328,6 +422,8 @@ def create_analysis_runtime(
             "events": [],
             "result": None,
         }
+        initial_snapshot = dict(_ANALYSES[analysis_id])
+    _persist_projection(initial_snapshot)
     _append_event(
         analysis_id,
         phase="mission_accepted",
@@ -346,21 +442,67 @@ def create_analysis_runtime(
     )
 
 
+def _status_from_projection(projection: AnalysisProjection) -> dict[str, Any]:
+    interrupted = (
+        projection.state not in _TERMINAL_ANALYSIS_STATES
+        and projection.runtime_instance_id != runtime_instance_id()
+    )
+    payload: dict[str, Any] = {
+        "analysis_id": projection.analysis_id,
+        "mission_id": projection.mission_id,
+        "state": "stalled" if interrupted else projection.state,
+        "phase": "runtime_restart_detected" if interrupted else projection.phase,
+        "created_at": projection.created_at,
+        "updated_at": projection.updated_at,
+        "result": projection.result,
+    }
+    progress = _trace_runtime_snapshot(projection.mission_id, projection.analysis_id)
+    if interrupted:
+        payload.update(
+            {
+                "interrupted_by_runtime_restart": True,
+                "interruption_reason": "runtime_instance_changed",
+                "previous_state": projection.state,
+                "resume_required": True,
+                "resume_supported": False,
+            }
+        )
+        progress = _interrupted_progress(progress)
+    else:
+        payload.update(
+            {
+                "interrupted_by_runtime_restart": False,
+                "resume_required": False,
+            }
+        )
+    payload["progress"] = progress
+    return payload
+
+
 def get_analysis_status_payload(analysis_id: str) -> dict[str, Any]:
     """Return the canonical status projection shared by REST and MCP."""
     with _LOCK:
         record = _ANALYSES.get(analysis_id)
-        if record is None:
+        if record is not None:
+            payload = {
+                "analysis_id": record["analysis_id"],
+                "mission_id": record["mission_id"],
+                "state": record["state"],
+                "phase": record.get("phase"),
+                "created_at": record["created_at"],
+                "updated_at": record["updated_at"],
+                "result": record["result"],
+                "interrupted_by_runtime_restart": False,
+                "resume_required": False,
+            }
+        else:
+            payload = None
+    if payload is None:
+        projection = _projection_record(analysis_id)
+        if projection is None:
             raise AnalysisNotFoundError("analysis_not_found")
-        payload = {
-            "analysis_id": record["analysis_id"],
-            "mission_id": record["mission_id"],
-            "state": record["state"],
-            "phase": record.get("phase"),
-            "created_at": record["created_at"],
-            "updated_at": record["updated_at"],
-            "result": record["result"],
-        }
+        return _status_from_projection(projection)
+
     payload["progress"] = _trace_runtime_snapshot(
         str(payload["mission_id"]),
         analysis_id,
@@ -372,9 +514,25 @@ def get_analysis_events_payload(analysis_id: str) -> list[dict[str, Any]]:
     """Return the canonical UMEL event snapshot shared by REST and MCP."""
     with _LOCK:
         record = _ANALYSES.get(analysis_id)
-        if record is None:
-            raise AnalysisNotFoundError("analysis_not_found")
-        return list(record["events"])
+        if record is not None:
+            return list(record["events"])
+
+    projection = _projection_record(analysis_id)
+    if projection is None:
+        raise AnalysisNotFoundError("analysis_not_found")
+    events = _projection_events(analysis_id)
+    interrupted = (
+        projection.state not in _TERMINAL_ANALYSIS_STATES
+        and projection.runtime_instance_id != runtime_instance_id()
+    )
+    if interrupted:
+        events.append(
+            _restart_interruption_event(
+                events,
+                previous_state=projection.state,
+            )
+        )
+    return events
 
 
 def _heartbeat_detail(snapshot: dict[str, Any]) -> str:
