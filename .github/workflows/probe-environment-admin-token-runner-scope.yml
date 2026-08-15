@@ -1,0 +1,58 @@
+name: Probe environment admin token runner scope
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/probe-environment-admin-token-runner-scope.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ADMIN_TOKEN: ${{ secrets.AIMETON_ENVIRONMENT_ADMIN_TOKEN }}
+    steps:
+      - name: Verify secret is available
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${ADMIN_TOKEN:-}" ]]; then
+            echo 'AIMETON_ENVIRONMENT_ADMIN_TOKEN is unavailable' >&2
+            exit 1
+          fi
+
+      - name: Probe repository runner-registration authorization
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          repos=(
+            'Dimar4713/aimeton-infrastructure'
+            'Dimar4713/BIS-N-EC'
+            'Dimar4713/aimeton-architecture'
+            'Dimar4713/aimeton-site'
+            'Dimar4713/AIMETON_site_auditor'
+            'Dimar4713/Aletescop'
+          )
+          failed=0
+          for repo in "${repos[@]}"; do
+            status="$({ curl --silent --show-error \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "Authorization: Bearer ${ADMIN_TOKEN}" \
+              --header 'Accept: application/vnd.github+json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${repo}/actions/runners/registration-token"; } || true)"
+            echo "${repo} runner_registration_http=${status}"
+            if [[ "${status}" != '201' ]]; then
+              failed=1
+            fi
+          done
+          if [[ "${failed}" -ne 0 ]]; then
+            echo 'Existing token does not have runner-registration authority for every required repository.' >&2
+            exit 2
+          fi
+          echo 'existing_admin_token_runner_scope=complete'
