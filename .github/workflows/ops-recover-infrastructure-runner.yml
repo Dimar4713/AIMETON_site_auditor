@@ -10,21 +10,23 @@ permissions:
   contents: read
 
 jobs:
-  recover:
+  verify-listener:
     if: github.actor == 'Dimar4713'
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
     steps:
-      - name: Restart only infrastructure runner service
+      - name: Verify infrastructure runner listener after recovery
         shell: bash
         run: |
           set -euo pipefail
           unit='actions.runner.Dimar4713-aimeton-infrastructure.aimeton-main-server.service'
-          before="$(systemctl show -p MainPID --value "$unit")"
-          sudo systemctl restart "$unit"
-          sleep 3
           systemctl is-active --quiet "$unit"
-          after="$(systemctl show -p MainPID --value "$unit")"
-          test -n "$after"
-          test "$after" != '0'
-          printf 'infrastructure_runner_recovery=ok\nbefore_pid=%s\nafter_pid=%s\n' "$before" "$after"
+          pid="$(systemctl show -p MainPID --value "$unit")"
+          test -n "$pid"
+          test "$pid" != '0'
+          recent="$(sudo journalctl -u "$unit" --since '5 minutes ago' --no-pager -o cat | grep -E 'Connected to GitHub|Listening for Jobs|Runner connect error|Runner listener exit|Runner listener started' || true)"
+          printf 'infrastructure_runner_service=active\nmain_pid=%s\n' "$pid"
+          printf '%s\n' "$recent"
+          printf '%s\n' "$recent" | grep -q 'Connected to GitHub'
+          printf '%s\n' "$recent" | grep -q 'Listening for Jobs'
+          echo 'infrastructure_runner_listener=connected-and-listening'
