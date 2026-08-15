@@ -1,0 +1,22 @@
+name: Live Better DeepSeek Field Acceptance
+
+on:
+  push:
+    branches:
+      - ops/live-bds-field-acceptance-20260816
+    paths:
+      - scripts/accept_live_bds_field.py
+      - .github/workflows/live-bds-field-acceptance.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run live field acceptance through Better DeepSeek Origin
+        run: python3 scripts/accept_live_bds_field.py
