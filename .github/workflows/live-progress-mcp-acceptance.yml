@@ -1,6 +1,9 @@
 name: Live Progress MCP Acceptance
 
 on:
+  push:
+    branches:
+      - ops/live-progress-mcp-acceptance-20260815
   workflow_dispatch:
 
 permissions:
