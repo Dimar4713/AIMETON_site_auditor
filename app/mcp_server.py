@@ -5,6 +5,13 @@ import os
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from app.analysis_async_api import (
+    AnalysisNotFoundError,
+    create_analysis_runtime,
+    get_analysis_events_payload,
+    get_analysis_status_payload,
+    schedule_analysis_runtime,
+)
 from app.company_intelligence import run_company_intelligence
 from app.discovery import run_hunt
 from app.heuristics import heuristic_analysis
@@ -67,8 +74,13 @@ MCP_TRANSPORT_SECURITY = TransportSecuritySettings(
 mcp = FastMCP(
     "AIMETON Site Auditor",
     instructions=(
-        "Public read-only economic intelligence profile: site analysis, company hunting and "
-        "source-traceable company intelligence. Unconfirmed mentions must not be presented as facts."
+        "Public economic intelligence profile: site analysis, asynchronous analysis missions, "
+        "company hunting and source-traceable company intelligence. Unconfirmed mentions must "
+        "not be presented as facts. Prefer analysis.start/status/events for browser MCP clients "
+        "with short request timeouts; analyze_site remains available for backward compatibility. "
+        "When polling analysis.status or analysis.events repeatedly, increment the poll argument "
+        "using next_poll from the previous response so clients that deduplicate identical tool "
+        "calls still send each poll."
     ),
     stateless_http=True,
     json_response=True,
@@ -91,7 +103,7 @@ admin_mcp = FastMCP(
 
 @mcp.tool()
 async def analyze_site(url: str) -> dict:
-    """Analyze one public website and propose commercially useful AI solutions."""
+    """Analyze one public website synchronously; retained for backward compatibility."""
     orchestrator = get_mission_orchestrator()
     mission = orchestrator.create_mission(
         default_site_mission_request(url),
@@ -132,6 +144,58 @@ async def analyze_site(url: str) -> dict:
             "analysis_id": mission.contract.analysis_id,
         }
     ).model_dump(mode="json")
+
+
+@mcp.tool(name="analysis.start")
+async def analysis_start(url: str) -> dict:
+    """Start a durable-in-process website analysis and return identifiers immediately."""
+    started = create_analysis_runtime(url, entry_point=EntryPoint.MCP)
+    schedule_analysis_runtime(
+        source_url=url,
+        mission_id=started.mission_id,
+        analysis_id=started.analysis_id,
+    )
+    payload = started.model_dump(mode="json")
+    payload["next_poll"] = 1
+    payload["polling_instruction"] = (
+        "Call analysis.status and/or analysis.events with poll=1, then use next_poll "
+        "from each response for the next request."
+    )
+    return payload
+
+
+@mcp.tool(name="analysis.status")
+async def analysis_status(analysis_id: str, poll: int = 0) -> dict:
+    """Read current state; increment poll on repeated calls to avoid client-side deduplication."""
+    if poll < 0:
+        raise ValueError("poll_must_be_non_negative")
+    try:
+        payload = get_analysis_status_payload(analysis_id)
+    except AnalysisNotFoundError:
+        raise ValueError("analysis_not_found") from None
+    return {
+        **payload,
+        "poll": poll,
+        "next_poll": poll + 1,
+    }
+
+
+@mcp.tool(name="analysis.events")
+async def analysis_events(analysis_id: str, poll: int = 0) -> dict:
+    """Read UMEL progress events; increment poll on repeated calls to avoid client-side deduplication."""
+    if poll < 0:
+        raise ValueError("poll_must_be_non_negative")
+    try:
+        events = get_analysis_events_payload(analysis_id)
+    except AnalysisNotFoundError:
+        raise ValueError("analysis_not_found") from None
+    return {
+        "analysis_id": analysis_id,
+        "poll": poll,
+        "next_poll": poll + 1,
+        "event_count": len(events),
+        "events": events,
+    }
 
 
 @mcp.tool()
@@ -208,6 +272,9 @@ async def security_profile() -> dict:
         "authentication": "bearer-token",
         "public_tools": [
             "analyze_site",
+            "analysis.start",
+            "analysis.status",
+            "analysis.events",
             "start_search_mission",
             "runtime.time",
             "runtime.wait.status",

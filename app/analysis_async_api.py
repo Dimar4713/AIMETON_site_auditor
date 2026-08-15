@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, Literal
@@ -25,6 +26,11 @@ from app.umel import get_umel_event
 router = APIRouter(prefix="/api/analyze", tags=["analysis-runtime"])
 _LOCK = RLock()
 _ANALYSES: dict[str, dict[str, Any]] = {}
+_MCP_TASKS: set[asyncio.Task[None]] = set()
+
+
+class AnalysisNotFoundError(LookupError):
+    """Raised when an async analysis identifier is unknown to this runtime."""
 
 
 class ApiModel(BaseModel):
@@ -102,6 +108,73 @@ def _append_event(
         )
         record["state"] = state
         record["updated_at"] = now.isoformat()
+
+
+def create_analysis_runtime(
+    source_url: str,
+    *,
+    entry_point: EntryPoint,
+) -> AnalysisStartResponse:
+    """Create the canonical mission + async analysis record without starting work."""
+    orchestrator = get_mission_orchestrator()
+    mission = orchestrator.create_mission(
+        default_site_mission_request(source_url),
+        entry_point=entry_point,
+    )
+    mission_id = mission.contract.mission_id
+    analysis_id = mission.contract.analysis_id
+    now = _canonical_now().isoformat()
+    with _LOCK:
+        _ANALYSES[analysis_id] = {
+            "analysis_id": analysis_id,
+            "mission_id": mission_id,
+            "state": "queued",
+            "created_at": now,
+            "updated_at": now,
+            "events": [],
+            "result": None,
+        }
+    _append_event(
+        analysis_id,
+        phase="mission_accepted",
+        event_code="mission.received",
+        state="queued",
+        icon_key="inbox",
+        message="Задача принята и поставлена в очередь.",
+        next_action="Начать подключение к сайту.",
+    )
+    return AnalysisStartResponse(
+        mission_id=mission_id,
+        analysis_id=analysis_id,
+        state="queued",
+        status_url=f"/api/analyze/{analysis_id}",
+        events_url=f"/api/analyze/{analysis_id}/events",
+    )
+
+
+def get_analysis_status_payload(analysis_id: str) -> dict[str, Any]:
+    """Return the canonical status projection shared by REST and MCP."""
+    with _LOCK:
+        record = _ANALYSES.get(analysis_id)
+        if record is None:
+            raise AnalysisNotFoundError("analysis_not_found")
+        return {
+            "analysis_id": record["analysis_id"],
+            "mission_id": record["mission_id"],
+            "state": record["state"],
+            "created_at": record["created_at"],
+            "updated_at": record["updated_at"],
+            "result": record["result"],
+        }
+
+
+def get_analysis_events_payload(analysis_id: str) -> list[dict[str, Any]]:
+    """Return the canonical UMEL event snapshot shared by REST and MCP."""
+    with _LOCK:
+        record = _ANALYSES.get(analysis_id)
+        if record is None:
+            raise AnalysisNotFoundError("analysis_not_found")
+        return list(record["events"])
 
 
 async def _run_analysis(
@@ -187,74 +260,55 @@ async def _run_analysis(
         )
 
 
+def schedule_analysis_runtime(
+    *,
+    source_url: str,
+    mission_id: str,
+    analysis_id: str,
+) -> None:
+    """Schedule one MCP-started analysis and keep a strong task reference."""
+    task = asyncio.create_task(
+        _run_analysis(
+            source_url=source_url,
+            mission_id=mission_id,
+            analysis_id=analysis_id,
+        ),
+        name=f"aimeton-analysis:{analysis_id}",
+    )
+    _MCP_TASKS.add(task)
+    task.add_done_callback(_MCP_TASKS.discard)
+
+
 @router.post(
     "/start",
     response_model=AnalysisStartResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks):
-    orchestrator = get_mission_orchestrator()
-    mission = orchestrator.create_mission(
-        default_site_mission_request(str(req.url)),
+    started = create_analysis_runtime(
+        str(req.url),
         entry_point=EntryPoint.LEGACY_ADAPTER,
-    )
-    mission_id = mission.contract.mission_id
-    analysis_id = mission.contract.analysis_id
-    now = _canonical_now().isoformat()
-    with _LOCK:
-        _ANALYSES[analysis_id] = {
-            "analysis_id": analysis_id,
-            "mission_id": mission_id,
-            "state": "queued",
-            "created_at": now,
-            "updated_at": now,
-            "events": [],
-            "result": None,
-        }
-    _append_event(
-        analysis_id,
-        phase="mission_accepted",
-        event_code="mission.received",
-        state="queued",
-        icon_key="inbox",
-        message="Задача принята и поставлена в очередь.",
-        next_action="Начать подключение к сайту.",
     )
     background_tasks.add_task(
         _run_analysis,
         source_url=str(req.url),
-        mission_id=mission_id,
-        analysis_id=analysis_id,
+        mission_id=started.mission_id,
+        analysis_id=started.analysis_id,
     )
-    return AnalysisStartResponse(
-        mission_id=mission_id,
-        analysis_id=analysis_id,
-        state="queued",
-        status_url=f"/api/analyze/{analysis_id}",
-        events_url=f"/api/analyze/{analysis_id}/events",
-    )
+    return started
 
 
 @router.get("/{analysis_id}")
 def get_analysis_status(analysis_id: str):
-    with _LOCK:
-        record = _ANALYSES.get(analysis_id)
-        if record is None:
-            raise HTTPException(status_code=404, detail="analysis_not_found")
-        return {
-            "analysis_id": record["analysis_id"],
-            "mission_id": record["mission_id"],
-            "state": record["state"],
-            "created_at": record["created_at"],
-            "updated_at": record["updated_at"],
-            "result": record["result"],
-        }
+    try:
+        return get_analysis_status_payload(analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="analysis_not_found") from exc
 
 
 @router.get("/{analysis_id}/events", response_model=list[AnalysisEvent])
 def get_analysis_events(analysis_id: str):
-    with _LOCK:
-        record = _ANALYSES.get(analysis_id)
-        if record is None:
-            raise HTTPException(status_code=404, detail="analysis_not_found")
-        return list(record["events"])
+    try:
+        return get_analysis_events_payload(analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="analysis_not_found") from exc
