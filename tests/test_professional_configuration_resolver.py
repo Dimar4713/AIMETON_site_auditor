@@ -102,8 +102,6 @@ def test_historical_stop_action_is_rejected_in_favor_of_canonical_skip():
 
 
 def test_invalid_datetime_provenance_fails_with_format_checker():
-    config = _build(created_at="not-a-date")
-
     # Builder validates before returning, so malformed provenance fails immediately.
     with pytest.raises(ValidationError):
         build_hunter_professional_configuration(
