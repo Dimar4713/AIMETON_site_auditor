@@ -16,7 +16,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 3
     steps:
-      - name: Probe reasoning token budget syntax on strict ManagementSlice
+      - name: Probe reasoning effort levels on strict ManagementSlice
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -31,8 +31,8 @@ jobs:
 
           VARIANTS = [
               ("control", None),
-              ("reasoning_128", {"max_tokens": 128}),
-              ("reasoning_256", {"max_tokens": 256}),
+              ("effort_high", {"effort": "high"}),
+              ("effort_xhigh", {"effort": "xhigh"}),
           ]
 
           def synthetic_context():
@@ -150,7 +150,6 @@ jobs:
                   ))
               for result in results:
                   print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-              # Probe is diagnostic: HTTP rejection of a candidate is evidence, not workflow failure.
               if results[0]["http_status"] != 200:
                   raise SystemExit("routerai_control_http_failure")
 
