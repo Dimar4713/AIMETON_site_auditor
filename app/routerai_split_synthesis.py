@@ -31,10 +31,10 @@ TModel = TypeVar("TModel", bound=BaseModel)
 class ProfileExtraction(BaseModel):
     company_name: str
     business_summary: str
-    evidence: list[str] = Field(default_factory=list)
-    company_facts: list[CompanyFact] = Field(default_factory=list)
-    economic_signals: list[EconomicSignal] = Field(default_factory=list)
-    risks_and_assumptions: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list, max_length=12)
+    company_facts: list[CompanyFact] = Field(default_factory=list, max_length=30)
+    economic_signals: list[EconomicSignal] = Field(default_factory=list, max_length=16)
+    risks_and_assumptions: list[str] = Field(default_factory=list, max_length=16)
 
 
 class CommercialSynthesis(BaseModel):
@@ -93,6 +93,7 @@ async def _request_json(
         "model": MODEL,
         "temperature": 0.1,
         "max_tokens": max_tokens,
+        "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": system},
             {
@@ -109,7 +110,11 @@ async def _request_json(
                 json=payload,
             )
             response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+        body = response.json()
+        choice = body["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise SplitSynthesisPhaseError(phase, "OutputTruncated")
+        content = choice["message"]["content"]
         return model_type.model_validate(_extract_json(content))
     except (asyncio.TimeoutError, httpx.TimeoutException) as exc:
         raise SplitSynthesisPhaseTimeout(phase) from exc
@@ -357,6 +362,7 @@ async def analyze_with_routerai_split(
 - Каждый company_fact и economic_signal должен содержать только реально поддерживающие source_ids.
 - Не найдено — не выдумывай. Финансовые значения сопровождай периодом, если он известен.
 - Разделяй факты, сигналы и риски.
+- Пиши кратко: evidence не более 12 пунктов, company_facts не более 30, economic_signals не более 16, risks_and_assumptions не более 16.
 
 OFFICIAL URL: {url}
 TITLE: {title}
