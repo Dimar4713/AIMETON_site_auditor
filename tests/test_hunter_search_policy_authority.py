@@ -89,6 +89,38 @@ def test_default_env_authority_does_not_open_admin_repository(monkeypatch: pytes
     assert resolved.admin_policy_persisted is False
 
 
+def test_loaded_record_is_used_without_repository_reread(monkeypatch: pytest.MonkeyPatch) -> None:
+    base = _base_policy()
+    record = _admin_record(persisted=True)
+
+    def forbidden_repository_open():
+        raise AssertionError("loaded settings record must be the single observation snapshot")
+
+    monkeypatch.setattr(policy_authority, "get_search_strategy_settings_repository", forbidden_repository_open)
+    resolved = resolve_hunter_search_policy(
+        authority=HunterSearchPolicyAuthority.ADMIN,
+        base_policy=base,
+        settings_record=record,
+    )
+
+    expected = record.settings.apply_search_policy(base)
+    assert resolved.policy == expected
+    assert resolved.selected_policy_fingerprint == resolved.admin_projection_fingerprint
+
+
+def test_record_and_repository_cannot_be_mixed() -> None:
+    record = _admin_record(persisted=True)
+    repository = FakeSettingsRepository(record)
+
+    with pytest.raises(ValueError, match="provide_settings_record_or_repository_not_both"):
+        resolve_hunter_search_policy(
+            authority=HunterSearchPolicyAuthority.ADMIN,
+            base_policy=_base_policy(),
+            settings_record=record,
+            settings_repository=repository,
+        )
+
+
 def test_explicit_admin_authority_uses_persisted_projection() -> None:
     base = _base_policy()
     record = _admin_record(persisted=True)

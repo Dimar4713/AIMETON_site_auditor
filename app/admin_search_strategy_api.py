@@ -11,6 +11,10 @@ from app.hunter_professional_provenance import (
     fingerprint_model_payload,
     summarize_gateway_policy,
 )
+from app.hunter_search_policy_authority import (
+    HunterSearchPolicyAuthority,
+    resolve_hunter_search_policy,
+)
 from app.search_gateway import search_policy_from_env
 from app.search_observer_quality_policy import QualityFirstPromotionPolicy
 from app.search_quality_policy_settings import (
@@ -44,21 +48,56 @@ def _require_csrf(cookie_token: str | None, header_token: str | None) -> None:
 
 
 def _execution_policy_observation(record: SearchStrategySettingsRecord) -> dict:
+    """Describe configured, candidate and selected Hunter policies without executing search.
+
+    All runtime authority facts come from the same canonical resolver used by
+    ``run_hunt()``. The already-loaded admin record is passed into the resolver so
+    selected/candidate comparisons are based on one settings snapshot.
+    """
+
     actual = search_policy_from_env()
     projected = record.settings.apply_search_policy(actual)
     actual_summary = summarize_gateway_policy(actual)
     projected_summary = summarize_gateway_policy(projected)
+    runtime_resolution = resolve_hunter_search_policy(
+        base_policy=actual,
+        settings_record=record,
+    )
+    selected_summary = summarize_gateway_policy(runtime_resolution.policy)
+
+    admin_candidate_summary = None
+    admin_candidate_fingerprint = None
+    admin_candidate_matches_projection = None
+    admin_candidate_available = record.updated_at is not None
+    if admin_candidate_available:
+        admin_candidate = resolve_hunter_search_policy(
+            authority=HunterSearchPolicyAuthority.ADMIN,
+            base_policy=actual,
+            settings_record=record,
+        )
+        admin_candidate_summary = summarize_gateway_policy(admin_candidate.policy)
+        admin_candidate_fingerprint = admin_candidate.selected_policy_fingerprint
+        admin_candidate_matches_projection = (
+            admin_candidate_fingerprint == projected_summary["fingerprint"]
+        )
+
     quality_record = get_search_quality_policy_repository().get()
     return {
+        "runtime_authority": runtime_resolution.authority.value,
+        "selected_gateway_policy": selected_summary,
+        "selected_policy_fingerprint": runtime_resolution.selected_policy_fingerprint,
         "actual_gateway_policy": actual_summary,
         "projected_admin_gateway_policy": projected_summary,
+        "admin_candidate_available": admin_candidate_available,
+        "admin_candidate_gateway_policy": admin_candidate_summary,
+        "admin_candidate_policy_fingerprint": admin_candidate_fingerprint,
+        "admin_candidate_matches_projection": admin_candidate_matches_projection,
         "configured_admin_policy_fingerprint": fingerprint_model_payload(record.settings),
         "quality_policy_fingerprint": fingerprint_model_payload(quality_record.policy),
         "policy_equivalent": actual_summary["fingerprint"] == projected_summary["fingerprint"],
-        # Current run_hunt() call site passes search_policy_from_env() directly.
-        # Keep this explicit so UI/acceptance evidence never mistakes a matching
-        # configuration for proof that the admin projection was execution authority.
-        "runtime_callsite_uses_admin_projection": False,
+        "runtime_callsite_uses_admin_projection": (
+            runtime_resolution.authority is HunterSearchPolicyAuthority.ADMIN
+        ),
         "routing_changed_by_observation": False,
     }
 
