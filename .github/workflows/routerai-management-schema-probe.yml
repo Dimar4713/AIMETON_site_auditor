@@ -16,7 +16,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 3
     steps:
-      - name: Compare Pro and Flash on realistic bounded ManagementSlice
+      - name: Probe reasoning token budget syntax on strict ManagementSlice
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -29,9 +29,10 @@ jobs:
 
           from app.routerai_profile_extraction import ManagementSlice
 
-          MODELS = [
-              "deepseek/deepseek-v4-pro",
-              "deepseek/deepseek-v4-flash",
+          VARIANTS = [
+              ("control", None),
+              ("reasoning_128", {"max_tokens": 128}),
+              ("reasoning_256", {"max_tokens": 256}),
           ]
 
           def synthetic_context():
@@ -57,11 +58,12 @@ jobs:
               ) * 35
               return official[:3550], json.dumps(sources, ensure_ascii=False, separators=(",", ":"))[:10000]
 
-          async def probe(model, client, official, sources):
+          async def probe(label, reasoning, client, official, sources):
               key = os.getenv("ROUTERAI_API_KEY")
               if not key:
                   raise RuntimeError("routerai_key_not_configured")
               base = os.getenv("ROUTERAI_BASE_URL", "https://routerai.ru/api/v1")
+              model = "deepseek/deepseek-v4-pro"
               schema = ManagementSlice.model_json_schema()
               prompt = f"""Extract only formal management facts.
           Allowed fields: founders, executives. Return at most one compact fact per field.
@@ -87,6 +89,9 @@ jobs:
                       {"role": "user", "content": prompt},
                   ],
               }
+              if reasoning is not None:
+                  payload["reasoning"] = reasoning
+
               started = time.perf_counter()
               response = await client.post(
                   f"{base}/chat/completions",
@@ -95,6 +100,8 @@ jobs:
               )
               elapsed = time.perf_counter() - started
               result = {
+                  "variant": label,
+                  "reasoning_request": reasoning,
                   "model": model,
                   "http_status": response.status_code,
                   "elapsed_seconds": round(elapsed, 3),
@@ -106,8 +113,7 @@ jobs:
                   "prompt_tokens": None,
                   "completion_tokens": None,
                   "reasoning_tokens": None,
-                  "usage_keys": [],
-                  "completion_detail_keys": [],
+                  "response_bytes": len(response.content),
                   "response_content_exposed": False,
                   "secret_values_exposed": False,
               }
@@ -124,8 +130,6 @@ jobs:
                       pass
                   usage = body.get("usage") or {}
                   details = usage.get("completion_tokens_details") or {}
-                  result["usage_keys"] = sorted(str(k) for k in usage.keys())
-                  result["completion_detail_keys"] = sorted(str(k) for k in details.keys())
                   result["prompt_tokens"] = usage.get("prompt_tokens")
                   result["completion_tokens"] = usage.get("completion_tokens")
                   result["reasoning_tokens"] = (
@@ -141,12 +145,14 @@ jobs:
               official, sources = synthetic_context()
               async with httpx.AsyncClient(timeout=30) as client:
                   results = await asyncio.gather(*(
-                      probe(model, client, official, sources) for model in MODELS
+                      probe(label, reasoning, client, official, sources)
+                      for label, reasoning in VARIANTS
                   ))
               for result in results:
                   print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-              if not all(result["http_status"] == 200 for result in results):
-                  raise SystemExit("routerai_model_ab_http_failure")
+              # Probe is diagnostic: HTTP rejection of a candidate is evidence, not workflow failure.
+              if results[0]["http_status"] != 200:
+                  raise SystemExit("routerai_control_http_failure")
 
           asyncio.run(main())
           PY
