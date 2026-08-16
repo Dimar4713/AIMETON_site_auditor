@@ -62,7 +62,7 @@ jobs:
             printf '%s\n' "- stage auditor status: \`$status\`"
           } > "$REPORT"
 
-      - name: Inspect configured projection and resolver execution authority without provider calls
+      - name: Inspect dynamic execution authority and admin candidate without provider calls
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -75,9 +75,7 @@ jobs:
           import os
 
           from app.admin_search_strategy_api import _execution_policy_observation
-          from app.hunter_search_policy_authority import resolve_hunter_search_policy
           from app.models import HuntRequest
-          from app.search_gateway import search_policy_from_env
           from app.search_strategy_settings import get_search_strategy_settings_repository
 
           record = get_search_strategy_settings_repository().get()
@@ -87,7 +85,8 @@ jobs:
           observation = _execution_policy_observation(record)
           projected = observation['projected_admin_gateway_policy']
           actual = observation['actual_gateway_policy']
-          authority_resolution = resolve_hunter_search_policy(base_policy=search_policy_from_env())
+          selected = observation['selected_gateway_policy']
+          admin_candidate = observation['admin_candidate_gateway_policy']
           effective_hunt = settings.apply_hunt_request(
               HuntRequest(region='runtime-inspection', industries=['runtime-inspection'])
           )
@@ -112,12 +111,22 @@ jobs:
               'expected_projected_provider_order': expected_order,
               'actual_projected_provider_order': projected['provider_order'],
           }
-          assert authority_resolution.authority.value == 'env', authority_resolution.authority
-          assert authority_resolution.selected_policy_fingerprint == actual['fingerprint']
-          assert authority_resolution.env_policy_fingerprint == actual['fingerprint']
-          assert authority_resolution.admin_projection_fingerprint is None
-          assert authority_resolution.admin_policy_persisted is False
+
+          # Current Stage must remain env-authoritative. These values are emitted by
+          # the same canonical resolver used by run_hunt(), via the admin API helper.
+          assert observation['runtime_authority'] == 'env', observation['runtime_authority']
           assert observation['runtime_callsite_uses_admin_projection'] is False
+          assert selected == actual
+          assert observation['selected_policy_fingerprint'] == actual['fingerprint']
+
+          # The persisted ADMIN policy is resolved as a candidate only. It is never
+          # passed to SearchGateway by this acceptance and must exactly match the
+          # separately projected persisted admin policy.
+          assert observation['admin_candidate_available'] is True
+          assert observation['admin_candidate_matches_projection'] is True
+          assert admin_candidate == projected
+          assert observation['admin_candidate_policy_fingerprint'] == projected['fingerprint']
+
           assert observation['routing_changed_by_observation'] is False
           assert actual['fingerprint'].startswith('sha256:')
           assert projected['fingerprint'].startswith('sha256:')
@@ -132,10 +141,15 @@ jobs:
                   if global_settings.emergency_strategy_override is not None
                   else None
               ),
-              'runtime_authority': authority_resolution.authority.value,
-              'resolver_selected_policy_fingerprint': authority_resolution.selected_policy_fingerprint,
+              'runtime_authority': observation['runtime_authority'],
+              'selected_gateway_policy': selected,
+              'selected_policy_fingerprint': observation['selected_policy_fingerprint'],
               'actual_gateway_policy': actual,
               'projected_admin_gateway_policy': projected,
+              'admin_candidate_available': observation['admin_candidate_available'],
+              'admin_candidate_gateway_policy': admin_candidate,
+              'admin_candidate_policy_fingerprint': observation['admin_candidate_policy_fingerprint'],
+              'admin_candidate_matches_projection': observation['admin_candidate_matches_projection'],
               'policy_equivalent': observation['policy_equivalent'],
               'runtime_callsite_uses_admin_projection': observation['runtime_callsite_uses_admin_projection'],
               'routing_changed_by_observation': observation['routing_changed_by_observation'],
@@ -165,12 +179,12 @@ jobs:
             echo '```'
             echo
             echo '- provider calls: `0`'
-            echo '- configured admin projection checked against expected Stage product settings: ✅'
-            echo '- canonical resolver runtime authority: `env` ✅'
-            echo '- resolver selected fingerprint equals actual SearchGateway env policy: ✅'
-            echo '- admin projection remains configured/observational and is not activated by this acceptance.'
+            echo '- canonical admin observation runtime authority: `env` ✅'
+            echo '- selected policy equals actual SearchGateway env policy: ✅'
+            echo '- persisted ADMIN candidate equals projected admin policy: ✅'
+            echo '- ADMIN candidate activated: `false`'
             echo '- routing changed by acceptance: `false`'
-            echo '- verdict: ✅ configured projection and resolver execution authority are distinguished without provider calls.'
+            echo '- verdict: ✅ runtime selection and admin candidate share one canonical resolver without provider calls.'
           } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized evidence
