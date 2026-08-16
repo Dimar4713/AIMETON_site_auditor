@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from hashlib import sha256
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 
 from app.models import HuntRequest
 
@@ -28,13 +29,30 @@ def load_professional_configuration_schema() -> dict[str, Any]:
     return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
+def _validate_timezone_aware_iso8601(value: Any) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError("provenance.created_at must be a non-empty ISO-8601 datetime")
+    raw = value.strip()
+    try:
+        parsed = datetime.fromisoformat(raw[:-1] + "+00:00" if raw.endswith("Z") else raw)
+    except ValueError as exc:
+        raise ValidationError("provenance.created_at must be valid ISO-8601") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValidationError("provenance.created_at must include a timezone offset")
+
+
 def validate_professional_configuration(config: Mapping[str, Any]) -> None:
-    """Fail closed against the canonical Professional Configuration schema."""
+    """Fail closed against schema plus critical semantic invariants."""
     validator = Draft202012Validator(
         load_professional_configuration_schema(),
         format_checker=FormatChecker(),
     )
-    validator.validate(dict(config))
+    payload = dict(config)
+    validator.validate(payload)
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValidationError("provenance must be an object")
+    _validate_timezone_aware_iso8601(provenance.get("created_at"))
 
 
 def _normalize_string(value: str) -> str:
