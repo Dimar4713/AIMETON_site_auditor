@@ -13,6 +13,7 @@ from app.hunter_forensic_trace import HunterForensicTrace
 from app.hunter_handbook import OPPORTUNITY_PATTERNS, resolve_industries
 from app.hunter_lead_fit import classify_lead_fit, lead_fit_rank
 from app.hunter_query_intelligence import generate_hunter_query_plan
+from app.hunter_search_policy_authority import resolve_hunter_search_policy
 from app.hunter_source_role import classify_source_role, role_rank
 from app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
@@ -22,7 +23,6 @@ from app.search_gateway import (
     SearchDiagnostics,
     SearchRequest,
     get_search_gateway,
-    search_policy_from_env,
 )
 from app.trace_ledger import TraceState
 
@@ -317,7 +317,22 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
     raw_results: list[dict] = []
     search_diagnostics: list[SearchDiagnostics] = []
     gateway = get_search_gateway()
-    policy = search_policy_from_env()
+    policy_resolution = resolve_hunter_search_policy()
+    policy = policy_resolution.policy
+    trace.append(
+        "hunt_search_policy_resolved",
+        state=TraceState.SUCCEEDED,
+        reason_code="hunter_search_policy_authority_resolved",
+        summary="Hunter SearchGateway execution policy authority resolved before provider calls",
+        metadata={
+            "authority": policy_resolution.authority.value,
+            "selected_policy_fingerprint": policy_resolution.selected_policy_fingerprint,
+            "env_policy_fingerprint": policy_resolution.env_policy_fingerprint,
+            "admin_projection_fingerprint": policy_resolution.admin_projection_fingerprint,
+            "policy_equivalent": policy_resolution.policy_equivalent,
+            "admin_policy_persisted": policy_resolution.admin_policy_persisted,
+        },
+    )
 
     async def search_query(query: str):
         return await gateway.search(
