@@ -16,7 +16,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 3
     steps:
-      - name: Read allowlisted RouterAI metrics from live Runtime Core
+      - name: Read allowlisted split-synthesis failure metadata from live Runtime Core
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -24,34 +24,44 @@ jobs:
           import json
           import sqlite3
 
-          mission_id = "mission_9308825276a9481e8ee0a98e7ec24992"
+          mission_id = "mission_93b10c885bec49c8b109adf0b49e1936"
           db = sqlite3.connect("/app/data/runtime-core.sqlite3")
           row = db.execute(
               """
-              SELECT mission_id, attempt_id, metadata_json, created_at
+              SELECT mission_id, attempt_id, operation, state, reason_code,
+                     duration_ms, metadata_json, created_at
               FROM mission_trace_events
-              WHERE mission_id = ? AND operation = 'llm_started'
+              WHERE mission_id = ?
+                AND operation IN ('llm_finished', 'llm_timeout')
               ORDER BY created_at DESC
               LIMIT 1
               """,
               (mission_id,),
           ).fetchone()
           if row is None:
-              raise SystemExit("llm_started_trace_not_found")
-          metadata = json.loads(row[2])
+              raise SystemExit("llm_terminal_trace_not_found")
+          metadata = json.loads(row[6])
           allowed = [
               "model",
+              "budget_seconds",
+              "synthesis_mode",
+              "failed_phase",
+              "phase_error_type",
+              "error_type",
               "official_text_chars",
               "external_context_chars",
               "external_source_count",
               "schema_chars",
               "dynamic_input_chars",
-              "budget_seconds",
           ]
           metrics = {key: metadata.get(key) for key in allowed}
           print(json.dumps({
               "mission_id": row[0],
-              "created_at": row[3],
-              "metrics": metrics,
+              "operation": row[2],
+              "state": row[3],
+              "reason_code": row[4],
+              "duration_ms": row[5],
+              "created_at": row[7],
+              "metadata": metrics,
           }, ensure_ascii=False, sort_keys=True))
           PY
