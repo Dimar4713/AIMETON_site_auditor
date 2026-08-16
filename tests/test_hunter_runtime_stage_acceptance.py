@@ -17,11 +17,14 @@ def test_hunter_runtime_acceptance_is_dispatch_only_and_no_cost() -> None:
     assert "expected_provider_order" in text
     assert "get_search_strategy_settings_repository" in text
     assert "_execution_policy_observation" in text
-    assert "resolve_hunter_search_policy" in text
     assert "actual_gateway_policy" in text
     assert "projected_admin_gateway_policy" in text
+    assert "selected_gateway_policy" in text
+    assert "selected_policy_fingerprint" in text
+    assert "admin_candidate_gateway_policy" in text
+    assert "admin_candidate_policy_fingerprint" in text
+    assert "admin_candidate_matches_projection" in text
     assert "runtime_authority" in text
-    assert "resolver_selected_policy_fingerprint" in text
     assert "policy_equivalent" in text
     assert "runtime_callsite_uses_admin_projection" in text
     assert "routing_changed_by_observation" in text
@@ -31,15 +34,28 @@ def test_hunter_runtime_acceptance_is_dispatch_only_and_no_cost() -> None:
     assert "provider calls: `0`" in text
 
 
-def test_hunter_runtime_acceptance_proves_resolver_env_authority() -> None:
+def test_hunter_runtime_acceptance_proves_dynamic_env_selection_and_admin_candidate() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "authority_resolution = resolve_hunter_search_policy(base_policy=search_policy_from_env())" in text
-    assert "authority_resolution.authority.value == 'env'" in text
-    assert "authority_resolution.selected_policy_fingerprint == actual['fingerprint']" in text
-    assert "canonical resolver runtime authority: `env`" in text
-    assert "resolver selected fingerprint equals actual SearchGateway env policy" in text
-    assert "admin projection remains configured/observational" in text
+    assert "observation['runtime_authority'] == 'env'" in text
+    assert "selected == actual" in text
+    assert "observation['selected_policy_fingerprint'] == actual['fingerprint']" in text
+    assert "observation['admin_candidate_available'] is True" in text
+    assert "observation['admin_candidate_matches_projection'] is True" in text
+    assert "admin_candidate == projected" in text
+    assert "observation['admin_candidate_policy_fingerprint'] == projected['fingerprint']" in text
+    assert "canonical admin observation runtime authority: `env`" in text
+    assert "persisted ADMIN candidate equals projected admin policy" in text
+    assert "ADMIN candidate activated: `false`" in text
+
+
+def test_hunter_runtime_acceptance_does_not_bypass_admin_observation_resolver() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "resolve_hunter_search_policy" not in text
+    assert "search_policy_from_env" not in text
+    assert "authority_resolution" not in text
+    assert "observation = _execution_policy_observation(record)" in text
 
 
 def test_hunter_runtime_command_is_authorized_only_on_p1_501() -> None:
