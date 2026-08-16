@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+
+import pytest
 
 import app.routerai_split_synthesis as split
 from app.models import (
@@ -92,6 +95,116 @@ def test_split_synthesis_defaults_on_and_has_one_switch_rollback(monkeypatch) ->
 
     monkeypatch.setenv("ROUTERAI_SPLIT_SYNTHESIS", "1")
     assert routerai_split_synthesis_enabled() is True
+
+
+def test_profile_extraction_collections_are_bounded() -> None:
+    schema = split.ProfileExtraction.model_json_schema()
+    properties = schema["properties"]
+    assert properties["evidence"]["maxItems"] == 12
+    assert properties["company_facts"]["maxItems"] == 30
+    assert properties["economic_signals"]["maxItems"] == 16
+    assert properties["risks_and_assumptions"]["maxItems"] == 16
+
+
+def test_request_json_uses_provider_json_mode(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "company_name": "Example",
+                                    "business_summary": "Summary",
+                                    "evidence": [],
+                                    "company_facts": [],
+                                    "economic_signals": [],
+                                    "risks_and_assumptions": [],
+                                }
+                            )
+                        },
+                    }
+                ]
+            }
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, *, headers, json):
+            captured["payload"] = json
+            return FakeResponse()
+
+    monkeypatch.setenv("ROUTERAI_API_KEY", "test-only")
+    monkeypatch.setattr(split.httpx, "AsyncClient", lambda timeout: FakeClient())
+
+    result = asyncio.run(
+        split._request_json(
+            "profile_extraction",
+            split.ProfileExtraction,
+            system="JSON only",
+            prompt="Extract",
+            max_tokens=100,
+            timeout_seconds=1,
+        )
+    )
+
+    assert result.company_name == "Example"
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+
+def test_request_json_surfaces_output_truncation(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": "{}"},
+                    }
+                ]
+            }
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, *, headers, json):
+            return FakeResponse()
+
+    monkeypatch.setenv("ROUTERAI_API_KEY", "test-only")
+    monkeypatch.setattr(split.httpx, "AsyncClient", lambda timeout: FakeClient())
+
+    with pytest.raises(split.SplitSynthesisPhaseError) as exc_info:
+        asyncio.run(
+            split._request_json(
+                "profile_extraction",
+                split.ProfileExtraction,
+                system="JSON only",
+                prompt="Extract",
+                max_tokens=100,
+                timeout_seconds=1,
+            )
+        )
+
+    assert exc_info.value.phase == "profile_extraction"
+    assert exc_info.value.error_type == "OutputTruncated"
 
 
 def test_split_assembly_filters_unknown_sources_and_enforces_km_canon() -> None:
