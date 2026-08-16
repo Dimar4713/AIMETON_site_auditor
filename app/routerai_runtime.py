@@ -14,8 +14,8 @@ from app.models import SiteAnalysis
 from app.routerai_split_synthesis import (
     SplitSynthesisPhaseError,
     SplitSynthesisPhaseTimeout,
-    analyze_with_routerai_split,
 )
+from app.routerai_split_v2 import analyze_with_routerai_split_v2
 from app.trace_context import current_trace_identity
 from app.trace_ledger import TraceEventCreate, TraceState
 from app.trace_write_metrics import InstrumentedSQLiteTraceLedger
@@ -49,7 +49,7 @@ def routerai_analysis_timeout_seconds() -> float:
 
 
 def routerai_split_synthesis_enabled() -> bool:
-    """Default async synthesis to split_v1 while preserving one-switch rollback."""
+    """Default async synthesis to split mode while preserving one-switch rollback."""
     value = os.getenv("ROUTERAI_SPLIT_SYNTHESIS", "1").strip().lower()
     return value not in {"0", "false", "no", "off"}
 
@@ -149,7 +149,7 @@ async def run_bounded_routerai_analysis(
     budget_seconds = routerai_analysis_timeout_seconds()
     use_split = routerai_split_synthesis_enabled()
     input_metrics = routerai_input_metrics(text, external_sources)
-    input_metrics["synthesis_mode"] = "split_v1" if use_split else "legacy_monolith"
+    input_metrics["synthesis_mode"] = "split_v2_parallel" if use_split else "legacy_monolith"
     started = time.perf_counter()
     _trace(
         operation="llm_started",
@@ -159,7 +159,7 @@ async def run_bounded_routerai_analysis(
         budget_seconds=budget_seconds,
         extra_metadata=input_metrics,
     )
-    analysis_fn = analyze_with_routerai_split if use_split else analyze_with_routerai
+    analysis_fn = analyze_with_routerai_split_v2 if use_split else analyze_with_routerai
     try:
         result = await asyncio.wait_for(
             analysis_fn(url, title, text, external_sources),
