@@ -62,7 +62,7 @@ jobs:
             printf '%s\n' "- stage auditor status: \`$status\`"
           } > "$REPORT"
 
-      - name: Inspect configured projection and actual execution policy without provider calls
+      - name: Inspect configured projection and resolver execution authority without provider calls
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -75,7 +75,9 @@ jobs:
           import os
 
           from app.admin_search_strategy_api import _execution_policy_observation
+          from app.hunter_search_policy_authority import resolve_hunter_search_policy
           from app.models import HuntRequest
+          from app.search_gateway import search_policy_from_env
           from app.search_strategy_settings import get_search_strategy_settings_repository
 
           record = get_search_strategy_settings_repository().get()
@@ -85,6 +87,7 @@ jobs:
           observation = _execution_policy_observation(record)
           projected = observation['projected_admin_gateway_policy']
           actual = observation['actual_gateway_policy']
+          authority_resolution = resolve_hunter_search_policy(base_policy=search_policy_from_env())
           effective_hunt = settings.apply_hunt_request(
               HuntRequest(region='runtime-inspection', industries=['runtime-inspection'])
           )
@@ -109,6 +112,11 @@ jobs:
               'expected_projected_provider_order': expected_order,
               'actual_projected_provider_order': projected['provider_order'],
           }
+          assert authority_resolution.authority.value == 'env', authority_resolution.authority
+          assert authority_resolution.selected_policy_fingerprint == actual['fingerprint']
+          assert authority_resolution.env_policy_fingerprint == actual['fingerprint']
+          assert authority_resolution.admin_projection_fingerprint is None
+          assert authority_resolution.admin_policy_persisted is False
           assert observation['runtime_callsite_uses_admin_projection'] is False
           assert observation['routing_changed_by_observation'] is False
           assert actual['fingerprint'].startswith('sha256:')
@@ -124,6 +132,8 @@ jobs:
                   if global_settings.emergency_strategy_override is not None
                   else None
               ),
+              'runtime_authority': authority_resolution.authority.value,
+              'resolver_selected_policy_fingerprint': authority_resolution.selected_policy_fingerprint,
               'actual_gateway_policy': actual,
               'projected_admin_gateway_policy': projected,
               'policy_equivalent': observation['policy_equivalent'],
@@ -156,10 +166,11 @@ jobs:
             echo
             echo '- provider calls: `0`'
             echo '- configured admin projection checked against expected Stage product settings: ✅'
-            echo '- actual SearchGateway env policy fingerprint retained separately: ✅'
-            echo '- execution authority fact: `run_hunt()` currently uses env policy directly; admin projection is observational/configured, not activated by this acceptance.'
+            echo '- canonical resolver runtime authority: `env` ✅'
+            echo '- resolver selected fingerprint equals actual SearchGateway env policy: ✅'
+            echo '- admin projection remains configured/observational and is not activated by this acceptance.'
             echo '- routing changed by acceptance: `false`'
-            echo '- verdict: ✅ configured projection and actual execution policy are distinguished without provider calls.'
+            echo '- verdict: ✅ configured projection and resolver execution authority are distinguished without provider calls.'
           } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized evidence
