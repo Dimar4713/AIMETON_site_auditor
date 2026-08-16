@@ -16,7 +16,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 3
     steps:
-      - name: Verify strict structured output for deployed ManagementSlice
+      - name: Compare Pro and Flash on realistic bounded ManagementSlice
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -29,18 +29,51 @@ jobs:
 
           from app.routerai_profile_extraction import ManagementSlice
 
-          async def main():
+          MODELS = [
+              "deepseek/deepseek-v4-pro",
+              "deepseek/deepseek-v4-flash",
+          ]
+
+          def synthetic_context():
+              sources = []
+              for idx in range(1, 31):
+                  if idx % 7 == 0:
+                      snippet = "Registry note: founder Ivan Example; executive Petr Example."
+                  elif idx % 5 == 0:
+                      snippet = "Search mention about a similarly named company; identity is unverified."
+                  else:
+                      snippet = "General company search snippet without management facts."
+                  sources.append({
+                      "id": f"E{idx}",
+                      "title": f"Synthetic source {idx}",
+                      "query_kind": "ownership" if idx % 2 else "registry",
+                      "source_class": "registry" if idx % 2 == 0 else "ownership",
+                      "evidence_level": "unverified_mention",
+                      "snippet": snippet,
+                  })
+              official = (
+                  "Example engineering company. Official site describes products and services. "
+                  "Management details are not listed on the public landing page. "
+              ) * 35
+              return official[:3550], json.dumps(sources, ensure_ascii=False, separators=(",", ":"))[:10000]
+
+          async def probe(model, client, official, sources):
               key = os.getenv("ROUTERAI_API_KEY")
               if not key:
-                  raise SystemExit("routerai_key_not_configured")
+                  raise RuntimeError("routerai_key_not_configured")
               base = os.getenv("ROUTERAI_BASE_URL", "https://routerai.ru/api/v1")
-              model = os.getenv("ROUTERAI_MODEL", "openai/gpt-4o-mini")
               schema = ManagementSlice.model_json_schema()
+              prompt = f"""Extract only formal management facts.
+          Allowed fields: founders, executives. Return at most one compact fact per field.
+          Do not invent facts. Search snippets are discovery hints only.
+          OFFICIAL PAGE TEXT:\n{official}\nRELEVANT SOURCES:\n{sources}
+          """
               payload = {
                   "model": model,
                   "temperature": 0,
                   "max_tokens": 600,
                   "structured_outputs": True,
+                  "include_reasoning": True,
                   "response_format": {
                       "type": "json_schema",
                       "json_schema": {
@@ -51,45 +84,69 @@ jobs:
                   },
                   "messages": [
                       {"role": "system", "content": "Return only the requested structured object."},
-                      {"role": "user", "content": "Company Example has founder Ivan Example and executive Petr Example. Return only supported founders/executives facts with source id S1 and no risks."},
+                      {"role": "user", "content": prompt},
                   ],
               }
               started = time.perf_counter()
-              async with httpx.AsyncClient(timeout=30) as client:
-                  response = await client.post(
-                      f"{base}/chat/completions",
-                      headers={"Authorization": f"Bearer {key}"},
-                      json=payload,
-                  )
+              response = await client.post(
+                  f"{base}/chat/completions",
+                  headers={"Authorization": f"Bearer {key}"},
+                  json=payload,
+              )
               elapsed = time.perf_counter() - started
-              finish_reason = None
-              schema_valid = False
-              fact_count = None
-              if response.status_code == 200:
-                  body = response.json()
-                  choice = body.get("choices", [{}])[0]
-                  finish_reason = choice.get("finish_reason")
-                  content = choice.get("message", {}).get("content", "")
-                  try:
-                      parsed = ManagementSlice.model_validate(json.loads(content))
-                      schema_valid = True
-                      fact_count = len(parsed.company_facts)
-                  except Exception:
-                      pass
-              print(json.dumps({
+              result = {
                   "model": model,
                   "http_status": response.status_code,
                   "elapsed_seconds": round(elapsed, 3),
-                  "finish_reason": finish_reason,
-                  "schema_valid": schema_valid,
-                  "fact_count": fact_count,
-                  "response_bytes": len(response.content),
+                  "input_chars": len(official) + len(sources),
+                  "max_tokens": 600,
+                  "finish_reason": None,
+                  "schema_valid": False,
+                  "fact_count": None,
+                  "prompt_tokens": None,
+                  "completion_tokens": None,
+                  "reasoning_tokens": None,
+                  "usage_keys": [],
+                  "completion_detail_keys": [],
                   "response_content_exposed": False,
                   "secret_values_exposed": False,
-              }, sort_keys=True))
-              response.raise_for_status()
-              if not schema_valid or finish_reason != "stop":
-                  raise SystemExit("management_strict_schema_probe_failed")
+              }
+              if response.status_code == 200:
+                  body = response.json()
+                  choice = body.get("choices", [{}])[0]
+                  result["finish_reason"] = choice.get("finish_reason")
+                  content = choice.get("message", {}).get("content", "")
+                  try:
+                      parsed = ManagementSlice.model_validate(json.loads(content))
+                      result["schema_valid"] = True
+                      result["fact_count"] = len(parsed.company_facts)
+                  except Exception:
+                      pass
+                  usage = body.get("usage") or {}
+                  details = usage.get("completion_tokens_details") or {}
+                  result["usage_keys"] = sorted(str(k) for k in usage.keys())
+                  result["completion_detail_keys"] = sorted(str(k) for k in details.keys())
+                  result["prompt_tokens"] = usage.get("prompt_tokens")
+                  result["completion_tokens"] = usage.get("completion_tokens")
+                  result["reasoning_tokens"] = (
+                      details.get("reasoning_tokens")
+                      if isinstance(details, dict)
+                      else None
+                  )
+                  if result["reasoning_tokens"] is None:
+                      result["reasoning_tokens"] = usage.get("reasoning_tokens")
+              return result
+
+          async def main():
+              official, sources = synthetic_context()
+              async with httpx.AsyncClient(timeout=30) as client:
+                  results = await asyncio.gather(*(
+                      probe(model, client, official, sources) for model in MODELS
+                  ))
+              for result in results:
+                  print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+              if not all(result["http_status"] == 200 for result in results):
+                  raise SystemExit("routerai_model_ab_http_failure")
 
           asyncio.run(main())
           PY
