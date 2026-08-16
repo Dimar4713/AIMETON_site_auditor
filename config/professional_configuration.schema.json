@@ -97,7 +97,7 @@
         "max_additional_waves": {"type": "integer", "minimum": 0},
         "allowed_actions": {
           "type": "array",
-          "items": {"enum": ["continue", "refine", "stop"]},
+          "items": {"enum": ["continue", "refine", "skip"]},
           "uniqueItems": true
         }
       }

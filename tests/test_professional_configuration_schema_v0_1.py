@@ -55,7 +55,7 @@ def _valid_configuration() -> dict:
         "refinement_policy": {
             "mode": "shadow",
             "max_additional_waves": 1,
-            "allowed_actions": ["continue", "refine", "stop"],
+            "allowed_actions": ["continue", "refine", "skip"],
         },
         "interaction_policy": {
             "consultation_enabled": True,
