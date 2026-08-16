@@ -11,6 +11,11 @@ import httpx
 
 from app.llm import MODEL, analyze_with_routerai
 from app.models import SiteAnalysis
+from app.routerai_split_synthesis import (
+    SplitSynthesisPhaseError,
+    SplitSynthesisPhaseTimeout,
+    analyze_with_routerai_split,
+)
 from app.trace_context import current_trace_identity
 from app.trace_ledger import TraceEventCreate, TraceState
 from app.trace_write_metrics import InstrumentedSQLiteTraceLedger
@@ -41,6 +46,12 @@ def routerai_analysis_timeout_seconds() -> float:
         minimum=10.0,
         maximum=120.0,
     )
+
+
+def routerai_split_synthesis_enabled() -> bool:
+    """Default async synthesis to split_v1 while preserving one-switch rollback."""
+    value = os.getenv("ROUTERAI_SPLIT_SYNTHESIS", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
 
 
 def routerai_input_metrics(
@@ -134,9 +145,11 @@ async def run_bounded_routerai_analysis(
     text: str,
     external_sources: list[dict] | None = None,
 ) -> SiteAnalysis:
-    """Run one RouterAI analysis with a hard wall-clock deadline and trace span."""
+    """Run RouterAI analysis with a hard wall-clock deadline and rollbackable split mode."""
     budget_seconds = routerai_analysis_timeout_seconds()
+    use_split = routerai_split_synthesis_enabled()
     input_metrics = routerai_input_metrics(text, external_sources)
+    input_metrics["synthesis_mode"] = "split_v1" if use_split else "legacy_monolith"
     started = time.perf_counter()
     _trace(
         operation="llm_started",
@@ -146,13 +159,18 @@ async def run_bounded_routerai_analysis(
         budget_seconds=budget_seconds,
         extra_metadata=input_metrics,
     )
+    analysis_fn = analyze_with_routerai_split if use_split else analyze_with_routerai
     try:
         result = await asyncio.wait_for(
-            analyze_with_routerai(url, title, text, external_sources),
+            analysis_fn(url, title, text, external_sources),
             timeout=budget_seconds,
         )
-    except (asyncio.TimeoutError, httpx.TimeoutException) as exc:
+    except (asyncio.TimeoutError, httpx.TimeoutException, SplitSynthesisPhaseTimeout) as exc:
         duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+        error_metadata = dict(input_metrics)
+        phase = getattr(exc, "phase", None)
+        if phase:
+            error_metadata["failed_phase"] = str(phase)[:128]
         _trace(
             operation="llm_timeout",
             state=TraceState.DEGRADED,
@@ -161,11 +179,17 @@ async def run_bounded_routerai_analysis(
             duration_ms=duration_ms,
             budget_seconds=budget_seconds,
             error_type=type(exc).__name__,
-            extra_metadata=input_metrics,
+            extra_metadata=error_metadata,
         )
         raise TimeoutError("routerai_analysis_deadline_exceeded") from exc
     except Exception as exc:
         duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+        error_metadata = dict(input_metrics)
+        phase = getattr(exc, "phase", None)
+        if phase:
+            error_metadata["failed_phase"] = str(phase)[:128]
+        if isinstance(exc, SplitSynthesisPhaseError):
+            error_metadata["phase_error_type"] = exc.error_type[:128]
         _trace(
             operation="llm_finished",
             state=TraceState.FAILED,
@@ -174,7 +198,7 @@ async def run_bounded_routerai_analysis(
             duration_ms=duration_ms,
             budget_seconds=budget_seconds,
             error_type=type(exc).__name__,
-            extra_metadata=input_metrics,
+            extra_metadata=error_metadata,
         )
         raise
 
