@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Literal
+from typing import Annotated, Any, Awaitable, Callable, Literal
 
 from pydantic import BaseModel, Field
 
@@ -18,40 +18,41 @@ FactField = Literal[
     "geography", "products", "customers", "suppliers", "other",
 ]
 Confidence = Literal["Высокая", "Средняя", "Низкая"]
+ShortText = Annotated[str, Field(max_length=240)]
 
 
 class CompactCompanyFact(BaseModel):
     field: FactField
-    value: str = Field(max_length=360)
+    value: str = Field(max_length=240)
     period: str | None = Field(default=None, max_length=64)
     confidence: Confidence = "Средняя"
     source_ids: list[str] = Field(default_factory=list, max_length=4)
 
 
 class CompactEconomicSignal(BaseModel):
-    signal: str = Field(max_length=180)
-    evidence: str = Field(max_length=220)
-    business_effect: str = Field(max_length=220)
+    signal: str = Field(max_length=140)
+    evidence: str = Field(max_length=180)
+    business_effect: str = Field(max_length=180)
     confidence: Confidence = "Средняя"
     source_ids: list[str] = Field(default_factory=list, max_length=4)
 
 
 class IdentityProfileSlice(BaseModel):
     company_name: str = Field(max_length=160)
-    business_summary: str = Field(max_length=600)
-    evidence: list[str] = Field(default_factory=list, max_length=6)
+    business_summary: str = Field(max_length=480)
+    evidence: list[ShortText] = Field(default_factory=list, max_length=5)
     company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=12)
-    risks_and_assumptions: list[str] = Field(default_factory=list, max_length=4)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=4)
 
 
 class OperationsProfileSlice(BaseModel):
     company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=12)
-    risks_and_assumptions: list[str] = Field(default_factory=list, max_length=4)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=4)
 
 
 class SignalProfileSlice(BaseModel):
-    economic_signals: list[CompactEconomicSignal] = Field(default_factory=list, max_length=8)
-    risks_and_assumptions: list[str] = Field(default_factory=list, max_length=6)
+    economic_signals: list[CompactEconomicSignal] = Field(default_factory=list, max_length=6)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=5)
 
 
 @dataclass(frozen=True)
@@ -219,7 +220,7 @@ RELEVANT SOURCES:\n{signal_context}
             IdentityProfileSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
             prompt=identity_prompt,
-            max_tokens=1300,
+            max_tokens=1200,
             timeout_seconds=22.0,
         ),
         request_json(
@@ -227,7 +228,7 @@ RELEVANT SOURCES:\n{signal_context}
             OperationsProfileSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
             prompt=operations_prompt,
-            max_tokens=1200,
+            max_tokens=1100,
             timeout_seconds=22.0,
         ),
         request_json(
@@ -235,7 +236,7 @@ RELEVANT SOURCES:\n{signal_context}
             SignalProfileSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
             prompt=signal_prompt,
-            max_tokens=1200,
+            max_tokens=1000,
             timeout_seconds=22.0,
         ),
     )
@@ -253,8 +254,8 @@ RELEVANT SOURCES:\n{signal_context}
     return MergedProfileExtraction(
         company_name=identity.company_name,
         business_summary=identity.business_summary,
-        evidence=_unique_text(identity.evidence, 6),
+        evidence=_unique_text(identity.evidence, 5),
         company_facts=_merge_facts(identity.company_facts, operations.company_facts),
-        economic_signals=[_to_signal(item) for item in signals.economic_signals[:8]],
+        economic_signals=[_to_signal(item) for item in signals.economic_signals[:6]],
         risks_and_assumptions=risks,
     )
