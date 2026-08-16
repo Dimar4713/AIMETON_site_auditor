@@ -50,14 +50,18 @@ def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
     signal_schema = profile.CompactEconomicSignal.model_json_schema()
     identity_schema = profile.IdentityCoreSlice.model_json_schema()
     ownership_schema = profile.OwnershipNetworkSlice.model_json_schema()
+    operations_schema = profile.OperationsProfileSlice.model_json_schema()
     signal_slice_schema = profile.SignalProfileSlice.model_json_schema()
 
-    assert fact_schema["properties"]["value"]["maxLength"] == 240
-    assert fact_schema["properties"]["source_ids"]["maxItems"] == 4
+    assert fact_schema["properties"]["value"]["maxLength"] == 200
+    assert fact_schema["properties"]["source_ids"]["maxItems"] == 3
     assert signal_schema["properties"]["signal"]["maxLength"] == 140
-    assert signal_schema["properties"]["business_effect"]["maxLength"] == 180
+    assert signal_schema["properties"]["business_effect"]["maxLength"] == 170
+    assert signal_schema["properties"]["source_ids"]["maxItems"] == 3
     assert identity_schema["properties"]["company_facts"]["maxItems"] == 9
-    assert ownership_schema["properties"]["company_facts"]["maxItems"] == 7
+    assert ownership_schema["properties"]["company_facts"]["maxItems"] == 5
+    assert ownership_schema["properties"]["risks_and_assumptions"]["maxItems"] == 2
+    assert operations_schema["properties"]["company_facts"]["maxItems"] == 9
     assert signal_slice_schema["properties"]["economic_signals"]["maxItems"] == 6
 
 
@@ -139,7 +143,9 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
         "profile_operations",
         "profile_signals",
     }
-    assert max(tokens for _, tokens in phases) <= 1100
+    phase_tokens = dict(phases)
+    assert phase_tokens["profile_ownership_network"] == 900
+    assert max(phase_tokens.values()) <= 1100
     assert merged.company_name == "Example"
     assert all(isinstance(item, CompanyFact) for item in merged.company_facts)
     assert {item.field for item in merged.company_facts} == {
