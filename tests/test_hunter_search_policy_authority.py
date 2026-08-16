@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import app.hunter_search_policy_authority as policy_authority
 from app.hunter_search_policy_authority import (
     HunterSearchPolicyAuthority,
     hunter_search_policy_authority_from_env,
@@ -40,9 +41,7 @@ def _base_policy() -> SearchPolicy:
 
 
 def _admin_record(*, persisted: bool) -> SearchStrategySettingsRecord:
-    settings = SearchStrategySettings()
-    profile = settings.tariffs[settings.global_settings.active_tariff]
-    settings = settings.model_copy(deep=True)
+    settings = SearchStrategySettings().model_copy(deep=True)
     settings.global_settings.active_tariff = "max"
     settings.tariffs["max"].strategy = SearchStrategyId.EXHAUSTIVE_COVERAGE
     settings.tariffs["max"].provider_order = ["searxng", "yandex"]
@@ -71,6 +70,23 @@ def test_default_authority_is_env_and_preserves_base_policy(monkeypatch: pytest.
     assert resolved.policy_equivalent is False
     assert resolved.admin_policy_persisted is True
     assert repository.get_calls == 1
+
+
+def test_default_env_authority_does_not_open_admin_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HUNTER_SEARCH_POLICY_AUTHORITY", raising=False)
+    base = _base_policy()
+
+    def forbidden_repository_open():
+        raise AssertionError("env authority must not acquire an admin SQLite dependency")
+
+    monkeypatch.setattr(policy_authority, "get_search_strategy_settings_repository", forbidden_repository_open)
+    resolved = resolve_hunter_search_policy(base_policy=base)
+
+    assert resolved.authority is HunterSearchPolicyAuthority.ENV
+    assert resolved.policy == base
+    assert resolved.admin_projection_fingerprint is None
+    assert resolved.policy_equivalent is None
+    assert resolved.admin_policy_persisted is False
 
 
 def test_explicit_admin_authority_uses_persisted_projection() -> None:
