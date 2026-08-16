@@ -1,0 +1,72 @@
+name: RouterAI Large Input Small Output Probe
+
+on:
+  push:
+    branches:
+      - ops/routerai-input-observe-20260816
+    paths:
+      - .github/workflows/routerai-large-input-small-output-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 3
+    steps:
+      - name: Measure large-input tiny-output latency without exposing content or credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i aimeton-auditor python - <<'PY'
+          import asyncio
+          import json
+          import os
+          import time
+          import httpx
+
+          async def main():
+              base = os.getenv("ROUTERAI_BASE_URL", "https://routerai.ru/api/v1")
+              model = os.getenv("ROUTERAI_MODEL", "openai/gpt-4o-mini")
+              key = os.getenv("ROUTERAI_API_KEY")
+              if not key:
+                  raise SystemExit("routerai_key_not_configured")
+
+              # Synthetic payload approximates the measured post-compaction dynamic input
+              # while intentionally requiring only a tiny completion. No production source
+              # text, URL, prompt, or credential is emitted to logs.
+              synthetic_context = ("AIMETON-FIELD-PROBE " * 2500)[:50000]
+              payload = {
+                  "model": model,
+                  "temperature": 0,
+                  "max_tokens": 64,
+                  "messages": [
+                      {"role": "system", "content": "Return only a short JSON object."},
+                      {"role": "user", "content": synthetic_context + "\nReturn {\"ok\":true}."},
+                  ],
+              }
+
+              started = time.perf_counter()
+              async with httpx.AsyncClient(timeout=30) as client:
+                  response = await client.post(
+                      f"{base}/chat/completions",
+                      headers={"Authorization": f"Bearer {key}"},
+                      json=payload,
+                  )
+              elapsed = time.perf_counter() - started
+              print(json.dumps({
+                  "model": model,
+                  "http_status": response.status_code,
+                  "elapsed_seconds": round(elapsed, 3),
+                  "input_chars": len(synthetic_context),
+                  "max_tokens": 64,
+                  "response_bytes": len(response.content),
+                  "secret_values_exposed": False,
+                  "response_content_exposed": False,
+              }, sort_keys=True))
+              response.raise_for_status()
+
+          asyncio.run(main())
+          PY
