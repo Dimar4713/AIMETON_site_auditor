@@ -13,12 +13,12 @@ on:
         default: max
         type: string
       expected_strategy:
-        description: Expected effective search strategy
+        description: Expected configured admin-projected search strategy
         required: false
         default: exhaustive_coverage
         type: string
       expected_provider_order:
-        description: Expected effective provider order, comma separated
+        description: Expected configured admin-projected provider order, comma separated
         required: false
         default: searxng,yandex
         type: string
@@ -62,7 +62,7 @@ jobs:
             printf '%s\n' "- stage auditor status: \`$status\`"
           } > "$REPORT"
 
-      - name: Inspect effective Hunter runtime without provider calls
+      - name: Inspect configured projection and actual execution policy without provider calls
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -74,15 +74,17 @@ jobs:
           import json
           import os
 
+          from app.admin_search_strategy_api import _execution_policy_observation
           from app.models import HuntRequest
-          from app.search_gateway import search_policy_from_env
           from app.search_strategy_settings import get_search_strategy_settings_repository
 
           record = get_search_strategy_settings_repository().get()
           settings = record.settings
           global_settings = settings.global_settings
           profile = settings.active_profile()
-          effective_policy = settings.apply_search_policy(search_policy_from_env())
+          observation = _execution_policy_observation(record)
+          projected = observation['projected_admin_gateway_policy']
+          actual = observation['actual_gateway_policy']
           effective_hunt = settings.apply_hunt_request(
               HuntRequest(region='runtime-inspection', industries=['runtime-inspection'])
           )
@@ -95,21 +97,24 @@ jobs:
               if item.strip()
           ]
 
-          actual_strategy = str(effective_policy.strategy)
-          actual_order = list(effective_policy.provider_order)
-
           assert global_settings.active_tariff == expected_tariff, {
               'expected_tariff': expected_tariff,
               'actual_tariff': global_settings.active_tariff,
           }
-          assert actual_strategy == expected_strategy, {
-              'expected_strategy': expected_strategy,
-              'actual_strategy': actual_strategy,
+          assert projected['strategy'] == expected_strategy, {
+              'expected_projected_strategy': expected_strategy,
+              'actual_projected_strategy': projected['strategy'],
           }
-          assert actual_order == expected_order, {
-              'expected_provider_order': expected_order,
-              'actual_provider_order': actual_order,
+          assert projected['provider_order'] == expected_order, {
+              'expected_projected_provider_order': expected_order,
+              'actual_projected_provider_order': projected['provider_order'],
           }
+          assert observation['runtime_callsite_uses_admin_projection'] is False
+          assert observation['routing_changed_by_observation'] is False
+          assert actual['fingerprint'].startswith('sha256:')
+          assert projected['fingerprint'].startswith('sha256:')
+          assert observation['configured_admin_policy_fingerprint'].startswith('sha256:')
+          assert observation['quality_policy_fingerprint'].startswith('sha256:')
 
           safe = {
               'active_tariff': global_settings.active_tariff,
@@ -119,18 +124,14 @@ jobs:
                   if global_settings.emergency_strategy_override is not None
                   else None
               ),
-              'effective_strategy': actual_strategy,
-              'effective_provider_order': actual_order,
-              'allowed_providers': (
-                  sorted(effective_policy.allowed_providers)
-                  if effective_policy.allowed_providers is not None
-                  else None
-              ),
-              'allow_paid_fallback': effective_policy.allow_paid_fallback,
-              'allow_paid_fanout': effective_policy.allow_paid_fanout,
-              'target_results': effective_policy.target_results,
-              'max_providers_per_query': effective_policy.max_providers_per_query,
-              'hunter_limits': {
+              'actual_gateway_policy': actual,
+              'projected_admin_gateway_policy': projected,
+              'policy_equivalent': observation['policy_equivalent'],
+              'runtime_callsite_uses_admin_projection': observation['runtime_callsite_uses_admin_projection'],
+              'routing_changed_by_observation': observation['routing_changed_by_observation'],
+              'configured_admin_policy_fingerprint': observation['configured_admin_policy_fingerprint'],
+              'quality_policy_fingerprint': observation['quality_policy_fingerprint'],
+              'hunter_limits_after_admin_settings': {
                   'max_queries': effective_hunt.max_queries,
                   'results_per_query': effective_hunt.results_per_query,
                   'max_candidates': effective_hunt.max_candidates,
@@ -147,14 +148,18 @@ jobs:
           )"
           {
             echo
-            echo '### Effective Hunter runtime'
+            echo '### Hunter policy provenance'
             echo
             echo '```json'
             echo "$result"
             echo '```'
             echo
             echo '- provider calls: `0`'
-            echo '- verdict: ✅ active tariff, effective strategy and provider order match the expected Stage runtime.'
+            echo '- configured admin projection checked against expected Stage product settings: ✅'
+            echo '- actual SearchGateway env policy fingerprint retained separately: ✅'
+            echo '- execution authority fact: `run_hunt()` currently uses env policy directly; admin projection is observational/configured, not activated by this acceptance.'
+            echo '- routing changed by acceptance: `false`'
+            echo '- verdict: ✅ configured projection and actual execution policy are distinguished without provider calls.'
           } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized evidence
