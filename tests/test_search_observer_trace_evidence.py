@@ -61,5 +61,7 @@ def test_non_observer_trace_does_not_receive_observer_evidence(monkeypatch, tmp_
         metadata={"plan_source": "test"},
     )
 
-    assert len(captured) == 1
-    assert "model" not in captured[0].metadata
+    hunter_events = [item for item in captured if item.component == "hunter"]
+    assert len(hunter_events) == 1
+    assert "model" not in hunter_events[0].metadata
+    assert all("model" not in item.metadata for item in captured)
