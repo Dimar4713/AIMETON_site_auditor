@@ -75,6 +75,7 @@ def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
 
 def test_parallel_extractors_merge_into_public_fact_models() -> None:
     phases: list[tuple[str, int]] = []
+    strict_phases: list[str] = []
 
     async def fake_request(phase, model_type, **kwargs):
         phases.append((phase, kwargs["max_tokens"]))
@@ -140,9 +141,14 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
             )
         raise AssertionError(model_type)
 
+    async def fake_strict_request(phase, model_type, **kwargs):
+        strict_phases.append(phase)
+        return await fake_request(phase, model_type, **kwargs)
+
     merged = asyncio.run(
         profile.extract_profile_parallel(
             request_json=fake_request,
+            strict_request_json=fake_strict_request,
             url="https://example.com",
             title="Example",
             text="Official site text",
@@ -164,6 +170,7 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
         "profile_operations",
         "profile_signals",
     }
+    assert strict_phases == ["profile_management"]
     phase_tokens = dict(phases)
     assert phase_tokens["profile_management"] == 600
     assert phase_tokens["profile_ownership_network"] == 700
