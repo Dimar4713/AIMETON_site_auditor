@@ -18,46 +18,46 @@ FactField = Literal[
     "geography", "products", "customers", "suppliers", "other",
 ]
 Confidence = Literal["Высокая", "Средняя", "Низкая"]
-ShortText = Annotated[str, Field(max_length=240)]
+ShortText = Annotated[str, Field(max_length=180)]
 
 
 class CompactCompanyFact(BaseModel):
     field: FactField
-    value: str = Field(max_length=240)
+    value: str = Field(max_length=200)
     period: str | None = Field(default=None, max_length=64)
     confidence: Confidence = "Средняя"
-    source_ids: list[str] = Field(default_factory=list, max_length=4)
+    source_ids: list[str] = Field(default_factory=list, max_length=3)
 
 
 class CompactEconomicSignal(BaseModel):
     signal: str = Field(max_length=140)
-    evidence: str = Field(max_length=180)
-    business_effect: str = Field(max_length=180)
+    evidence: str = Field(max_length=170)
+    business_effect: str = Field(max_length=170)
     confidence: Confidence = "Средняя"
-    source_ids: list[str] = Field(default_factory=list, max_length=4)
+    source_ids: list[str] = Field(default_factory=list, max_length=3)
 
 
 class IdentityCoreSlice(BaseModel):
     company_name: str = Field(max_length=160)
-    business_summary: str = Field(max_length=420)
-    evidence: list[ShortText] = Field(default_factory=list, max_length=4)
+    business_summary: str = Field(max_length=380)
+    evidence: list[ShortText] = Field(default_factory=list, max_length=3)
+    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=9)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=2)
+
+
+class OwnershipNetworkSlice(BaseModel):
+    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=5)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=2)
+
+
+class OperationsProfileSlice(BaseModel):
     company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=9)
     risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=3)
 
 
-class OwnershipNetworkSlice(BaseModel):
-    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=7)
-    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=4)
-
-
-class OperationsProfileSlice(BaseModel):
-    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=12)
-    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=4)
-
-
 class SignalProfileSlice(BaseModel):
     economic_signals: list[CompactEconomicSignal] = Field(default_factory=list, max_length=6)
-    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=5)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=3)
 
 
 @dataclass(frozen=True)
@@ -183,6 +183,7 @@ async def extract_profile_parallel(
 - Не создавай факты, цифры, людей, контакты или source_ids, которых нет во входе.
 - Поисковый сниппет — сигнал, не проверенный первичный документ.
 - Пиши кратко; не повторяй один факт разными словами.
+- Для каждого разрешённого поля возвращай не более одного факта; несколько значений объединяй компактно в value.
 - Если данных нет, пропусти факт, а не выдумывай его.
 """
 
@@ -200,8 +201,9 @@ RELEVANT SOURCES:\n{identity_core_context}
 
     ownership_prompt = f"""Извлеки только ownership/management/network сведения компании.
 Разрешённые поля: founders, executives, beneficial_owners, affiliates, social_accounts.
-Не повторяй адреса, телефоны, реквизиты, финансы и продукты. Учредитель не является
-автоматически бенефициаром; аффилированность маркируй осторожно.
+Верни максимум один компактный факт на каждое из пяти полей. Не повторяй адреса,
+телефоны, реквизиты, финансы и продукты. Учредитель не является автоматически
+бенефициаром; аффилированность маркируй осторожно.
 {common_rules}
 URL: {url}
 TITLE: {title}
@@ -211,8 +213,9 @@ RELEVANT SOURCES:\n{ownership_context}
 
     operations_prompt = f"""Извлеки операционные и экономические факты компании.
 Разрешённые поля: headcount, revenue, profit, assets, taxes, products, customers,
-suppliers, other. Для финансовых значений обязательно указывай period, если он виден.
-Не формируй economic_signals и не делай коммерческое предложение.
+suppliers, other. Верни максимум один компактный факт на поле. Для финансовых
+значений обязательно указывай period, если он виден. Не формируй economic_signals
+и не делай коммерческое предложение.
 {common_rules}
 URL: {url}
 TITLE: {title}
@@ -244,7 +247,7 @@ RELEVANT SOURCES:\n{signal_context}
             OwnershipNetworkSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
             prompt=ownership_prompt,
-            max_tokens=750,
+            max_tokens=900,
             timeout_seconds=20.0,
         ),
         request_json(
@@ -275,12 +278,12 @@ RELEVANT SOURCES:\n{signal_context}
         + ownership.risks_and_assumptions
         + operations.risks_and_assumptions
         + signals.risks_and_assumptions,
-        12,
+        10,
     )
     return MergedProfileExtraction(
         company_name=identity_core.company_name,
         business_summary=identity_core.business_summary,
-        evidence=_unique_text(identity_core.evidence, 4),
+        evidence=_unique_text(identity_core.evidence, 3),
         company_facts=_merge_facts(
             identity_core.company_facts,
             ownership.company_facts,
