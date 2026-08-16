@@ -1,0 +1,95 @@
+name: RouterAI Management Schema Probe
+
+on:
+  push:
+    branches:
+      - ops/routerai-input-observe-20260816
+    paths:
+      - .github/workflows/routerai-management-schema-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 3
+    steps:
+      - name: Verify strict structured output for deployed ManagementSlice
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i aimeton-auditor python - <<'PY'
+          import asyncio
+          import json
+          import os
+          import time
+          import httpx
+
+          from app.routerai_profile_extraction import ManagementSlice
+
+          async def main():
+              key = os.getenv("ROUTERAI_API_KEY")
+              if not key:
+                  raise SystemExit("routerai_key_not_configured")
+              base = os.getenv("ROUTERAI_BASE_URL", "https://routerai.ru/api/v1")
+              model = os.getenv("ROUTERAI_MODEL", "openai/gpt-4o-mini")
+              schema = ManagementSlice.model_json_schema()
+              payload = {
+                  "model": model,
+                  "temperature": 0,
+                  "max_tokens": 600,
+                  "structured_outputs": True,
+                  "response_format": {
+                      "type": "json_schema",
+                      "json_schema": {
+                          "name": "aimeton_management_slice",
+                          "strict": True,
+                          "schema": schema,
+                      },
+                  },
+                  "messages": [
+                      {"role": "system", "content": "Return only the requested structured object."},
+                      {"role": "user", "content": "Company Example has founder Ivan Example and executive Petr Example. Return only supported founders/executives facts with source id S1 and no risks."},
+                  ],
+              }
+              started = time.perf_counter()
+              async with httpx.AsyncClient(timeout=30) as client:
+                  response = await client.post(
+                      f"{base}/chat/completions",
+                      headers={"Authorization": f"Bearer {key}"},
+                      json=payload,
+                  )
+              elapsed = time.perf_counter() - started
+              finish_reason = None
+              schema_valid = False
+              fact_count = None
+              if response.status_code == 200:
+                  body = response.json()
+                  choice = body.get("choices", [{}])[0]
+                  finish_reason = choice.get("finish_reason")
+                  content = choice.get("message", {}).get("content", "")
+                  try:
+                      parsed = ManagementSlice.model_validate(json.loads(content))
+                      schema_valid = True
+                      fact_count = len(parsed.company_facts)
+                  except Exception:
+                      pass
+              print(json.dumps({
+                  "model": model,
+                  "http_status": response.status_code,
+                  "elapsed_seconds": round(elapsed, 3),
+                  "finish_reason": finish_reason,
+                  "schema_valid": schema_valid,
+                  "fact_count": fact_count,
+                  "response_bytes": len(response.content),
+                  "response_content_exposed": False,
+                  "secret_values_exposed": False,
+              }, sort_keys=True))
+              response.raise_for_status()
+              if not schema_valid or finish_reason != "stop":
+                  raise SystemExit("management_strict_schema_probe_failed")
+
+          asyncio.run(main())
+          PY
