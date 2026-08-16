@@ -1,0 +1,98 @@
+name: RouterAI Structured Output Probe
+
+on:
+  push:
+    branches:
+      - ops/routerai-input-observe-20260816
+    paths:
+      - .github/workflows/routerai-structured-output-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 3
+    steps:
+      - name: Verify strict JSON-schema output on the live RouterAI model
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i aimeton-auditor python - <<'PY'
+          import asyncio
+          import json
+          import os
+          import time
+          import httpx
+
+          async def main():
+              key = os.getenv("ROUTERAI_API_KEY")
+              if not key:
+                  raise SystemExit("routerai_key_not_configured")
+              base = os.getenv("ROUTERAI_BASE_URL", "https://routerai.ru/api/v1")
+              model = os.getenv("ROUTERAI_MODEL", "openai/gpt-4o-mini")
+              schema = {
+                  "type": "object",
+                  "properties": {"ok": {"type": "boolean"}},
+                  "required": ["ok"],
+                  "additionalProperties": False,
+              }
+              payload = {
+                  "model": model,
+                  "temperature": 0,
+                  "max_tokens": 64,
+                  "structured_outputs": True,
+                  "response_format": {
+                      "type": "json_schema",
+                      "json_schema": {
+                          "name": "aimeton_probe",
+                          "strict": True,
+                          "schema": schema,
+                      },
+                  },
+                  "messages": [
+                      {"role": "system", "content": "Return only the requested structured object."},
+                      {"role": "user", "content": "Set ok to true."},
+                  ],
+              }
+              started = time.perf_counter()
+              async with httpx.AsyncClient(timeout=30) as client:
+                  response = await client.post(
+                      f"{base}/chat/completions",
+                      headers={"Authorization": f"Bearer {key}"},
+                      json=payload,
+                  )
+              elapsed = time.perf_counter() - started
+              parsed = False
+              schema_valid = False
+              finish_reason = None
+              if response.status_code == 200:
+                  body = response.json()
+                  choice = body.get("choices", [{}])[0]
+                  finish_reason = choice.get("finish_reason")
+                  content = choice.get("message", {}).get("content", "")
+                  try:
+                      obj = json.loads(content)
+                      parsed = True
+                      schema_valid = obj == {"ok": True}
+                  except Exception:
+                      pass
+              print(json.dumps({
+                  "model": model,
+                  "http_status": response.status_code,
+                  "elapsed_seconds": round(elapsed, 3),
+                  "finish_reason": finish_reason,
+                  "json_parsed": parsed,
+                  "schema_valid": schema_valid,
+                  "response_bytes": len(response.content),
+                  "response_content_exposed": False,
+                  "secret_values_exposed": False,
+              }, sort_keys=True))
+              response.raise_for_status()
+              if not schema_valid:
+                  raise SystemExit("structured_output_not_valid")
+
+          asyncio.run(main())
+          PY
