@@ -172,6 +172,7 @@ def _merge_facts(*groups: list[CompactCompanyFact]) -> list[CompanyFact]:
 async def extract_profile_parallel(
     *,
     request_json: RequestJson,
+    strict_request_json: RequestJson | None = None,
     url: str,
     title: str,
     text: str,
@@ -189,6 +190,7 @@ async def extract_profile_parallel(
     )
     operations_context = _source_slice(external_sources, _OPERATIONS_KINDS)
     signal_context = _source_slice(external_sources, _SIGNAL_KINDS)
+    management_request = strict_request_json or request_json
 
     common_rules = """
 Правила:
@@ -266,7 +268,7 @@ RELEVANT SOURCES:\n{signal_context}
             max_tokens=850,
             timeout_seconds=20.0,
         ),
-        request_json(
+        management_request(
             "profile_management",
             ManagementSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
