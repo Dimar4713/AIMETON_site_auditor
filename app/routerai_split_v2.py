@@ -13,6 +13,7 @@ from app.routerai_split_synthesis import (
     _assemble_site_analysis,
     _request_json,
 )
+from app.routerai_strict_request import request_json_strict
 
 
 async def analyze_with_routerai_split_v2(
@@ -27,6 +28,7 @@ async def analyze_with_routerai_split_v2(
 
     merged = await extract_profile_parallel(
         request_json=_request_json,
+        strict_request_json=request_json_strict,
         url=url,
         title=title,
         text=text,
