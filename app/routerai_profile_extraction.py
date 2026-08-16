@@ -45,8 +45,13 @@ class IdentityCoreSlice(BaseModel):
     risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=2)
 
 
+class ManagementSlice(BaseModel):
+    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=2)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=1)
+
+
 class OwnershipNetworkSlice(BaseModel):
-    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=5)
+    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=3)
     risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=2)
 
 
@@ -73,7 +78,10 @@ class MergedProfileExtraction:
 RequestJson = Callable[..., Awaitable[BaseModel]]
 
 _IDENTITY_CORE_KINDS = {"official", "contact", "registry"}
-_OWNERSHIP_KINDS = {"official", "registry", "ownership", "affiliation", "social"}
+_MANAGEMENT_KINDS = {"official", "registry", "ownership"}
+_OWNERSHIP_NETWORK_KINDS = {
+    "official", "registry", "ownership", "affiliation", "social",
+}
 _OPERATIONS_KINDS = {
     "finance", "workforce", "jobs", "tender", "patent", "other",
 }
@@ -173,7 +181,12 @@ async def extract_profile_parallel(
     """Run bounded vertical extractors in parallel, then merge deterministically."""
     official_text = text[:10000]
     identity_core_context = _source_slice(external_sources, _IDENTITY_CORE_KINDS)
-    ownership_context = _source_slice(external_sources, _OWNERSHIP_KINDS)
+    management_context = _source_slice(external_sources, _MANAGEMENT_KINDS, char_budget=10000)
+    ownership_network_context = _source_slice(
+        external_sources,
+        _OWNERSHIP_NETWORK_KINDS,
+        char_budget=12000,
+    )
     operations_context = _source_slice(external_sources, _OPERATIONS_KINDS)
     signal_context = _source_slice(external_sources, _SIGNAL_KINDS)
 
@@ -199,16 +212,27 @@ OFFICIAL PAGE TEXT:\n{official_text}
 RELEVANT SOURCES:\n{identity_core_context}
 """
 
-    ownership_prompt = f"""Извлеки только ownership/management/network сведения компании.
-Разрешённые поля: founders, executives, beneficial_owners, affiliates, social_accounts.
-Верни максимум один компактный факт на каждое из пяти полей. Не повторяй адреса,
-телефоны, реквизиты, финансы и продукты. Учредитель не является автоматически
-бенефициаром; аффилированность маркируй осторожно.
+    management_prompt = f"""Извлеки только сведения о формальном управлении компанией.
+Разрешённые поля: founders, executives. Верни максимум один компактный факт на
+каждое из двух полей. Учредитель не является автоматически бенефициаром. Не
+извлекай affiliates, social_accounts, контакты, финансы и продукты.
 {common_rules}
 URL: {url}
 TITLE: {title}
 OFFICIAL PAGE TEXT:\n{official_text}
-RELEVANT SOURCES:\n{ownership_context}
+RELEVANT SOURCES:\n{management_context}
+"""
+
+    ownership_network_prompt = f"""Извлеки только ownership/network сведения компании.
+Разрешённые поля: beneficial_owners, affiliates, social_accounts. Верни максимум
+один компактный факт на каждое из трёх полей. Бенефициарность и аффилированность
+маркируй осторожно и не выводи их только из факта учредительства. Не повторяй
+founders/executives, адреса, телефоны, финансы и продукты.
+{common_rules}
+URL: {url}
+TITLE: {title}
+OFFICIAL PAGE TEXT:\n{official_text}
+RELEVANT SOURCES:\n{ownership_network_context}
 """
 
     operations_prompt = f"""Извлеки операционные и экономические факты компании.
@@ -233,7 +257,7 @@ OFFICIAL PAGE TEXT:\n{official_text}
 RELEVANT SOURCES:\n{signal_context}
 """
 
-    identity_core, ownership, operations, signals = await asyncio.gather(
+    identity_core, management, ownership_network, operations, signals = await asyncio.gather(
         request_json(
             "profile_identity_core",
             IdentityCoreSlice,
@@ -243,12 +267,20 @@ RELEVANT SOURCES:\n{signal_context}
             timeout_seconds=20.0,
         ),
         request_json(
+            "profile_management",
+            ManagementSlice,
+            system="Возвращай только компактный валидный JSON по схеме.",
+            prompt=management_prompt,
+            max_tokens=600,
+            timeout_seconds=18.0,
+        ),
+        request_json(
             "profile_ownership_network",
             OwnershipNetworkSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=ownership_prompt,
-            max_tokens=900,
-            timeout_seconds=20.0,
+            prompt=ownership_network_prompt,
+            max_tokens=700,
+            timeout_seconds=18.0,
         ),
         request_json(
             "profile_operations",
@@ -269,13 +301,15 @@ RELEVANT SOURCES:\n{signal_context}
     )
 
     assert isinstance(identity_core, IdentityCoreSlice)
-    assert isinstance(ownership, OwnershipNetworkSlice)
+    assert isinstance(management, ManagementSlice)
+    assert isinstance(ownership_network, OwnershipNetworkSlice)
     assert isinstance(operations, OperationsProfileSlice)
     assert isinstance(signals, SignalProfileSlice)
 
     risks = _unique_text(
         identity_core.risks_and_assumptions
-        + ownership.risks_and_assumptions
+        + management.risks_and_assumptions
+        + ownership_network.risks_and_assumptions
         + operations.risks_and_assumptions
         + signals.risks_and_assumptions,
         10,
@@ -286,7 +320,8 @@ RELEVANT SOURCES:\n{signal_context}
         evidence=_unique_text(identity_core.evidence, 3),
         company_facts=_merge_facts(
             identity_core.company_facts,
-            ownership.company_facts,
+            management.company_facts,
+            ownership_network.company_facts,
             operations.company_facts,
         ),
         economic_signals=[_to_signal(item) for item in signals.economic_signals[:6]],
