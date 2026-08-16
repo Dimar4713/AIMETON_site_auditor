@@ -37,11 +37,16 @@ class CompactEconomicSignal(BaseModel):
     source_ids: list[str] = Field(default_factory=list, max_length=4)
 
 
-class IdentityProfileSlice(BaseModel):
+class IdentityCoreSlice(BaseModel):
     company_name: str = Field(max_length=160)
-    business_summary: str = Field(max_length=480)
-    evidence: list[ShortText] = Field(default_factory=list, max_length=5)
-    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=12)
+    business_summary: str = Field(max_length=420)
+    evidence: list[ShortText] = Field(default_factory=list, max_length=4)
+    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=9)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=3)
+
+
+class OwnershipNetworkSlice(BaseModel):
+    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=7)
     risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=4)
 
 
@@ -67,9 +72,8 @@ class MergedProfileExtraction:
 
 RequestJson = Callable[..., Awaitable[BaseModel]]
 
-_IDENTITY_KINDS = {
-    "official", "contact", "registry", "ownership", "affiliation", "social",
-}
+_IDENTITY_CORE_KINDS = {"official", "contact", "registry"}
+_OWNERSHIP_KINDS = {"official", "registry", "ownership", "affiliation", "social"}
 _OPERATIONS_KINDS = {
     "finance", "workforce", "jobs", "tender", "patent", "other",
 }
@@ -87,7 +91,7 @@ def _source_slice(
     sources: list[dict[str, Any]],
     kinds: set[str],
     *,
-    char_budget: int = 18000,
+    char_budget: int = 14000,
 ) -> str:
     """Project only evidence needed by one extractor while preserving source IDs."""
     selected: list[dict[str, Any]] = []
@@ -167,8 +171,9 @@ async def extract_profile_parallel(
     accessed_at: str,
 ) -> MergedProfileExtraction:
     """Run bounded vertical extractors in parallel, then merge deterministically."""
-    official_text = text[:12000]
-    identity_context = _source_slice(external_sources, _IDENTITY_KINDS)
+    official_text = text[:10000]
+    identity_core_context = _source_slice(external_sources, _IDENTITY_CORE_KINDS)
+    ownership_context = _source_slice(external_sources, _OWNERSHIP_KINDS)
     operations_context = _source_slice(external_sources, _OPERATIONS_KINDS)
     signal_context = _source_slice(external_sources, _SIGNAL_KINDS)
 
@@ -181,16 +186,27 @@ async def extract_profile_parallel(
 - Если данных нет, пропусти факт, а не выдумывай его.
 """
 
-    identity_prompt = f"""Извлеки identity/contact/ownership профиль компании.
+    identity_core_prompt = f"""Извлеки только базовую идентичность и прямые контакты компании.
 Разрешённые поля: legal_name, brand_name, inn, ogrn, registration_status, address,
-phones, emails, website, social_accounts, founders, executives, beneficial_owners,
-affiliates, geography. Не извлекай финансовые показатели и коммерческое решение.
+phones, emails, website, geography. Не извлекай собственников, руководителей,
+аффилированность, соцсети, финансы и коммерческое решение.
 {common_rules}
 URL: {url}
 TITLE: {title}
 ACCESSED AT: {accessed_at}
 OFFICIAL PAGE TEXT:\n{official_text}
-RELEVANT SOURCES:\n{identity_context}
+RELEVANT SOURCES:\n{identity_core_context}
+"""
+
+    ownership_prompt = f"""Извлеки только ownership/management/network сведения компании.
+Разрешённые поля: founders, executives, beneficial_owners, affiliates, social_accounts.
+Не повторяй адреса, телефоны, реквизиты, финансы и продукты. Учредитель не является
+автоматически бенефициаром; аффилированность маркируй осторожно.
+{common_rules}
+URL: {url}
+TITLE: {title}
+OFFICIAL PAGE TEXT:\n{official_text}
+RELEVANT SOURCES:\n{ownership_context}
 """
 
     operations_prompt = f"""Извлеки операционные и экономические факты компании.
@@ -214,14 +230,22 @@ OFFICIAL PAGE TEXT:\n{official_text}
 RELEVANT SOURCES:\n{signal_context}
 """
 
-    identity, operations, signals = await asyncio.gather(
+    identity_core, ownership, operations, signals = await asyncio.gather(
         request_json(
-            "profile_identity",
-            IdentityProfileSlice,
+            "profile_identity_core",
+            IdentityCoreSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=identity_prompt,
-            max_tokens=1200,
-            timeout_seconds=22.0,
+            prompt=identity_core_prompt,
+            max_tokens=850,
+            timeout_seconds=20.0,
+        ),
+        request_json(
+            "profile_ownership_network",
+            OwnershipNetworkSlice,
+            system="Возвращай только компактный валидный JSON по схеме.",
+            prompt=ownership_prompt,
+            max_tokens=750,
+            timeout_seconds=20.0,
         ),
         request_json(
             "profile_operations",
@@ -241,21 +265,27 @@ RELEVANT SOURCES:\n{signal_context}
         ),
     )
 
-    assert isinstance(identity, IdentityProfileSlice)
+    assert isinstance(identity_core, IdentityCoreSlice)
+    assert isinstance(ownership, OwnershipNetworkSlice)
     assert isinstance(operations, OperationsProfileSlice)
     assert isinstance(signals, SignalProfileSlice)
 
     risks = _unique_text(
-        identity.risks_and_assumptions
+        identity_core.risks_and_assumptions
+        + ownership.risks_and_assumptions
         + operations.risks_and_assumptions
         + signals.risks_and_assumptions,
         12,
     )
     return MergedProfileExtraction(
-        company_name=identity.company_name,
-        business_summary=identity.business_summary,
-        evidence=_unique_text(identity.evidence, 5),
-        company_facts=_merge_facts(identity.company_facts, operations.company_facts),
+        company_name=identity_core.company_name,
+        business_summary=identity_core.business_summary,
+        evidence=_unique_text(identity_core.evidence, 4),
+        company_facts=_merge_facts(
+            identity_core.company_facts,
+            ownership.company_facts,
+            operations.company_facts,
+        ),
         economic_signals=[_to_signal(item) for item in signals.economic_signals[:6]],
         risks_and_assumptions=risks,
     )

@@ -22,32 +22,42 @@ def _source(source_id: str, query_kind: str) -> dict:
 def test_source_slices_follow_search_verticals_and_keep_ids() -> None:
     sources = [
         _source("E1", "contact"),
-        _source("E2", "finance"),
-        _source("E3", "court"),
-        _source("E4", "jobs"),
+        _source("E2", "ownership"),
+        _source("E3", "finance"),
+        _source("E4", "court"),
+        _source("E5", "jobs"),
     ]
 
-    identity = json.loads(profile._source_slice(sources, profile._IDENTITY_KINDS))
+    identity_core = json.loads(
+        profile._source_slice(sources, profile._IDENTITY_CORE_KINDS)
+    )
+    ownership = json.loads(profile._source_slice(sources, profile._OWNERSHIP_KINDS))
     operations = json.loads(profile._source_slice(sources, profile._OPERATIONS_KINDS))
     signals = json.loads(profile._source_slice(sources, profile._SIGNAL_KINDS))
 
-    assert {item["id"] for item in identity} == {"E1"}
-    assert {item["id"] for item in operations} == {"E2", "E4"}
-    assert {item["id"] for item in signals} == {"E2", "E3"}
-    assert all("url" not in item for item in identity + operations + signals)
+    assert {item["id"] for item in identity_core} == {"E1"}
+    assert {item["id"] for item in ownership} == {"E2"}
+    assert {item["id"] for item in operations} == {"E3", "E5"}
+    assert {item["id"] for item in signals} == {"E3", "E4"}
+    assert all(
+        "url" not in item
+        for item in identity_core + ownership + operations + signals
+    )
 
 
 def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
     fact_schema = profile.CompactCompanyFact.model_json_schema()
     signal_schema = profile.CompactEconomicSignal.model_json_schema()
-    identity_schema = profile.IdentityProfileSlice.model_json_schema()
+    identity_schema = profile.IdentityCoreSlice.model_json_schema()
+    ownership_schema = profile.OwnershipNetworkSlice.model_json_schema()
     signal_slice_schema = profile.SignalProfileSlice.model_json_schema()
 
     assert fact_schema["properties"]["value"]["maxLength"] == 240
     assert fact_schema["properties"]["source_ids"]["maxItems"] == 4
     assert signal_schema["properties"]["signal"]["maxLength"] == 140
     assert signal_schema["properties"]["business_effect"]["maxLength"] == 180
-    assert identity_schema["properties"]["company_facts"]["maxItems"] == 12
+    assert identity_schema["properties"]["company_facts"]["maxItems"] == 9
+    assert ownership_schema["properties"]["company_facts"]["maxItems"] == 7
     assert signal_slice_schema["properties"]["economic_signals"]["maxItems"] == 6
 
 
@@ -56,8 +66,8 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
 
     async def fake_request(phase, model_type, **kwargs):
         phases.append((phase, kwargs["max_tokens"]))
-        if model_type is profile.IdentityProfileSlice:
-            return profile.IdentityProfileSlice(
+        if model_type is profile.IdentityCoreSlice:
+            return profile.IdentityCoreSlice(
                 company_name="Example",
                 business_summary="Engineering company",
                 evidence=["Official site identifies the company"],
@@ -71,6 +81,17 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
                 ],
                 risks_and_assumptions=["Identity needs registry confirmation"],
             )
+        if model_type is profile.OwnershipNetworkSlice:
+            return profile.OwnershipNetworkSlice(
+                company_facts=[
+                    profile.CompactCompanyFact(
+                        field="executives",
+                        value="Named executive",
+                        confidence="Средняя",
+                        source_ids=["E2"],
+                    )
+                ]
+            )
         if model_type is profile.OperationsProfileSlice:
             return profile.OperationsProfileSlice(
                 company_facts=[
@@ -78,7 +99,7 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
                         field="products",
                         value="Engineering services",
                         confidence="Средняя",
-                        source_ids=["E2"],
+                        source_ids=["E3"],
                     )
                 ]
             )
@@ -86,11 +107,11 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
             return profile.SignalProfileSlice(
                 economic_signals=[
                     profile.CompactEconomicSignal(
-                        signal="Hiring signal",
-                        evidence="Vacancy mention",
+                        signal="Market signal",
+                        evidence="Court or finance mention",
                         business_effect="Possible automation demand",
                         confidence="Средняя",
-                        source_ids=["E3"],
+                        source_ids=["E4"],
                     )
                 ]
             )
@@ -104,21 +125,27 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
             text="Official site text",
             external_sources=[
                 _source("E1", "contact"),
-                _source("E2", "other"),
-                _source("E3", "jobs"),
+                _source("E2", "ownership"),
+                _source("E3", "other"),
+                _source("E4", "court"),
             ],
             accessed_at="2026-08-16T00:00:00+00:00",
         )
     )
 
     assert {phase for phase, _ in phases} == {
-        "profile_identity",
+        "profile_identity_core",
+        "profile_ownership_network",
         "profile_operations",
         "profile_signals",
     }
-    assert max(tokens for _, tokens in phases) <= 1200
+    assert max(tokens for _, tokens in phases) <= 1100
     assert merged.company_name == "Example"
     assert all(isinstance(item, CompanyFact) for item in merged.company_facts)
-    assert {item.field for item in merged.company_facts} == {"website", "products"}
-    assert merged.economic_signals[0].source_ids == ["E3"]
+    assert {item.field for item in merged.company_facts} == {
+        "website",
+        "executives",
+        "products",
+    }
+    assert merged.economic_signals[0].source_ids == ["E4"]
     assert merged.risks_and_assumptions == ["Identity needs registry confirmation"]
