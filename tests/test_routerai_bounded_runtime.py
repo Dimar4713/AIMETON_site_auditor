@@ -23,6 +23,7 @@ async def test_routerai_span_is_visible_while_llm_is_running(tmp_path, monkeypat
         return expected
 
     monkeypatch.setenv("AIMETON_TRACE_DB", str(trace_path))
+    monkeypatch.setenv("ROUTERAI_SPLIT_SYNTHESIS", "0")
     monkeypatch.setattr(routerai_runtime, "analyze_with_routerai", fake_analysis)
     monkeypatch.setattr(routerai_runtime, "routerai_analysis_timeout_seconds", lambda: 5.0)
     monkeypatch.setattr(async_api, "_canonical_now", lambda: datetime.now(UTC))
@@ -74,6 +75,7 @@ async def test_routerai_timeout_is_terminal_in_trace_and_raises_for_local_fallba
         await asyncio.sleep(10)
 
     monkeypatch.setenv("AIMETON_TRACE_DB", str(trace_path))
+    monkeypatch.setenv("ROUTERAI_SPLIT_SYNTHESIS", "0")
     monkeypatch.setattr(routerai_runtime, "analyze_with_routerai", never_finishes)
     monkeypatch.setattr(routerai_runtime, "routerai_analysis_timeout_seconds", lambda: 0.02)
     monkeypatch.setattr(async_api, "_canonical_now", lambda: datetime.now(UTC))
