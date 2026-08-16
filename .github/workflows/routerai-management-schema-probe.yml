@@ -16,7 +16,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 3
     steps:
-      - name: Probe reasoning effort levels on strict ManagementSlice
+      - name: Compare Pro headroom and GPT-4o-mini extraction on strict ManagementSlice
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -30,9 +30,9 @@ jobs:
           from app.routerai_profile_extraction import ManagementSlice
 
           VARIANTS = [
-              ("control", None),
-              ("effort_high", {"effort": "high"}),
-              ("effort_xhigh", {"effort": "xhigh"}),
+              ("pro_600", "deepseek/deepseek-v4-pro", 600, True),
+              ("pro_1200", "deepseek/deepseek-v4-pro", 1200, True),
+              ("gpt4o_mini_600", "openai/gpt-4o-mini", 600, False),
           ]
 
           def synthetic_context():
@@ -58,12 +58,11 @@ jobs:
               ) * 35
               return official[:3550], json.dumps(sources, ensure_ascii=False, separators=(",", ":"))[:10000]
 
-          async def probe(label, reasoning, client, official, sources):
+          async def probe(label, model, max_tokens, include_reasoning, client, official, sources):
               key = os.getenv("ROUTERAI_API_KEY")
               if not key:
                   raise RuntimeError("routerai_key_not_configured")
               base = os.getenv("ROUTERAI_BASE_URL", "https://routerai.ru/api/v1")
-              model = "deepseek/deepseek-v4-pro"
               schema = ManagementSlice.model_json_schema()
               prompt = f"""Extract only formal management facts.
           Allowed fields: founders, executives. Return at most one compact fact per field.
@@ -73,9 +72,8 @@ jobs:
               payload = {
                   "model": model,
                   "temperature": 0,
-                  "max_tokens": 600,
+                  "max_tokens": max_tokens,
                   "structured_outputs": True,
-                  "include_reasoning": True,
                   "response_format": {
                       "type": "json_schema",
                       "json_schema": {
@@ -89,24 +87,37 @@ jobs:
                       {"role": "user", "content": prompt},
                   ],
               }
-              if reasoning is not None:
-                  payload["reasoning"] = reasoning
+              if include_reasoning:
+                  payload["include_reasoning"] = True
 
               started = time.perf_counter()
-              response = await client.post(
-                  f"{base}/chat/completions",
-                  headers={"Authorization": f"Bearer {key}"},
-                  json=payload,
-              )
+              try:
+                  response = await client.post(
+                      f"{base}/chat/completions",
+                      headers={"Authorization": f"Bearer {key}"},
+                      json=payload,
+                  )
+              except Exception as exc:
+                  return {
+                      "variant": label,
+                      "model": model,
+                      "max_tokens": max_tokens,
+                      "http_status": None,
+                      "elapsed_seconds": round(time.perf_counter() - started, 3),
+                      "error_type": type(exc).__name__,
+                      "schema_valid": False,
+                      "response_content_exposed": False,
+                      "secret_values_exposed": False,
+                  }
+
               elapsed = time.perf_counter() - started
               result = {
                   "variant": label,
-                  "reasoning_request": reasoning,
                   "model": model,
                   "http_status": response.status_code,
                   "elapsed_seconds": round(elapsed, 3),
                   "input_chars": len(official) + len(sources),
-                  "max_tokens": 600,
+                  "max_tokens": max_tokens,
                   "finish_reason": None,
                   "schema_valid": False,
                   "fact_count": None,
@@ -143,15 +154,15 @@ jobs:
 
           async def main():
               official, sources = synthetic_context()
-              async with httpx.AsyncClient(timeout=30) as client:
+              async with httpx.AsyncClient(timeout=45) as client:
                   results = await asyncio.gather(*(
-                      probe(label, reasoning, client, official, sources)
-                      for label, reasoning in VARIANTS
+                      probe(label, model, max_tokens, include_reasoning, client, official, sources)
+                      for label, model, max_tokens, include_reasoning in VARIANTS
                   ))
               for result in results:
                   print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-              if results[0]["http_status"] != 200:
-                  raise SystemExit("routerai_control_http_failure")
+              if not any(result.get("schema_valid") for result in results):
+                  raise SystemExit("no_candidate_produced_valid_management_schema")
 
           asyncio.run(main())
           PY
