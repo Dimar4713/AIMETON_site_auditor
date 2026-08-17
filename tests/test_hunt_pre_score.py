@@ -3,13 +3,32 @@ from __future__ import annotations
 import pytest
 
 from app import discovery
+from app.hunter_search_policy_authority import HunterSearchPolicyAuthority, ResolvedHunterSearchPolicy
 from app.models import HuntRequest
 from app.search_gateway.models import (
     GatewayState,
     SearchDiagnostics,
     SearchItem,
+    SearchPolicy,
     SearchResponse,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_canonical_hunter_policy(monkeypatch):
+    monkeypatch.setattr(
+        discovery,
+        "resolve_hunter_search_policy",
+        lambda: ResolvedHunterSearchPolicy(
+            policy=SearchPolicy(),
+            authority=HunterSearchPolicyAuthority.ADMIN,
+            selected_policy_fingerprint="sha256:test-admin",
+            env_policy_fingerprint="sha256:test-env",
+            admin_projection_fingerprint="sha256:test-admin",
+            policy_equivalent=False,
+            admin_policy_persisted=True,
+        ),
+    )
 
 
 def _request(**overrides) -> HuntRequest:
@@ -105,15 +124,8 @@ def test_missing_text_is_explicit_insufficient_data_not_zero():
 
 @pytest.mark.asyncio
 async def test_deep_processing_is_not_called_below_threshold(monkeypatch):
-    # The explicit industry-match factor intentionally raises a clear dentistry
-    # result. Keep this regression focused on the threshold rule itself by using
-    # the strictest allowed threshold.
     req = _request(deep_audit_score=100)
-    monkeypatch.setattr(
-        discovery,
-        "_build_queries",
-        lambda _req: ["query"],
-    )
+    monkeypatch.setattr(discovery, "_build_queries", lambda _req: ["query"])
 
     async def fake_search(_query: str, _limit: int):
         return [{
@@ -201,11 +213,7 @@ async def test_degraded_gateway_state_is_visible_in_hunt_api(monkeypatch):
             "content": "Каталог услуг",
         }]
 
-    monkeypatch.setattr(
-        discovery,
-        "get_search_gateway",
-        lambda: _degraded_gateway_for(fake_search),
-    )
+    monkeypatch.setattr(discovery, "get_search_gateway", lambda: _degraded_gateway_for(fake_search))
 
     result = await discovery.run_hunt(req)
 
