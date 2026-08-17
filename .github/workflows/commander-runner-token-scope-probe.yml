@@ -1,4 +1,4 @@
-name: Commander Runner Token Scope Probe
+name: Temporary Commander Runner Bootstrap
 
 on:
   pull_request:
@@ -9,23 +9,77 @@ permissions:
   contents: read
 
 jobs:
-  probe:
+  bootstrap:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      INFRA_SHA: 7e5c2cf706cb457d295d42f95200484864b9b348
     steps:
-      - name: Probe runner-registration capability without exposing response
+      - name: Bootstrap only through exact merged infrastructure contract
         env:
           PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
         shell: bash
         run: |
           set -Eeuo pipefail
           test -n "${PROJECTS_TOKEN:-}"
-          status="$(curl -sS -o /dev/null -w '%{http_code}' \
-            -X POST \
-            -H 'Accept: application/vnd.github+json' \
-            -H "Authorization: Bearer ${PROJECTS_TOKEN}" \
-            -H 'X-GitHub-Api-Version: 2026-03-10' \
-            -H 'User-Agent: aimeton-commander-runner-scope-probe' \
-            'https://api.github.com/repos/Dimar4713/aimeton-commander/actions/runners/registration-token')"
-          echo "commander_runner_registration_scope_http=${status}"
-          test "${status}" = '201'
+          [[ "${INFRA_SHA}" =~ ^[0-9a-f]{40}$ ]]
+
+          tmp="$(mktemp -d)"
+          cleanup() {
+            unset AIMETON_RUNNER_TOKEN_COMMANDER_CI PROJECTS_TOKEN || true
+            rm -rf "${tmp}"
+          }
+          trap cleanup EXIT
+
+          api_headers=(
+            -H 'Accept: application/vnd.github+json'
+            -H "Authorization: Bearer ${PROJECTS_TOKEN}"
+            -H 'X-GitHub-Api-Version: 2026-03-10'
+            -H 'User-Agent: aimeton-commander-runner-bootstrap'
+          )
+
+          current_main_sha="$(curl -fsSL "${api_headers[@]}" \
+            'https://api.github.com/repos/Dimar4713/aimeton-infrastructure/branches/main' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["sha"])')"
+          test "${current_main_sha}" = "${INFRA_SHA}"
+
+          curl -fsSL -L "${api_headers[@]}" \
+            "https://api.github.com/repos/Dimar4713/aimeton-infrastructure/tarball/${INFRA_SHA}" \
+            -o "${tmp}/infra.tar.gz"
+          mkdir -p "${tmp}/infra"
+          tar -xzf "${tmp}/infra.tar.gz" -C "${tmp}/infra" --strip-components=1
+
+          python3 - "${tmp}/infra/ops/main-server/runners.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          matches = [r for r in data['runners'] if r['key'] == 'commander_ci']
+          assert len(matches) == 1
+          runner = matches[0]
+          assert runner['repository'] == 'Dimar4713/aimeton-commander'
+          assert runner['name'] == 'aimeton-commander-ci'
+          assert runner['labels'] == ['commander-ci']
+          print('commander_runner_manifest=verified')
+          PY
+
+          curl -fsSL "${api_headers[@]}" -X POST \
+            'https://api.github.com/repos/Dimar4713/aimeton-commander/actions/runners/registration-token' \
+            -o "${tmp}/runner-token.json"
+          AIMETON_RUNNER_TOKEN_COMMANDER_CI="$(python3 - "${tmp}/runner-token.json" <<'PY'
+          import json, sys
+          token = json.load(open(sys.argv[1], encoding='utf-8')).get('token')
+          if not token:
+              raise SystemExit('runner registration token missing')
+          print(token)
+          PY
+          )"
+          test -n "${AIMETON_RUNNER_TOKEN_COMMANDER_CI}"
+          export AIMETON_RUNNER_TOKEN_COMMANDER_CI
+          rm -f "${tmp}/runner-token.json"
+          unset PROJECTS_TOKEN
+
+          cd "${tmp}/infra"
+          sudo --preserve-env=AIMETON_RUNNER_TOKEN_COMMANDER_CI \
+            bash scripts/bootstrap_main_server_runners.sh --apply
+          unset AIMETON_RUNNER_TOKEN_COMMANDER_CI
+          bash scripts/bootstrap_main_server_runners.sh --check
+          echo 'temporary_commander_runner_bootstrap=success'
