@@ -24,6 +24,7 @@ def test_hunter_runtime_acceptance_is_dispatch_only_and_no_cost() -> None:
     assert "admin_candidate_gateway_policy" in text
     assert "admin_candidate_policy_fingerprint" in text
     assert "admin_candidate_matches_projection" in text
+    assert "provider_lifecycle" in text
     assert "runtime_authority" in text
     assert "policy_equivalent" in text
     assert "runtime_callsite_uses_admin_projection" in text
@@ -47,6 +48,21 @@ def test_hunter_runtime_acceptance_proves_dynamic_env_selection_and_admin_candid
     assert "canonical admin observation runtime authority: `env`" in text
     assert "persisted ADMIN candidate equals projected admin policy" in text
     assert "ADMIN candidate activated: `false`" in text
+
+
+def test_hunter_runtime_acceptance_proves_tavily_registration_without_activation_assumption() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "set(by_provider) == {'searxng', 'yandex', 'tavily'}" in text
+    assert "all(item['registered'] is True for item in lifecycle)" in text
+    assert "all(item['availability'] == 'unknown' for item in lifecycle)" in text
+    assert "by_provider['tavily']['admin_enabled'] is False" in text
+    assert "by_provider['tavily']['enabled'] is False" in text
+    assert "by_provider['tavily']['admin_position'] is None" in text
+    assert "by_provider['tavily']['active'] is True" not in text
+    assert "by_provider['tavily']['configured'] is True" not in text
+    assert "all canonical providers remain registered" in text
+    assert "network availability not guessed without evidence" in text
 
 
 def test_hunter_runtime_acceptance_does_not_bypass_admin_observation_resolver() -> None:
