@@ -21,6 +21,10 @@ def test_hunter_runtime_acceptance_is_dispatch_only_and_no_cost() -> None:
     assert "projected_admin_gateway_policy" in text
     assert "selected_gateway_policy" in text
     assert "selected_policy_fingerprint" in text
+    assert "gateway_effective_policy" in text
+    assert "gateway_effective_policy_fingerprint" in text
+    assert "legacy_hunter_admin_projection_applied" in text
+    assert "gateway_policy_changed_after_authority_resolution" in text
     assert "admin_candidate_gateway_policy" in text
     assert "admin_candidate_policy_fingerprint" in text
     assert "admin_candidate_matches_projection" in text
@@ -35,19 +39,28 @@ def test_hunter_runtime_acceptance_is_dispatch_only_and_no_cost() -> None:
     assert "provider calls: `0`" in text
 
 
-def test_hunter_runtime_acceptance_proves_dynamic_env_selection_and_admin_candidate() -> None:
+def test_hunter_runtime_acceptance_exposes_hidden_post_resolver_projection() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
     assert "observation['runtime_authority'] == 'env'" in text
     assert "selected == actual" in text
     assert "observation['selected_policy_fingerprint'] == actual['fingerprint']" in text
+    assert "observation['legacy_hunter_admin_projection_applied'] is True" in text
+    assert "observation['gateway_policy_changed_after_authority_resolution'] is True" in text
+    assert "gateway_effective == projected" in text
+    assert "observation['gateway_effective_policy_fingerprint'] == projected['fingerprint']" in text
+    assert "observation['gateway_effective_policy_fingerprint'] != observation['selected_policy_fingerprint']" in text
+    assert "legacy TracedSearchGateway admin projection applied after resolver" in text
+    assert "gateway-effective policy equals persisted admin projection" in text
+
+
+def test_hunter_runtime_acceptance_proves_admin_candidate_without_activation() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+
     assert "observation['admin_candidate_available'] is True" in text
     assert "observation['admin_candidate_matches_projection'] is True" in text
     assert "admin_candidate == projected" in text
     assert "observation['admin_candidate_policy_fingerprint'] == projected['fingerprint']" in text
-    assert "canonical admin observation runtime authority: `env`" in text
-    assert "persisted ADMIN candidate equals projected admin policy" in text
-    assert "ADMIN candidate activated: `false`" in text
 
 
 def test_hunter_runtime_acceptance_proves_tavily_registration_without_activation_assumption() -> None:
@@ -61,17 +74,18 @@ def test_hunter_runtime_acceptance_proves_tavily_registration_without_activation
     assert "expected_admin_position" in text
     assert "profile.provider_order.index('tavily') + 1" in text
     assert "by_provider['tavily']['admin_position'] == expected_admin_position" in text
-    assert "by_provider['tavily']['admin_position'] is None" not in text
+    assert "gateway_effective['provider_order'].index('tavily') + 1" in text
     assert "by_provider['tavily']['active'] is True" not in text
     assert "by_provider['tavily']['configured'] is True" not in text
     assert "all canonical providers remain registered" in text
     assert "network availability not guessed without evidence" in text
 
 
-def test_hunter_runtime_acceptance_does_not_bypass_admin_observation_resolver() -> None:
+def test_hunter_runtime_acceptance_does_not_reimplement_policy_resolvers() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
     assert "resolve_hunter_search_policy" not in text
+    assert "resolve_traced_gateway_policy" not in text
     assert "search_policy_from_env" not in text
     assert "authority_resolution" not in text
     assert "observation = _execution_policy_observation(record)" in text
