@@ -37,13 +37,14 @@ jobs:
             -H 'X-GitHub-Api-Version: 2026-03-10'
             -H 'User-Agent: aimeton-commander-runner-bootstrap'
           )
+          retry=(--retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 60)
 
-          current_main_sha="$(curl -fsSL "${api_headers[@]}" \
+          current_main_sha="$(curl -fsSL "${retry[@]}" "${api_headers[@]}" \
             'https://api.github.com/repos/Dimar4713/aimeton-infrastructure/branches/main' \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["sha"])')"
           test "${current_main_sha}" = "${INFRA_SHA}"
 
-          curl -fsSL -L "${api_headers[@]}" \
+          curl -fsSL -L "${retry[@]}" "${api_headers[@]}" \
             "https://api.github.com/repos/Dimar4713/aimeton-infrastructure/tarball/${INFRA_SHA}" \
             -o "${tmp}/infra.tar.gz"
           mkdir -p "${tmp}/infra"
@@ -61,7 +62,7 @@ jobs:
           print('commander_runner_manifest=verified')
           PY
 
-          curl -fsSL "${api_headers[@]}" -X POST \
+          curl -fsSL "${retry[@]}" "${api_headers[@]}" -X POST \
             'https://api.github.com/repos/Dimar4713/aimeton-commander/actions/runners/registration-token' \
             -o "${tmp}/runner-token.json"
           AIMETON_RUNNER_TOKEN_COMMANDER_CI="$(python3 - "${tmp}/runner-token.json" <<'PY'
