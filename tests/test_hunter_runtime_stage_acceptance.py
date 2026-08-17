@@ -15,6 +15,8 @@ def test_hunter_runtime_acceptance_is_dispatch_only_and_no_cost() -> None:
     assert "expected_tariff" in text
     assert "expected_strategy" in text
     assert "expected_provider_order" in text
+    assert "expected_effective_policy_fingerprint" in text
+    assert "sha256:63151511b45bd2ba687dc12fa9a903485583671e45ff70ae3dff14beaf2bf285" in text
     assert "get_search_strategy_settings_repository" in text
     assert "_execution_policy_observation" in text
     assert "actual_gateway_policy" in text
@@ -39,45 +41,50 @@ def test_hunter_runtime_acceptance_is_dispatch_only_and_no_cost() -> None:
     assert "provider calls: `0`" in text
 
 
-def test_hunter_runtime_acceptance_exposes_hidden_post_resolver_projection() -> None:
+def test_hunter_runtime_acceptance_proves_single_admin_authority_and_preserved_effective_policy() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "observation['runtime_authority'] == 'env'" in text
-    assert "selected == actual" in text
-    assert "observation['selected_policy_fingerprint'] == actual['fingerprint']" in text
-    assert "observation['legacy_hunter_admin_projection_applied'] is True" in text
-    assert "observation['gateway_policy_changed_after_authority_resolution'] is True" in text
-    assert "gateway_effective == projected" in text
-    assert "observation['gateway_effective_policy_fingerprint'] == projected['fingerprint']" in text
-    assert "observation['gateway_effective_policy_fingerprint'] != observation['selected_policy_fingerprint']" in text
-    assert "legacy TracedSearchGateway admin projection applied after resolver" in text
-    assert "gateway-effective policy equals persisted admin projection" in text
+    assert "observation['runtime_authority'] == 'admin'" in text
+    assert "observation['runtime_callsite_uses_admin_projection'] is True" in text
+    assert "selected == projected" in text
+    assert "observation['selected_policy_fingerprint'] == projected['fingerprint']" in text
+    assert "observation['legacy_hunter_admin_projection_applied'] is False" in text
+    assert "observation['gateway_policy_changed_after_authority_resolution'] is False" in text
+    assert "gateway_effective == selected" in text
+    assert "observation['gateway_effective_policy_fingerprint'] == observation['selected_policy_fingerprint']" in text
+    assert "observation['gateway_effective_policy_fingerprint'] == expected_fingerprint" in text
+    assert "projected['fingerprint'] == expected_fingerprint" in text
+    assert "canonical resolver authority: `admin`" in text
+    assert "TracedSearchGateway policy mutation after resolver: `false`" in text
+    assert "provider-effective fingerprint preserved across migration" in text
 
 
-def test_hunter_runtime_acceptance_proves_admin_candidate_without_activation() -> None:
+def test_hunter_runtime_acceptance_proves_admin_candidate_is_same_canonical_policy() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
     assert "observation['admin_candidate_available'] is True" in text
     assert "observation['admin_candidate_matches_projection'] is True" in text
-    assert "admin_candidate == projected" in text
-    assert "observation['admin_candidate_policy_fingerprint'] == projected['fingerprint']" in text
+    assert "admin_candidate == selected" in text
+    assert "observation['admin_candidate_policy_fingerprint'] == expected_fingerprint" in text
 
 
-def test_hunter_runtime_acceptance_proves_tavily_registration_without_activation_assumption() -> None:
+def test_hunter_runtime_acceptance_proves_tavily_registered_configured_but_inactive() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
     assert "set(by_provider) == {'searxng', 'yandex', 'tavily'}" in text
     assert "all(item['registered'] is True for item in lifecycle)" in text
     assert "all(item['availability'] == 'unknown' for item in lifecycle)" in text
+    assert "all(item['availability_evidence'] == 'not_observed' for item in lifecycle)" in text
+    assert "by_provider['tavily']['configured'] is True" in text
     assert "by_provider['tavily']['admin_enabled'] is False" in text
     assert "by_provider['tavily']['enabled'] is False" in text
+    assert "by_provider['tavily']['active'] is False" in text
+    assert "by_provider['tavily']['runtime_position'] is None" in text
     assert "expected_admin_position" in text
     assert "profile.provider_order.index('tavily') + 1" in text
     assert "by_provider['tavily']['admin_position'] == expected_admin_position" in text
-    assert "gateway_effective['provider_order'].index('tavily') + 1" in text
-    assert "by_provider['tavily']['active'] is True" not in text
-    assert "by_provider['tavily']['configured'] is True" not in text
     assert "all canonical providers remain registered" in text
+    assert "Tavily remains configured but admin-disabled/inactive" in text
     assert "network availability not guessed without evidence" in text
 
 
