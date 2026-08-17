@@ -54,11 +54,46 @@ def test_tavily_registration_is_independent_from_admin_activation(monkeypatch) -
     assert "secret-value-not-for-output" not in str(tavily.model_dump(mode="json"))
 
 
+def test_tavily_contract_block_does_not_deregister_or_deconfigure(monkeypatch) -> None:
+    monkeypatch.setenv("TAVILY_API_KEY", "configured-key")
+    monkeypatch.setenv("TAVILY_CONTRACT_ALLOWED", "false")
+
+    statuses = observe_provider_lifecycle(
+        runtime_policy=_runtime_policy(),
+        settings_record=_admin_record_without_tavily(),
+    )
+    tavily = next(item for item in statuses if item.provider == "tavily")
+
+    assert tavily.registered is True
+    assert tavily.configured is True
+    assert tavily.active is False
+    assert tavily.availability is ProviderAvailability.UNKNOWN
+    assert tavily.admin_enabled is False
+
+
+def test_runtime_membership_without_credentials_is_not_active(monkeypatch) -> None:
+    monkeypatch.delenv("TAVILY_TOKEN", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setenv("TAVILY_CONTRACT_ALLOWED", "true")
+
+    statuses = observe_provider_lifecycle(
+        runtime_policy=_runtime_policy(),
+        settings_record=_admin_record_without_tavily(),
+    )
+    tavily = next(item for item in statuses if item.provider == "tavily")
+
+    assert tavily.registered is True
+    assert tavily.configured is False
+    assert tavily.runtime_position == 2
+    assert tavily.active is False
+
+
 def test_configuration_is_not_misreported_as_availability(monkeypatch) -> None:
     monkeypatch.setenv("SEARXNG_BASE_URL", "https://search.internal.example")
     monkeypatch.setenv("YANDEX_SEARCH_API_KEY", "key")
     monkeypatch.setenv("YANDEX_CLOUD_FOLDER_ID", "folder")
     monkeypatch.setenv("TAVILY_API_KEY", "key")
+    monkeypatch.setenv("TAVILY_CONTRACT_ALLOWED", "true")
 
     statuses = observe_provider_lifecycle(
         runtime_policy=_runtime_policy(),
