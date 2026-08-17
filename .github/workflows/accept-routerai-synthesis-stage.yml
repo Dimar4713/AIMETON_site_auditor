@@ -1,0 +1,202 @@
+name: Accept RouterAI Synthesis Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed source SHA to validate
+        required: true
+        type: string
+      allow_paid_calls:
+        description: Explicit owner authorization for one live RouterAI field mission
+        required: true
+        default: false
+        type: boolean
+      owner_spend_authorized:
+        description: Owner explicitly authorizes the bounded live validation spend
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: routerai-synthesis-stage
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+
+    steps:
+      - name: Require explicit owner authorization for exactly one paid field mission
+        id: auth
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          ALLOW_PAID_CALLS: ${{ inputs.allow_paid_calls }}
+          OWNER_SPEND_AUTHORIZED: ${{ inputs.owner_spend_authorized }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$ALLOW_PAID_CALLS" == 'true' ]]
+          [[ "$OWNER_SPEND_AUTHORIZED" == 'true' ]]
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$EXPECTED_SHA" >> "$GITHUB_OUTPUT"
+          echo 'auth_mode=central_command_router_or_manual_explicit_owner_authorization' >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact deployed SHA and healthy stage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(cat app-source-sha.txt)"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$deployed" == '${{ steps.auth.outputs.sha }}' ]]
+          [[ "$status" == healthy ]]
+          echo "deployed_sha=$deployed"
+          echo "container_status=$status"
+
+      - name: Run one Better DeepSeek-origin AIMETON field mission
+        id: probe
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          evidence="$RUNNER_TEMP/routerai-synthesis-${GITHUB_RUN_ID}.json"
+          echo "evidence=$evidence" >> "$GITHUB_OUTPUT"
+          docker exec -i "$CONTAINER" python - <<'PY' > "$evidence"
+          import json, os, sqlite3, time
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+
+          base = 'http://127.0.0.1:5000'
+          def request(path, *, method='GET', payload=None):
+              body = None if payload is None else json.dumps(payload).encode('utf-8')
+              req = Request(base + path, data=body, method=method, headers={'Content-Type': 'application/json'})
+              try:
+                  with urlopen(req, timeout=30) as response:
+                      return response.status, json.loads(response.read().decode('utf-8'))
+              except HTTPError as exc:
+                  raw = exc.read().decode('utf-8')
+                  try:
+                      return exc.code, json.loads(raw)
+                  except json.JSONDecodeError:
+                      return exc.code, {'detail': 'non_json_error'}
+
+          mission_started = time.monotonic()
+          code, started = request('/api/analyze/start', method='POST', payload={'url': 'https://aimeton.ru/'})
+          assert code == 202, (code, started)
+          mission_id = started['mission_id']
+          deadline = mission_started + 210.0
+          status = None
+          while time.monotonic() < deadline:
+              status_code, status = request(started['status_url'])
+              assert status_code == 200, (status_code, status)
+              if status.get('state') in {'failed', 'blocked', 'degraded', 'completed'}:
+                  break
+              time.sleep(2)
+          assert status is not None
+          total_elapsed = time.monotonic() - mission_started
+
+          db_path = Path(os.getenv('AIMETON_RUNTIME_DB', '/app/data/runtime-core.sqlite3'))
+          assert db_path.exists()
+          db = sqlite3.connect(db_path)
+          db.row_factory = sqlite3.Row
+          rows = db.execute(
+              '''SELECT attempt_id, sequence, component, operation, state, reason_code,
+                        provider, duration_ms, metadata_json
+                 FROM mission_trace_events
+                 WHERE mission_id = ? ORDER BY attempt_id, sequence''',
+              (mission_id,),
+          ).fetchall()
+          assert rows, 'mission trace missing'
+          llm_rows = [row for row in rows if row['component'] == 'llm_synthesis']
+          started_rows = [row for row in llm_rows if row['operation'] == 'llm_started']
+          terminal_rows = [row for row in llm_rows if row['operation'] in {'llm_finished', 'llm_timeout'}]
+          assert started_rows, 'llm_started missing'
+          assert terminal_rows, 'llm terminal event missing'
+          terminal = terminal_rows[-1]
+          started_metadata = json.loads(started_rows[-1]['metadata_json'] or '{}')
+          terminal_metadata = json.loads(terminal['metadata_json'] or '{}')
+          llm_elapsed = (terminal['duration_ms'] or 0) / 1000.0
+          llm_budget = float(started_metadata.get('budget_seconds') or 60.0)
+          synthesis_mode = str(started_metadata.get('synthesis_mode') or '')
+          checks = {
+              'mission_completed': status.get('state') == 'completed',
+              'result_present': isinstance(status.get('result'), dict) and bool(status.get('result')),
+              'llm_terminal_succeeded': terminal['operation'] == 'llm_finished' and terminal['state'] == 'succeeded',
+              'no_llm_timeout': not any(row['operation'] == 'llm_timeout' for row in llm_rows),
+              'no_llm_failure': not any(row['operation'] == 'llm_finished' and row['state'] != 'succeeded' for row in llm_rows),
+              'within_existing_llm_budget': llm_elapsed <= llm_budget + 0.25,
+              'outer_budget_not_raised': llm_budget <= 60.0,
+              'split_v2_parallel_active': synthesis_mode == 'split_v2_parallel',
+              'routerai_provider': terminal['provider'] == 'routerai',
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          safe = {
+              'terminal_state': status.get('state'), 'result_present': checks['result_present'],
+              'total_elapsed_seconds': round(total_elapsed, 3),
+              'llm_state': terminal['state'] if terminal['operation'] == 'llm_finished' else 'timeout',
+              'llm_operation': terminal['operation'], 'llm_reason_code': terminal['reason_code'],
+              'llm_elapsed_seconds': round(llm_elapsed, 3), 'llm_budget_seconds': llm_budget,
+              'synthesis_mode': synthesis_mode, 'model': str(started_metadata.get('model') or '')[:160],
+              'failed_phase': terminal_metadata.get('failed_phase'),
+              'trace_event_count': len(rows), 'llm_trace_event_count': len(llm_rows),
+              'analysis_source_inferred': 'llm' if checks['llm_terminal_succeeded'] else 'fallback_or_failed',
+              'failed_checks': failed,
+          }
+          print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+          if failed:
+              raise SystemExit('routerai_synthesis_acceptance_failed:' + ','.join(failed))
+          PY
+
+      - name: Publish sanitized evidence to issue 700
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_PATH: ${{ steps.probe.outputs.evidence }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.sha }}
+          AUTH_MODE: ${{ steps.auth.outputs.auth_mode }}
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY' > "$RUNNER_TEMP/routerai-synthesis-comment.md"
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          path = Path(os.environ.get('EVIDENCE_PATH') or '')
+          data = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+          failed = data.get('failed_checks') if data else ['workflow_failed_before_evidence']
+          lines = [
+              '## RouterAI synthesis exact-SHA Stage evidence', '',
+              f"- timestamp UTC: {datetime.now(timezone.utc).isoformat()}",
+              f"- exact deployed source SHA: `{os.environ.get('EXPECTED_SHA') or 'unresolved'}`",
+              '- target: `https://aimeton.ru/`', '- paid/live scope: exactly one field mission',
+              f"- authorization: `{os.environ.get('AUTH_MODE') or 'unresolved'}`",
+              f"- terminal mission state: `{data.get('terminal_state', 'unknown')}`",
+              f"- result present: `{data.get('result_present', False)}`",
+              f"- llm operation/state: `{data.get('llm_operation', 'unknown')}` / `{data.get('llm_state', 'unknown')}`",
+              f"- llm elapsed/budget: `{data.get('llm_elapsed_seconds', 'unknown')}s / {data.get('llm_budget_seconds', 'unknown')}s`",
+              f"- synthesis mode: `{data.get('synthesis_mode', 'unknown')}`", f"- model: `{data.get('model', 'unknown')}`",
+              f"- analysis source: `{data.get('analysis_source_inferred', 'unknown')}` (from durable LLM trace)",
+              f"- failed phase: `{data.get('failed_phase') or 'none'}`", f"- total mission elapsed: `{data.get('total_elapsed_seconds', 'unknown')}s`",
+              f"- failed checks: `{', '.join(failed) if failed else 'none'}`", '', '### Safety', '',
+              '- no raw prompt, source text, provider payload, credential or cookie published',
+              '- no provider activation, routing, policy, timeout or budget configuration changed',
+              '- workflow is dispatch-only and requires explicit paid-call and owner-spend authorization inputs',
+          ]
+          print('\n'.join(lines))
+          PY
+          cat "$RUNNER_TEMP/routerai-synthesis-comment.md" >> "$GITHUB_STEP_SUMMARY"
+          payload="$(python3 -c 'import json,sys; print(json.dumps({"body": open(sys.argv[1], encoding="utf-8").read()}))' "$RUNNER_TEMP/routerai-synthesis-comment.md")"
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/700/comments" -d "$payload"
