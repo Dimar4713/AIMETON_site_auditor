@@ -1,0 +1,31 @@
+name: Commander Runner Token Scope Probe
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/commander-runner-token-scope-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 5
+    steps:
+      - name: Probe runner-registration capability without exposing response
+        env:
+          PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${PROJECTS_TOKEN:-}"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${PROJECTS_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            -H 'User-Agent: aimeton-commander-runner-scope-probe' \
+            'https://api.github.com/repos/Dimar4713/aimeton-commander/actions/runners/registration-token')"
+          echo "commander_runner_registration_scope_http=${status}"
+          test "${status}" = '201'
