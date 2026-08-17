@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pydantic import BaseModel
 
 from app.policy_fingerprint import fingerprint_model_payload
 from app.search_gateway.models import SearchPolicy, SearchRequest
-from app.search_strategy_settings import SearchStrategySettingsRecord
+
+if TYPE_CHECKING:
+    from app.search_strategy_settings import SearchStrategySettingsRecord
 
 
 class TracedGatewayPolicyResolution(BaseModel):
