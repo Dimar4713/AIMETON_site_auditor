@@ -119,7 +119,7 @@ jobs:
     environment: stage
     timeout-minutes: 10
     steps:
-      - name: Verify exact deployed source is available locally
+      - name: Materialize exact deployed convergence tooling without marketplace actions
         shell: bash
         env:
           EXPECTED_SHA: ${{ needs.resolve-gates.outputs.sha }}
@@ -128,6 +128,19 @@ jobs:
           cd "$STACK_DIR"
           test -f app-source-sha.txt
           test "$(cat app-source-sha.txt)" = "$EXPECTED_SHA"
+
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then
+            git init
+          fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$EXPECTED_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$EXPECTED_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -f scripts/write_stage_convergence_marker.py
           echo "Convergence tooling source SHA: $EXPECTED_SHA"
 
@@ -200,7 +213,8 @@ jobs:
           AUTH_GUARD_RUN_ID: ${{ needs.resolve-gates.outputs.auth_guard_run_id }}
         run: |
           set -Eeuo pipefail
-          cd "$STACK_DIR"
+          cd "$GITHUB_WORKSPACE"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           python3 scripts/write_stage_convergence_marker.py \
             --expected-sha "$EXPECTED_SHA" \
             --deploy-run-id "$DEPLOY_RUN_ID" \
