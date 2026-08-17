@@ -85,6 +85,82 @@ jobs:
           PY
           )"
 
+          routerai_trace="$(docker exec -i "$CONTAINER" python - <<'PY' 2>/dev/null
+          import hashlib
+          import json
+          import os
+          import re
+          import sqlite3
+          from pathlib import Path
+
+          def safe(value, limit=128):
+              text = "" if value is None else str(value)
+              text = re.sub(r"[^A-Za-z0-9_.:+-]", "_", text)
+              return text[:limit] or "none"
+
+          def digest(value):
+              return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
+
+          path = Path(
+              os.environ.get(
+                  "AIMETON_TRACE_DB",
+                  os.environ.get("AIMETON_RUNTIME_DB", "/app/data/runtime-core.sqlite3"),
+              )
+          )
+          if not path.exists():
+              print("present=no;reason=trace_db_missing")
+              raise SystemExit(0)
+
+          try:
+              with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+                  db.row_factory = sqlite3.Row
+                  rows = db.execute(
+                      """
+                      SELECT mission_id, attempt_id, duration_ms, metadata_json, created_at
+                      FROM mission_trace_events
+                      WHERE component = 'llm_synthesis'
+                        AND operation = 'llm_finished'
+                        AND state = 'failed'
+                      ORDER BY created_at DESC
+                      LIMIT 50
+                      """
+                  ).fetchall()
+          except Exception as exc:
+              print(f"present=no;reason=trace_read_{safe(type(exc).__name__)}")
+              raise SystemExit(0)
+
+          selected = None
+          selected_metadata = None
+          for row in rows:
+              try:
+                  metadata = json.loads(row["metadata_json"] or "{}")
+              except Exception:
+                  continue
+              if isinstance(metadata, dict) and metadata.get("failed_phase"):
+                  selected = row
+                  selected_metadata = metadata
+                  break
+
+          if selected is None or selected_metadata is None:
+              print("present=no;reason=no_failed_phase_event")
+              raise SystemExit(0)
+
+          fields = {
+              "present": "yes",
+              "mission_sha": digest(selected["mission_id"]),
+              "attempt_sha": digest(selected["attempt_id"]),
+              "created_at": safe(selected["created_at"], 64),
+              "duration_ms": safe(selected["duration_ms"], 32),
+              "failed_phase": safe(selected_metadata.get("failed_phase")),
+              "phase_error_type": safe(selected_metadata.get("phase_error_type")),
+              "error_type": safe(selected_metadata.get("error_type")),
+              "synthesis_mode": safe(selected_metadata.get("synthesis_mode")),
+              "budget_seconds": safe(selected_metadata.get("budget_seconds"), 32),
+          }
+          print(";".join(f"{key}={value}" for key, value in fields.items()))
+          PY
+          )"
+
           {
             echo "## Stage mission diagnostics"
             echo
@@ -102,6 +178,9 @@ jobs:
             echo "- /api/health HTTP: \`$health_code\`"
             echo "- anonymous /api/user/missions HTTP: \`$anonymous_user_missions\`"
             echo "- anonymous /api/admin/missions HTTP: \`$anonymous_admin_missions\`"
+            echo "- latest failed RouterAI phase trace: \`${routerai_trace:-unavailable}\`"
+            echo "- RouterAI trace identifiers: SHA-256 prefixes only"
+            echo "- RouterAI prompt/response/source payloads: not collected"
             echo "- credentials/tokens/internal payloads: not collected"
           } > "$report"
 
