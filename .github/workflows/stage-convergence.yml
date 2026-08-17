@@ -119,11 +119,17 @@ jobs:
     environment: stage
     timeout-minutes: 10
     steps:
-      - name: Checkout exact deployed source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.resolve-gates.outputs.sha }}
-          fetch-depth: 1
+      - name: Verify exact deployed source is available locally
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ needs.resolve-gates.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          test -f app-source-sha.txt
+          test "$(cat app-source-sha.txt)" = "$EXPECTED_SHA"
+          test -f scripts/write_stage_convergence_marker.py
+          echo "Convergence tooling source SHA: $EXPECTED_SHA"
 
       - name: Verify live Stage invariants before convergence publication
         shell: bash
@@ -194,6 +200,7 @@ jobs:
           AUTH_GUARD_RUN_ID: ${{ needs.resolve-gates.outputs.auth_guard_run_id }}
         run: |
           set -Eeuo pipefail
+          cd "$STACK_DIR"
           python3 scripts/write_stage_convergence_marker.py \
             --expected-sha "$EXPECTED_SHA" \
             --deploy-run-id "$DEPLOY_RUN_ID" \
@@ -212,29 +219,39 @@ jobs:
           print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
           PY
 
-      - name: Record sanitized convergence evidence
+      - name: Record sanitized convergence evidence locally and in summary
         if: always()
         shell: bash
         env:
           EXPECTED_SHA: ${{ needs.resolve-gates.outputs.sha }}
         run: |
           set +e
-          mkdir -p convergence-evidence
-          curl -sS "$STAGE_URL/api/runtime/convergence" > convergence-evidence/runtime-convergence.json || true
+          cd "$STACK_DIR"
+          evidence_dir="$STACK_DIR/deployment-evidence/stage-convergence-${GITHUB_RUN_ID}"
+          install -d -m 0700 "$evidence_dir"
+          curl -sS "$STAGE_URL/api/runtime/convergence" > "$evidence_dir/runtime-convergence.json" || true
           {
             echo "expected_sha=$EXPECTED_SHA"
             echo "workflow_run_id=$GITHUB_RUN_ID"
             echo "workflow_attempt=$GITHUB_RUN_ATTEMPT"
-            echo "timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo "bundle_sha=$(cat "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "bundle_sha=$(cat app-source-sha.txt 2>/dev/null || echo unavailable)"
+            echo "marketplace_actions_on_stage_runner=disabled"
             docker ps --filter name="$CONTAINER" --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
-          } > convergence-evidence/final-state.txt
-
-      - name: Upload convergence evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stage-convergence-${{ needs.resolve-gates.outputs.sha }}-${{ github.run_id }}
-          path: convergence-evidence/
-          if-no-files-found: error
-          retention-days: 30
+          } > "$evidence_dir/final-state.txt"
+          chmod 0600 "$evidence_dir"/* 2>/dev/null || true
+          find "$STACK_DIR/deployment-evidence" -mindepth 1 -maxdepth 1 -type d -name 'stage-convergence-*' -mtime +30 -exec rm -rf {} + 2>/dev/null || true
+          {
+            echo '## Stage convergence evidence'
+            echo
+            echo '```text'
+            cat "$evidence_dir/final-state.txt"
+            echo '```'
+            echo
+            echo '### Runtime convergence snapshot'
+            echo
+            echo '```json'
+            cat "$evidence_dir/runtime-convergence.json"
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
