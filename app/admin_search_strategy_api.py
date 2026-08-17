@@ -17,6 +17,7 @@ from app.hunter_search_policy_authority import (
 )
 from app.search_gateway import search_policy_from_env
 from app.search_observer_quality_policy import QualityFirstPromotionPolicy
+from app.search_provider_lifecycle import observe_provider_lifecycle
 from app.search_quality_policy_settings import (
     SearchQualityPolicyRecord,
     get_search_quality_policy_repository,
@@ -81,6 +82,13 @@ def _execution_policy_observation(record: SearchStrategySettingsRecord) -> dict:
             admin_candidate_fingerprint == projected_summary["fingerprint"]
         )
 
+    provider_lifecycle = [
+        item.model_dump(mode="json")
+        for item in observe_provider_lifecycle(
+            runtime_policy=runtime_resolution.policy,
+            settings_record=record,
+        )
+    ]
     quality_record = get_search_quality_policy_repository().get()
     return {
         "runtime_authority": runtime_resolution.authority.value,
@@ -92,6 +100,7 @@ def _execution_policy_observation(record: SearchStrategySettingsRecord) -> dict:
         "admin_candidate_gateway_policy": admin_candidate_summary,
         "admin_candidate_policy_fingerprint": admin_candidate_fingerprint,
         "admin_candidate_matches_projection": admin_candidate_matches_projection,
+        "provider_lifecycle": provider_lifecycle,
         "configured_admin_policy_fingerprint": fingerprint_model_payload(record.settings),
         "quality_policy_fingerprint": fingerprint_model_payload(quality_record.policy),
         "policy_equivalent": actual_summary["fingerprint"] == projected_summary["fingerprint"],
