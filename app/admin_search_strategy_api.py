@@ -50,12 +50,11 @@ def _require_csrf(cookie_token: str | None, header_token: str | None) -> None:
 
 
 def _execution_policy_observation(record: SearchStrategySettingsRecord) -> dict:
-    """Describe configured and effective Hunter policies without executing search.
+    """Describe canonical and effective Hunter policies without executing search.
 
-    The observation follows both real policy layers used by Hunter today:
-    canonical authority resolution in ``run_hunt()`` and the legacy Hunter
-    compatibility projection in ``TracedSearchGateway``. Both receive the same
-    already-loaded settings record so the comparison cannot span two revisions.
+    Persisted ADMIN settings are resolved once at the canonical Hunter authority
+    boundary. ``TracedSearchGateway`` is provenance-only, so its effective policy
+    must be identical to the resolver-selected policy.
     """
 
     actual = search_policy_from_env()
@@ -76,7 +75,6 @@ def _execution_policy_observation(record: SearchStrategySettingsRecord) -> dict:
             correlation_id="policy-observation",
         ),
         incoming_policy=runtime_resolution.policy,
-        settings_record=record,
     )
     gateway_effective_summary = summarize_gateway_policy(gateway_resolution.effective_policy)
 

@@ -13,14 +13,19 @@ on:
         default: max
         type: string
       expected_strategy:
-        description: Expected configured admin-projected search strategy
+        description: Expected canonical admin search strategy
         required: false
         default: exhaustive_coverage
         type: string
       expected_provider_order:
-        description: Expected configured admin-projected provider order, comma separated
+        description: Expected canonical admin provider order, comma separated
         required: false
         default: searxng,yandex
+        type: string
+      expected_effective_policy_fingerprint:
+        description: Provider-effective policy fingerprint that must survive the authority migration
+        required: false
+        default: 'sha256:63151511b45bd2ba687dc12fa9a903485583671e45ff70ae3dff14beaf2bf285'
         type: string
 
 permissions:
@@ -62,7 +67,7 @@ jobs:
             printf '%s\n' "- stage auditor status: \`$status\`"
           } > "$REPORT"
 
-      - name: Inspect authority, downstream effective policy, and provider lifecycle without provider calls
+      - name: Inspect single authority, effective policy, and provider lifecycle without provider calls
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -70,6 +75,7 @@ jobs:
             -e EXPECTED_TARIFF='${{ inputs.expected_tariff }}' \
             -e EXPECTED_STRATEGY='${{ inputs.expected_strategy }}' \
             -e EXPECTED_PROVIDER_ORDER='${{ inputs.expected_provider_order }}' \
+            -e EXPECTED_EFFECTIVE_POLICY_FINGERPRINT='${{ inputs.expected_effective_policy_fingerprint }}' \
             -i "$CONTAINER" python - <<'PY'
           import json
           import os
@@ -101,51 +107,58 @@ jobs:
               for item in os.environ['EXPECTED_PROVIDER_ORDER'].split(',')
               if item.strip()
           ]
+          expected_fingerprint = os.environ['EXPECTED_EFFECTIVE_POLICY_FINGERPRINT'].strip()
 
           assert global_settings.active_tariff == expected_tariff
           assert projected['strategy'] == expected_strategy
           assert projected['provider_order'] == expected_order
+          assert projected['fingerprint'] == expected_fingerprint
 
-          # Canonical resolver boundary currently selects ENV.
-          assert observation['runtime_authority'] == 'env'
-          assert observation['runtime_callsite_uses_admin_projection'] is False
-          assert selected == actual
-          assert observation['selected_policy_fingerprint'] == actual['fingerprint']
+          # Persisted ADMIN settings are the one canonical Hunter routing authority.
+          assert observation['runtime_authority'] == 'admin'
+          assert observation['runtime_callsite_uses_admin_projection'] is True
+          assert selected == projected
+          assert observation['selected_policy_fingerprint'] == projected['fingerprint']
 
-          # Current TracedSearchGateway compatibility layer then re-projects Hunter
-          # onto the persisted admin policy before the base provider gateway.
-          assert observation['legacy_hunter_admin_projection_applied'] is True
-          assert observation['gateway_policy_changed_after_authority_resolution'] is True
-          assert gateway_effective == projected
-          assert observation['gateway_effective_policy_fingerprint'] == projected['fingerprint']
-          assert observation['gateway_effective_policy_fingerprint'] != observation['selected_policy_fingerprint']
+          # TracedSearchGateway is provenance-only. It must not mutate policy after
+          # canonical resolution, and the provider-effective fingerprint must remain
+          # exactly the pre-migration Stage fingerprint.
+          assert observation['legacy_hunter_admin_projection_applied'] is False
+          assert observation['gateway_policy_changed_after_authority_resolution'] is False
+          assert gateway_effective == selected
+          assert observation['gateway_effective_policy_fingerprint'] == observation['selected_policy_fingerprint']
+          assert observation['gateway_effective_policy_fingerprint'] == expected_fingerprint
 
           assert observation['admin_candidate_available'] is True
           assert observation['admin_candidate_matches_projection'] is True
-          assert admin_candidate == projected
-          assert observation['admin_candidate_policy_fingerprint'] == projected['fingerprint']
+          assert admin_candidate == selected
+          assert observation['admin_candidate_policy_fingerprint'] == expected_fingerprint
 
-          # Provider lifecycle follows the final gateway-effective policy, not the
-          # earlier resolver boundary. Registration remains independent.
+          # The ENV-derived policy is still observed as the capability/budget base,
+          # but it is no longer a competing routing authority on this Stage state.
+          assert actual['fingerprint'].startswith('sha256:')
+          assert observation['policy_equivalent'] is False
+          assert actual['fingerprint'] != expected_fingerprint
+
+          # Provider lifecycle follows the single effective policy. Tavily stays
+          # integrated and configured, but is deliberately disabled/inactive by
+          # current ADMIN settings; acceptance performs no provider calls.
           assert set(by_provider) == {'searxng', 'yandex', 'tavily'}
           assert all(item['registered'] is True for item in lifecycle)
           assert all(item['availability'] == 'unknown' for item in lifecycle)
           assert all(item['availability_evidence'] == 'not_observed' for item in lifecycle)
+          assert by_provider['tavily']['configured'] is True
           assert by_provider['tavily']['admin_enabled'] is False
           assert by_provider['tavily']['enabled'] is False
+          assert by_provider['tavily']['active'] is False
           expected_admin_position = (
               profile.provider_order.index('tavily') + 1
               if 'tavily' in profile.provider_order else None
           )
           assert by_provider['tavily']['admin_position'] == expected_admin_position
-          assert by_provider['tavily']['runtime_position'] == (
-              gateway_effective['provider_order'].index('tavily') + 1
-              if 'tavily' in gateway_effective['provider_order'] else None
-          )
+          assert by_provider['tavily']['runtime_position'] is None
 
           assert observation['routing_changed_by_observation'] is False
-          assert actual['fingerprint'].startswith('sha256:')
-          assert projected['fingerprint'].startswith('sha256:')
           assert observation['configured_admin_policy_fingerprint'].startswith('sha256:')
           assert observation['quality_policy_fingerprint'].startswith('sha256:')
 
@@ -157,6 +170,7 @@ jobs:
               'selected_policy_fingerprint': observation['selected_policy_fingerprint'],
               'gateway_effective_policy': gateway_effective,
               'gateway_effective_policy_fingerprint': observation['gateway_effective_policy_fingerprint'],
+              'expected_pre_migration_effective_policy_fingerprint': expected_fingerprint,
               'legacy_hunter_admin_projection_applied': observation['legacy_hunter_admin_projection_applied'],
               'gateway_policy_changed_after_authority_resolution': observation['gateway_policy_changed_after_authority_resolution'],
               'actual_gateway_policy': actual,
@@ -188,19 +202,19 @@ jobs:
           )"
           {
             echo
-            echo '### Hunter policy authority, downstream effective policy, and provider lifecycle'
+            echo '### Hunter single policy authority and provider lifecycle'
             echo
             echo '```json'
             echo "$result"
             echo '```'
             echo
             echo '- provider calls: `0`'
-            echo '- canonical resolver authority: `env` ✅'
-            echo '- resolver-selected policy equals env policy: ✅'
-            echo '- legacy TracedSearchGateway admin projection applied after resolver: ✅'
-            echo '- gateway-effective policy equals persisted admin projection: ✅'
+            echo '- canonical resolver authority: `admin` ✅'
+            echo '- resolver-selected policy equals persisted admin projection: ✅'
+            echo '- TracedSearchGateway policy mutation after resolver: `false` ✅'
+            echo '- provider-effective fingerprint preserved across migration: ✅'
             echo '- all canonical providers remain registered: ✅'
-            echo '- Tavily may be globally/admin-disabled without deregistration: ✅'
+            echo '- Tavily remains configured but admin-disabled/inactive: ✅'
             echo '- network availability not guessed without evidence: ✅'
             echo '- routing changed by acceptance: `false`'
           } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"

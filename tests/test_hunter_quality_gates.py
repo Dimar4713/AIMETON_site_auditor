@@ -3,8 +3,26 @@ from types import SimpleNamespace
 import pytest
 
 from app import discovery
+from app.hunter_search_policy_authority import HunterSearchPolicyAuthority, ResolvedHunterSearchPolicy
 from app.models import HuntRequest, SiteAnalysis
-from app.search_gateway.models import GatewayState, SearchDiagnostics, SearchItem, SearchResponse
+from app.search_gateway.models import GatewayState, SearchDiagnostics, SearchItem, SearchPolicy, SearchResponse
+
+
+@pytest.fixture(autouse=True)
+def _stub_canonical_hunter_policy(monkeypatch):
+    monkeypatch.setattr(
+        discovery,
+        "resolve_hunter_search_policy",
+        lambda: ResolvedHunterSearchPolicy(
+            policy=SearchPolicy(),
+            authority=HunterSearchPolicyAuthority.ADMIN,
+            selected_policy_fingerprint="sha256:test-admin",
+            env_policy_fingerprint="sha256:test-env",
+            admin_projection_fingerprint="sha256:test-admin",
+            policy_equivalent=False,
+            admin_policy_persisted=True,
+        ),
+    )
 
 
 def _request() -> HuntRequest:
