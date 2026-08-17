@@ -40,13 +40,17 @@ def _provider_configured(provider: str) -> bool:
             "YANDEX_CLOUD_FOLDER_ID", "YANDEX_SEARCH_FOLDER_ID"
         )
     if provider == "tavily":
-        token_present = _nonempty_env("TAVILY_TOKEN", "TAVILY_API_KEY")
-        contract_allowed = (
-            os.getenv("TAVILY_CONTRACT_ALLOWED", "true").strip().lower()
-            in {"1", "true", "yes", "on"}
-        )
-        return token_present and contract_allowed
+        return _nonempty_env("TAVILY_TOKEN", "TAVILY_API_KEY")
     return False
+
+
+def _provider_execution_permitted(provider: str) -> bool:
+    if provider != "tavily":
+        return True
+    return (
+        os.getenv("TAVILY_CONTRACT_ALLOWED", "true").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
 
 
 def observe_provider_lifecycle(
@@ -69,15 +73,21 @@ def observe_provider_lifecycle(
 
     statuses: list[ProviderLifecycleStatus] = []
     for provider in KNOWN_PROVIDERS:
+        configured = _provider_configured(provider)
         runtime_position = runtime_order.index(provider) + 1 if provider in runtime_order else None
         admin_position = admin_profile_order.index(provider) + 1 if provider in admin_profile_order else None
         admin_enabled = provider in enabled_admin and admin_position is not None
-        active = provider in runtime_allowed and runtime_position is not None
+        active = (
+            provider in runtime_allowed
+            and runtime_position is not None
+            and configured
+            and _provider_execution_permitted(provider)
+        )
         statuses.append(
             ProviderLifecycleStatus(
                 provider=provider,
                 registered=True,
-                configured=_provider_configured(provider),
+                configured=configured,
                 availability=ProviderAvailability.UNKNOWN,
                 enabled=admin_enabled,
                 active=active,
