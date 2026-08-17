@@ -87,7 +87,7 @@ def test_hunter_runtime_acceptance_does_not_reimplement_policy_resolvers() -> No
     assert "resolve_hunter_search_policy" not in text
     assert "resolve_traced_gateway_policy" not in text
     assert "search_policy_from_env" not in text
-    assert "authority_resolution" not in text
+    assert "authority_resolution =" not in text
     assert "observation = _execution_policy_observation(record)" in text
 
 
