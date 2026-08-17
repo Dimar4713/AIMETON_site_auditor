@@ -68,19 +68,40 @@ jobs:
       DADATA_PUBLIC_READY_ATTEMPTS: 8
 
     steps:
-      - name: Verify exact deployed runtime tooling
+      - name: Resolve exact deployed source SHA
+        id: source
         shell: bash
         run: |
           set -Eeuo pipefail
           cd "$STACK_DIR"
           test -f app-source-sha.txt
           deployed="$(cat app-source-sha.txt)"
-          if [[ -n "${EXPECTED_SHA:-}" ]]; then
-            [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-            [[ "$deployed" == "$EXPECTED_SHA" ]]
+          [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
+          expected="${EXPECTED_SHA:-$deployed}"
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$deployed" == "$expected" ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+          echo "DaData deployed source SHA: $expected"
+
+      - name: Materialize exact DaData tooling without marketplace actions
+        shell: bash
+        env:
+          TOOLING_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then
+            git init
           fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TOOLING_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TOOLING_SHA"
+          git clean -ffdx
+          [[ "$(git rev-parse HEAD)" == "$TOOLING_SHA" ]]
           test -f scripts/configure_dadata_stage.sh
-          echo "DaData tooling source SHA: $deployed"
 
       - name: Validate DaData secret contract
         shell: bash
@@ -98,21 +119,22 @@ jobs:
           done
           echo "DaData environment secret contract present"
 
-      - name: Validate committed stage smoke
+      - name: Validate exact stage smoke tooling
         shell: bash
         run: |
           set -Eeuo pipefail
-          cd "$STACK_DIR"
+          cd "$GITHUB_WORKSPACE"
           bash -n scripts/configure_dadata_stage.sh
 
       - name: Configure runtime and run live smoke
         shell: bash
         run: |
           set -Eeuo pipefail
-          cd "$STACK_DIR"
-          mkdir -p deployment-evidence
+          cd "$GITHUB_WORKSPACE"
+          install -d -m 0700 "$STACK_DIR/deployment-evidence"
           chmod +x scripts/configure_dadata_stage.sh
-          scripts/configure_dadata_stage.sh 2>&1 | tee deployment-evidence/dadata-stage.log
+          scripts/configure_dadata_stage.sh 2>&1 | tee "$STACK_DIR/deployment-evidence/dadata-stage-${GITHUB_RUN_ID}.log"
+          chmod 0600 "$STACK_DIR/deployment-evidence/dadata-stage-${GITHUB_RUN_ID}.log"
 
       - name: Record redacted final state
         if: always()
@@ -128,12 +150,13 @@ jobs:
             echo "workflow_attempt=$GITHUB_RUN_ATTEMPT"
             echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "bundle_sha=$(cat app-source-sha.txt 2>/dev/null || echo unavailable)"
+            echo "tooling_sha=${{ steps.source.outputs.sha }}"
             echo "marketplace_actions_on_stage_runner=disabled"
             docker ps --filter name=aimeton-auditor --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
             curl -sS "$STAGE_URL/api/missions/registry-mirror/dadata/health" || true
           } | tee "$evidence"
           chmod 600 "$evidence"
-          find deployment-evidence -type f -name 'dadata-final-state-*.txt' -mtime +30 -delete 2>/dev/null || true
+          find deployment-evidence -type f \( -name 'dadata-final-state-*.txt' -o -name 'dadata-stage-*.log' \) -mtime +30 -delete 2>/dev/null || true
           {
             echo '## DaData Stage evidence'
             echo
