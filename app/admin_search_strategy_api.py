@@ -15,7 +15,8 @@ from app.hunter_search_policy_authority import (
     HunterSearchPolicyAuthority,
     resolve_hunter_search_policy,
 )
-from app.search_gateway import search_policy_from_env
+from app.search_gateway import SearchRequest, search_policy_from_env
+from app.search_gateway.traced_policy import resolve_traced_gateway_policy
 from app.search_observer_quality_policy import QualityFirstPromotionPolicy
 from app.search_provider_lifecycle import observe_provider_lifecycle
 from app.search_quality_policy_settings import (
@@ -49,11 +50,12 @@ def _require_csrf(cookie_token: str | None, header_token: str | None) -> None:
 
 
 def _execution_policy_observation(record: SearchStrategySettingsRecord) -> dict:
-    """Describe configured, candidate and selected Hunter policies without executing search.
+    """Describe configured and effective Hunter policies without executing search.
 
-    All runtime authority facts come from the same canonical resolver used by
-    ``run_hunt()``. The already-loaded admin record is passed into the resolver so
-    selected/candidate comparisons are based on one settings snapshot.
+    The observation follows both real policy layers used by Hunter today:
+    canonical authority resolution in ``run_hunt()`` and the legacy Hunter
+    compatibility projection in ``TracedSearchGateway``. Both receive the same
+    already-loaded settings record so the comparison cannot span two revisions.
     """
 
     actual = search_policy_from_env()
@@ -65,6 +67,18 @@ def _execution_policy_observation(record: SearchStrategySettingsRecord) -> dict:
         settings_record=record,
     )
     selected_summary = summarize_gateway_policy(runtime_resolution.policy)
+
+    gateway_resolution = resolve_traced_gateway_policy(
+        request=SearchRequest(
+            query="policy-observation",
+            limit=1,
+            mission_id="hunt-policy-observation",
+            correlation_id="policy-observation",
+        ),
+        incoming_policy=runtime_resolution.policy,
+        settings_record=record,
+    )
+    gateway_effective_summary = summarize_gateway_policy(gateway_resolution.effective_policy)
 
     admin_candidate_summary = None
     admin_candidate_fingerprint = None
@@ -85,7 +99,7 @@ def _execution_policy_observation(record: SearchStrategySettingsRecord) -> dict:
     provider_lifecycle = [
         item.model_dump(mode="json")
         for item in observe_provider_lifecycle(
-            runtime_policy=runtime_resolution.policy,
+            runtime_policy=gateway_resolution.effective_policy,
             settings_record=record,
         )
     ]
@@ -94,6 +108,10 @@ def _execution_policy_observation(record: SearchStrategySettingsRecord) -> dict:
         "runtime_authority": runtime_resolution.authority.value,
         "selected_gateway_policy": selected_summary,
         "selected_policy_fingerprint": runtime_resolution.selected_policy_fingerprint,
+        "gateway_effective_policy": gateway_effective_summary,
+        "gateway_effective_policy_fingerprint": gateway_resolution.effective_policy_fingerprint,
+        "legacy_hunter_admin_projection_applied": gateway_resolution.legacy_hunter_admin_projection_applied,
+        "gateway_policy_changed_after_authority_resolution": gateway_resolution.policy_changed,
         "actual_gateway_policy": actual_summary,
         "projected_admin_gateway_policy": projected_summary,
         "admin_candidate_available": admin_candidate_available,
