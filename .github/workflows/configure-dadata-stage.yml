@@ -119,7 +119,7 @@ jobs:
           done
           echo "DaData environment secret contract present"
 
-      - name: Validate exact stage smoke tooling
+      - name: Validate committed stage smoke from exact tooling
         shell: bash
         run: |
           set -Eeuo pipefail
