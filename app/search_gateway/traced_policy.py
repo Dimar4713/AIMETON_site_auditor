@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.hunter_professional_provenance import fingerprint_model_payload
+from app.policy_fingerprint import fingerprint_model_payload
 from app.search_gateway.models import SearchPolicy, SearchRequest
 from app.search_strategy_settings import SearchStrategySettingsRecord
 
