@@ -137,8 +137,9 @@ def test_discovery_uses_canonical_hunter_policy_resolver_once_before_gateway() -
     text = Path("app/discovery.py").read_text(encoding="utf-8")
 
     assert "from app.hunter_search_policy_authority import resolve_hunter_search_policy" in text
-    assert text.count("resolve_hunter_search_policy()") == 1
-    assert "policy_resolution = resolve_hunter_search_policy()" in text
-    assert "policy = policy_resolution.policy" in text
+    assert text.count("resolve_hunter_search_policy(") == 1
+    assert "authority_resolution = resolve_hunter_search_policy(" in text
+    assert "base_policy=search_policy" in text
+    assert "search_policy=authority_resolution.policy" in text
     assert '"hunt_search_policy_resolved"' in text
     assert "settings.apply_search_policy" not in text
