@@ -61,17 +61,26 @@ jobs:
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       STAGE_URL: https://stage-auditor.aimeton.ru
+      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
       DADATA_API: ${{ secrets.DADATA_API }}
       DADATA_SECRET: ${{ secrets.DADATA_SECRET }}
       DADATA_SMOKE_QUERY: ${{ vars.DADATA_SMOKE_QUERY || '7707083893' }}
       DADATA_PUBLIC_READY_ATTEMPTS: 8
 
     steps:
-      - name: Checkout main runtime tooling
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 1
+      - name: Verify exact deployed runtime tooling
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          test -f app-source-sha.txt
+          deployed="$(cat app-source-sha.txt)"
+          if [[ -n "${EXPECTED_SHA:-}" ]]; then
+            [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$deployed" == "$EXPECTED_SHA" ]]
+          fi
+          test -f scripts/configure_dadata_stage.sh
+          echo "DaData tooling source SHA: $deployed"
 
       - name: Validate DaData secret contract
         shell: bash
@@ -93,12 +102,14 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          cd "$STACK_DIR"
           bash -n scripts/configure_dadata_stage.sh
 
       - name: Configure runtime and run live smoke
         shell: bash
         run: |
           set -Eeuo pipefail
+          cd "$STACK_DIR"
           mkdir -p deployment-evidence
           chmod +x scripts/configure_dadata_stage.sh
           scripts/configure_dadata_stage.sh 2>&1 | tee deployment-evidence/dadata-stage.log
@@ -108,21 +119,25 @@ jobs:
         shell: bash
         run: |
           set +e
+          cd "$STACK_DIR"
           mkdir -p deployment-evidence
+          chmod 700 deployment-evidence
+          evidence="deployment-evidence/dadata-final-state-${GITHUB_RUN_ID}.txt"
           {
             echo "workflow_run_id=$GITHUB_RUN_ID"
             echo "workflow_attempt=$GITHUB_RUN_ATTEMPT"
-            echo "timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo "bundle_sha=$(cat "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "bundle_sha=$(cat app-source-sha.txt 2>/dev/null || echo unavailable)"
+            echo "marketplace_actions_on_stage_runner=disabled"
             docker ps --filter name=aimeton-auditor --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
             curl -sS "$STAGE_URL/api/missions/registry-mirror/dadata/health" || true
-          } | tee deployment-evidence/dadata-final-state.txt
-
-      - name: Upload DaData deployment evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dadata-stage-${{ github.run_id }}
-          path: deployment-evidence/
-          if-no-files-found: error
-          retention-days: 30
+          } | tee "$evidence"
+          chmod 600 "$evidence"
+          find deployment-evidence -type f -name 'dadata-final-state-*.txt' -mtime +30 -delete 2>/dev/null || true
+          {
+            echo '## DaData Stage evidence'
+            echo
+            echo '```text'
+            cat "$evidence"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -190,6 +190,7 @@ jobs:
           echo "- SQLite integrity: \`$integrity\`" >> "$report"
           echo "- tables: \`$tables\`" >> "$report"
           echo "- rollback compose backup: \`$backup_state\`" >> "$report"
+          echo "- marketplace actions on Stage runner: \`disabled\`" >> "$report"
           echo >> "$report"
           echo "### Verdict" >> "$report"
           if [[ "$mutation_required" == yes ]]; then
@@ -199,32 +200,36 @@ jobs:
           fi
 
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          install -d -m 0700 "$STACK_DIR/deployment-evidence"
+          durable="$STACK_DIR/deployment-evidence/runtime-persistence-reconcile-${GITHUB_RUN_ID}.md"
+          cp "$report" "$durable"
+          chmod 0600 "$durable"
+          find "$STACK_DIR/deployment-evidence" -type f -name 'runtime-persistence-reconcile-*.md' -mtime +30 -delete 2>/dev/null || true
           echo "report=$report" >> "$GITHUB_OUTPUT"
           echo "mutation_required=$mutation_required" >> "$GITHUB_OUTPUT"
 
-      - name: Upload reconcile evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: runtime-persistence-reconcile-${{ github.run_id }}
-          path: ${{ steps.reconcile.outputs.report }}
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Publish evidence to SA-03.4
+      - name: Publish evidence to SA-03.4 without marketplace actions
         continue-on-error: true
-        uses: actions/github-script@v7
+        shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           REPORT_PATH: ${{ steps.reconcile.outputs.report }}
-        with:
-          github-token: ${{ github.token }}
-          retries: 3
-          retry-exempt-status-codes: 400,401,403,404,422
-          script: |
-            const fs = require('fs');
-            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 159,
-              body: report.slice(0, 60000),
-            });
+        run: |
+          set -Eeuo pipefail
+          payload="$(mktemp)"
+          REPORT_PATH="$REPORT_PATH" python3 - <<'PY' > "$payload"
+          import json
+          import os
+          path = os.environ['REPORT_PATH']
+          with open(path, encoding='utf-8') as handle:
+              body = handle.read()
+          print(json.dumps({'body': body[:60000]}, ensure_ascii=False))
+          PY
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/159/comments" \
+            --data-binary "@$payload"
+          rm -f "$payload"
