@@ -58,7 +58,10 @@ def test_hunter_runtime_acceptance_proves_tavily_registration_without_activation
     assert "all(item['availability'] == 'unknown' for item in lifecycle)" in text
     assert "by_provider['tavily']['admin_enabled'] is False" in text
     assert "by_provider['tavily']['enabled'] is False" in text
-    assert "by_provider['tavily']['admin_position'] is None" in text
+    assert "expected_admin_position" in text
+    assert "profile.provider_order.index('tavily') + 1" in text
+    assert "by_provider['tavily']['admin_position'] == expected_admin_position" in text
+    assert "by_provider['tavily']['admin_position'] is None" not in text
     assert "by_provider['tavily']['active'] is True" not in text
     assert "by_provider['tavily']['configured'] is True" not in text
     assert "all canonical providers remain registered" in text
