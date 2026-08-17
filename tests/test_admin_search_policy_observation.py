@@ -52,7 +52,7 @@ def _patch_observation_dependencies(monkeypatch, actual: SearchPolicy) -> None:
     )
 
 
-def test_admin_observation_uses_resolver_for_env_runtime_authority(monkeypatch) -> None:
+def test_admin_observation_exposes_hidden_gateway_reprojection_for_env_authority(monkeypatch) -> None:
     actual = _actual_policy()
     record = _persisted_admin_record()
     _patch_observation_dependencies(monkeypatch, actual)
@@ -71,6 +71,18 @@ def test_admin_observation_uses_resolver_for_env_runtime_authority(monkeypatch) 
     assert observation["actual_gateway_policy"]["provider_order"][0] == "yandex"
     assert observation["projected_admin_gateway_policy"]["provider_order"][0] == "searxng"
     assert observation["policy_equivalent"] is False
+
+    assert observation["legacy_hunter_admin_projection_applied"] is True
+    assert observation["gateway_policy_changed_after_authority_resolution"] is True
+    assert (
+        observation["gateway_effective_policy"]
+        == observation["projected_admin_gateway_policy"]
+    )
+    assert (
+        observation["gateway_effective_policy_fingerprint"]
+        == observation["projected_admin_gateway_policy"]["fingerprint"]
+    )
+    assert observation["gateway_effective_policy_fingerprint"] != observation["selected_policy_fingerprint"]
 
 
 def test_admin_candidate_matches_persisted_projection_without_activation(monkeypatch) -> None:
@@ -93,6 +105,7 @@ def test_admin_candidate_matches_persisted_projection_without_activation(monkeyp
         == observation["projected_admin_gateway_policy"]
     )
     assert observation["selected_policy_fingerprint"] != observation["admin_candidate_policy_fingerprint"]
+    assert observation["gateway_effective_policy_fingerprint"] == observation["admin_candidate_policy_fingerprint"]
 
 
 def test_admin_observation_tracks_future_admin_authority_dynamically(monkeypatch) -> None:
@@ -110,6 +123,9 @@ def test_admin_observation_tracks_future_admin_authority_dynamically(monkeypatch
         observation["selected_policy_fingerprint"]
         == observation["projected_admin_gateway_policy"]["fingerprint"]
     )
+    assert observation["legacy_hunter_admin_projection_applied"] is True
+    assert observation["gateway_policy_changed_after_authority_resolution"] is False
+    assert observation["gateway_effective_policy"] == observation["selected_gateway_policy"]
     assert observation["admin_candidate_matches_projection"] is True
     assert observation["routing_changed_by_observation"] is False
 
@@ -126,3 +142,6 @@ def test_unpersisted_admin_record_has_no_admin_candidate(monkeypatch) -> None:
     assert observation["admin_candidate_gateway_policy"] is None
     assert observation["admin_candidate_policy_fingerprint"] is None
     assert observation["admin_candidate_matches_projection"] is None
+    # Legacy TracedSearchGateway behavior still applies the loaded/default settings
+    # record independently of whether it was explicitly persisted.
+    assert observation["legacy_hunter_admin_projection_applied"] is True

@@ -5,6 +5,7 @@ import json
 from typing import Any, Mapping, Sequence
 
 from app.models import HuntRequest
+from app.policy_fingerprint import fingerprint_model_payload
 
 
 def _canonical_json(value: Any) -> str:
@@ -61,17 +62,6 @@ def legacy_hunter_brief_revision_from_snapshot(snapshot: Mapping[str, Any]) -> s
 
 def legacy_hunter_brief_revision(request: HuntRequest) -> str:
     return legacy_hunter_brief_revision_from_snapshot(build_legacy_hunter_brief_snapshot(request))
-
-
-def fingerprint_model_payload(value: Any) -> str:
-    """Fingerprint a Pydantic/model or JSON-like policy without exposing values."""
-    if hasattr(value, "model_dump"):
-        payload = value.model_dump(mode="json", exclude_none=False)
-    elif isinstance(value, Mapping):
-        payload = dict(value)
-    else:
-        payload = value
-    return _digest(payload)
 
 
 def summarize_gateway_policy(policy: Any) -> dict[str, Any]:

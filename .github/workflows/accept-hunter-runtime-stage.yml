@@ -62,7 +62,7 @@ jobs:
             printf '%s\n' "- stage auditor status: \`$status\`"
           } > "$REPORT"
 
-      - name: Inspect dynamic execution authority and provider lifecycle without provider calls
+      - name: Inspect authority, downstream effective policy, and provider lifecycle without provider calls
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -86,6 +86,7 @@ jobs:
           projected = observation['projected_admin_gateway_policy']
           actual = observation['actual_gateway_policy']
           selected = observation['selected_gateway_policy']
+          gateway_effective = observation['gateway_effective_policy']
           admin_candidate = observation['admin_candidate_gateway_policy']
           lifecycle = observation['provider_lifecycle']
           by_provider = {item['provider']: item for item in lifecycle}
@@ -104,17 +105,28 @@ jobs:
           assert global_settings.active_tariff == expected_tariff
           assert projected['strategy'] == expected_strategy
           assert projected['provider_order'] == expected_order
+
+          # Canonical resolver boundary currently selects ENV.
           assert observation['runtime_authority'] == 'env'
           assert observation['runtime_callsite_uses_admin_projection'] is False
           assert selected == actual
           assert observation['selected_policy_fingerprint'] == actual['fingerprint']
+
+          # Current TracedSearchGateway compatibility layer then re-projects Hunter
+          # onto the persisted admin policy before the base provider gateway.
+          assert observation['legacy_hunter_admin_projection_applied'] is True
+          assert observation['gateway_policy_changed_after_authority_resolution'] is True
+          assert gateway_effective == projected
+          assert observation['gateway_effective_policy_fingerprint'] == projected['fingerprint']
+          assert observation['gateway_effective_policy_fingerprint'] != observation['selected_policy_fingerprint']
+
           assert observation['admin_candidate_available'] is True
           assert observation['admin_candidate_matches_projection'] is True
           assert admin_candidate == projected
           assert observation['admin_candidate_policy_fingerprint'] == projected['fingerprint']
 
-          # Provider lifecycle is observational only. Registered providers are not
-          # deleted merely because one concrete admin profile/global enablement excludes them.
+          # Provider lifecycle follows the final gateway-effective policy, not the
+          # earlier resolver boundary. Registration remains independent.
           assert set(by_provider) == {'searxng', 'yandex', 'tavily'}
           assert all(item['registered'] is True for item in lifecycle)
           assert all(item['availability'] == 'unknown' for item in lifecycle)
@@ -127,8 +139,8 @@ jobs:
           )
           assert by_provider['tavily']['admin_position'] == expected_admin_position
           assert by_provider['tavily']['runtime_position'] == (
-              actual['provider_order'].index('tavily') + 1
-              if 'tavily' in actual['provider_order'] else None
+              gateway_effective['provider_order'].index('tavily') + 1
+              if 'tavily' in gateway_effective['provider_order'] else None
           )
 
           assert observation['routing_changed_by_observation'] is False
@@ -143,6 +155,10 @@ jobs:
               'runtime_authority': observation['runtime_authority'],
               'selected_gateway_policy': selected,
               'selected_policy_fingerprint': observation['selected_policy_fingerprint'],
+              'gateway_effective_policy': gateway_effective,
+              'gateway_effective_policy_fingerprint': observation['gateway_effective_policy_fingerprint'],
+              'legacy_hunter_admin_projection_applied': observation['legacy_hunter_admin_projection_applied'],
+              'gateway_policy_changed_after_authority_resolution': observation['gateway_policy_changed_after_authority_resolution'],
               'actual_gateway_policy': actual,
               'projected_admin_gateway_policy': projected,
               'admin_candidate_available': observation['admin_candidate_available'],
@@ -172,20 +188,20 @@ jobs:
           )"
           {
             echo
-            echo '### Hunter policy and provider lifecycle provenance'
+            echo '### Hunter policy authority, downstream effective policy, and provider lifecycle'
             echo
             echo '```json'
             echo "$result"
             echo '```'
             echo
             echo '- provider calls: `0`'
-            echo '- canonical admin observation runtime authority: `env` ✅'
-            echo '- selected policy equals actual SearchGateway env policy: ✅'
-            echo '- persisted ADMIN candidate equals projected admin policy: ✅'
+            echo '- canonical resolver authority: `env` ✅'
+            echo '- resolver-selected policy equals env policy: ✅'
+            echo '- legacy TracedSearchGateway admin projection applied after resolver: ✅'
+            echo '- gateway-effective policy equals persisted admin projection: ✅'
             echo '- all canonical providers remain registered: ✅'
             echo '- Tavily may be globally/admin-disabled without deregistration: ✅'
             echo '- network availability not guessed without evidence: ✅'
-            echo '- ADMIN candidate activated: `false`'
             echo '- routing changed by acceptance: `false`'
           } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
 

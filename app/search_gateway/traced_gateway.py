@@ -17,6 +17,7 @@ from app.search_gateway.models import (
     SearchResponse,
 )
 from app.search_gateway.trace_bridge import persist_provider_waterfall
+from app.search_gateway.traced_policy import resolve_traced_gateway_policy
 from app.trace_context import current_trace_identity
 from app.trace_ledger import TraceEventCreate, TraceState
 from app.trace_write_metrics import InstrumentedSQLiteTraceLedger
@@ -197,16 +198,23 @@ class TracedSearchGateway(SearchGateway):
         request: SearchRequest,
         policy: SearchPolicy | None = None,
     ) -> SearchResponse:
-        effective_policy = policy or SearchPolicy()
+        incoming_policy = policy or SearchPolicy()
+        settings_record = None
         if request.mission_id.startswith("hunt-"):
             try:
                 from app.search_strategy_settings import get_search_strategy_settings_repository
 
-                effective_policy = get_search_strategy_settings_repository().get().settings.apply_search_policy(effective_policy)
+                settings_record = get_search_strategy_settings_repository().get()
             except Exception:
                 # Runtime strategy settings are optional/fail-open. The provided
                 # policy remains the safe fallback if the settings record is bad.
-                pass
+                settings_record = None
+        policy_resolution = resolve_traced_gateway_policy(
+            request=request,
+            incoming_policy=incoming_policy,
+            settings_record=settings_record,
+        )
+        effective_policy = policy_resolution.effective_policy
 
         fingerprint = request_fingerprint(request).removeprefix("sha256:")
         query_index = int(hashlib.sha256(fingerprint.encode("ascii")).hexdigest()[:8], 16)
@@ -237,6 +245,10 @@ class TracedSearchGateway(SearchGateway):
                         "allow_paid_fanout": effective_policy.allow_paid_fanout,
                         "target_results": effective_policy.target_results,
                         "max_providers_per_query": effective_policy.max_providers_per_query,
+                        "incoming_policy_fingerprint": policy_resolution.incoming_policy_fingerprint,
+                        "gateway_effective_policy_fingerprint": policy_resolution.effective_policy_fingerprint,
+                        "legacy_hunter_admin_projection_applied": policy_resolution.legacy_hunter_admin_projection_applied,
+                        "gateway_policy_changed": policy_resolution.policy_changed,
                     },
                     event_key=f"{mission_id}:{attempt_id}:query:{query_index}:planned",
                     runtime_version=runtime_version,
