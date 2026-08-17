@@ -199,20 +199,9 @@ class TracedSearchGateway(SearchGateway):
         policy: SearchPolicy | None = None,
     ) -> SearchResponse:
         incoming_policy = policy or SearchPolicy()
-        settings_record = None
-        if request.mission_id.startswith("hunt-"):
-            try:
-                from app.search_strategy_settings import get_search_strategy_settings_repository
-
-                settings_record = get_search_strategy_settings_repository().get()
-            except Exception:
-                # Runtime strategy settings are optional/fail-open. The provided
-                # policy remains the safe fallback if the settings record is bad.
-                settings_record = None
         policy_resolution = resolve_traced_gateway_policy(
             request=request,
             incoming_policy=incoming_policy,
-            settings_record=settings_record,
         )
         effective_policy = policy_resolution.effective_policy
 
