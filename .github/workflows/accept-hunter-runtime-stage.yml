@@ -219,33 +219,49 @@ jobs:
             echo '- routing changed by acceptance: `false`'
           } | tee -a "$REPORT" "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload sanitized evidence
+      - name: Preserve sanitized evidence in job summary
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hunter-runtime-stage-${{ github.run_id }}
-          path: ${{ env.REPORT }}
-          if-no-files-found: warn
-          retention-days: 30
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -f "$REPORT" ]]; then
+            {
+              echo
+              echo '### Durable acceptance report'
+              echo
+              cat "$REPORT"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
-      - name: Publish evidence to P1-501
+      - name: Publish evidence to P1-501 without marketplace actions
         if: always()
         continue-on-error: true
-        uses: actions/github-script@v7
+        shell: bash
         env:
-          REPORT_PATH: ${{ env.REPORT }}
-        with:
-          github-token: ${{ github.token }}
-          retries: 3
-          script: |
-            const fs = require('fs');
-            const path = process.env.REPORT_PATH;
-            const body = path && fs.existsSync(path)
-              ? fs.readFileSync(path, 'utf8')
-              : `## Hunter runtime Stage acceptance\n\nWorkflow ${context.runId} failed before sanitized evidence was produced.`;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 501,
-              body: body.slice(0, 60000),
-            });
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          payload="$(mktemp)"
+          REPORT_PATH="$REPORT" python3 - <<'PY' > "$payload"
+          import json
+          import os
+
+          path = os.environ['REPORT_PATH']
+          if os.path.exists(path):
+              with open(path, encoding='utf-8') as handle:
+                  body = handle.read()
+          else:
+              body = (
+                  '## Hunter runtime Stage acceptance\n\n'
+                  f"Workflow {os.environ.get('GITHUB_RUN_ID', 'unknown')} failed before sanitized evidence was produced."
+              )
+          print(json.dumps({'body': body[:60000]}, ensure_ascii=False))
+          PY
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/501/comments" \
+            --data-binary "@$payload"
+          rm -f "$payload"
