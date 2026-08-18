@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+from pydantic import ValidationError
+
 import app.routerai_profile_extraction as profile
 from app.models import CompanyFact
 
@@ -52,6 +55,7 @@ def test_source_slices_follow_search_verticals_and_keep_ids() -> None:
 
 def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
     fact_schema = profile.CompactCompanyFact.model_json_schema()
+    management_fact_schema = profile.ManagementCompanyFact.model_json_schema()
     signal_schema = profile.CompactEconomicSignal.model_json_schema()
     identity_schema = profile.IdentityCoreSlice.model_json_schema()
     management_schema = profile.ManagementSlice.model_json_schema()
@@ -61,6 +65,11 @@ def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
 
     assert fact_schema["properties"]["value"]["maxLength"] == 200
     assert fact_schema["properties"]["source_ids"]["maxItems"] == 3
+    assert management_fact_schema["properties"]["field"]["enum"] == ["founders", "executives"]
+    assert management_fact_schema["properties"]["value"]["maxLength"] == 140
+    assert management_fact_schema["properties"]["period"]["anyOf"][0]["maxLength"] == 32
+    assert management_fact_schema["properties"]["source_ids"]["maxItems"] == 2
+    assert management_fact_schema["properties"]["source_ids"]["items"]["maxLength"] == 64
     assert signal_schema["properties"]["signal"]["maxLength"] == 140
     assert signal_schema["properties"]["business_effect"]["maxLength"] == 170
     assert signal_schema["properties"]["source_ids"]["maxItems"] == 3
@@ -71,6 +80,70 @@ def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
     assert ownership_schema["properties"]["risks_and_assumptions"]["maxItems"] == 2
     assert operations_schema["properties"]["company_facts"]["maxItems"] == 9
     assert signal_slice_schema["properties"]["economic_signals"]["maxItems"] == 6
+
+
+def test_management_dto_rejects_output_outside_bounded_envelope() -> None:
+    with pytest.raises(ValidationError):
+        profile.ManagementCompanyFact(
+            field="executives",
+            value="x" * 141,
+            source_ids=["S1"],
+        )
+
+    with pytest.raises(ValidationError):
+        profile.ManagementCompanyFact(
+            field="affiliates",
+            value="Not a management field",
+            source_ids=["S1"],
+        )
+
+    with pytest.raises(ValidationError):
+        profile.ManagementCompanyFact(
+            field="founders",
+            value="Founder",
+            source_ids=["S" * 65],
+        )
+
+
+def test_management_input_is_bounded_without_changing_other_slice_budget() -> None:
+    calls: dict[str, dict] = {}
+
+    async def fake_request(phase, model_type, **kwargs):
+        calls[phase] = kwargs
+        if model_type is profile.IdentityCoreSlice:
+            return profile.IdentityCoreSlice(company_name="Example", business_summary="Example")
+        if model_type is profile.ManagementSlice:
+            return profile.ManagementSlice()
+        if model_type is profile.OwnershipNetworkSlice:
+            return profile.OwnershipNetworkSlice()
+        if model_type is profile.OperationsProfileSlice:
+            return profile.OperationsProfileSlice()
+        if model_type is profile.SignalProfileSlice:
+            return profile.SignalProfileSlice()
+        raise AssertionError(model_type)
+
+    long_source = _source("E2", "ownership")
+    long_source["snippet"] = "s" * 20000
+
+    asyncio.run(
+        profile.extract_profile_parallel(
+            request_json=fake_request,
+            strict_request_json=fake_request,
+            url="https://example.com",
+            title="Example",
+            text="o" * 20000,
+            external_sources=[long_source],
+            accessed_at="2026-08-18T00:00:00+00:00",
+        )
+    )
+
+    management_prompt = calls["profile_management"]["prompt"]
+    assert "o" * profile._MANAGEMENT_OFFICIAL_TEXT_BUDGET in management_prompt
+    assert "o" * (profile._MANAGEMENT_OFFICIAL_TEXT_BUDGET + 1) not in management_prompt
+    assert len(management_prompt) < 12000
+    assert calls["profile_management"]["max_tokens"] == 600
+    assert calls["profile_management"]["timeout_seconds"] == 18.0
+    assert calls["profile_operations"]["max_tokens"] == 1100
 
 
 def test_parallel_extractors_merge_into_public_fact_models() -> None:
@@ -97,7 +170,7 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
         if model_type is profile.ManagementSlice:
             return profile.ManagementSlice(
                 company_facts=[
-                    profile.CompactCompanyFact(
+                    profile.ManagementCompanyFact(
                         field="executives",
                         value="Named executive",
                         confidence="Средняя",
