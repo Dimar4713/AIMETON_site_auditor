@@ -66,7 +66,7 @@ def _km_cell(code: str) -> BusinessMachineCell:
     )
 
 
-def test_split_v2_stages_km_quadrants_and_commercial_execution(monkeypatch) -> None:
+def test_split_v2_stages_km_quadrant_ii_cells_and_commercial_execution(monkeypatch) -> None:
     async def fake_profile(**kwargs):
         return MergedProfileExtraction(
             company_name="Example",
@@ -104,8 +104,12 @@ def test_split_v2_stages_km_quadrants_and_commercial_execution(monkeypatch) -> N
         phase_kwargs[phase] = kwargs
         if model_type is split_v2.CompactBusinessMachineQuadrant:
             quadrant = phase.removeprefix("km_reasoning_")
-            code = f"{quadrant}-I"
             return split_v2.CompactBusinessMachineQuadrant(
+                business_machine_4x4=[_km_cell(f"{quadrant}-I")]
+            )
+        if model_type is split_v2.CompactBusinessMachineCell:
+            code = phase.removeprefix("km_reasoning_").replace("_", "-")
+            return split_v2.CompactBusinessMachineCell(
                 business_machine_4x4=[_km_cell(code)]
             )
         if model_type is split_v2.CompactCommercialOpportunity:
@@ -151,19 +155,29 @@ def test_split_v2_stages_km_quadrants_and_commercial_execution(monkeypatch) -> N
 
     assert set(phases) == {
         "km_reasoning_I",
-        "km_reasoning_II",
+        "km_reasoning_II_I",
+        "km_reasoning_II_II",
+        "km_reasoning_II_III",
+        "km_reasoning_II_IV",
         "km_reasoning_III",
         "km_reasoning_IV",
         "commercial_opportunity_reasoning",
         "commercial_execution",
     }
-    for quadrant in ("I", "II", "III", "IV"):
+    for quadrant in ("I", "III", "IV"):
         km_kwargs = phase_kwargs[f"km_reasoning_{quadrant}"]
         assert km_kwargs["reasoning_effort"] == "high"
         assert km_kwargs["max_tokens"] == 1200
         assert km_kwargs["timeout_seconds"] == 18.0
         assert "Engineering company" in km_kwargs["prompt"]
         assert f"квадрант {quadrant}" in km_kwargs["prompt"]
+    for suffix in ("I", "II", "III", "IV"):
+        km_kwargs = phase_kwargs[f"km_reasoning_II_{suffix}"]
+        assert km_kwargs["reasoning_effort"] == "high"
+        assert km_kwargs["max_tokens"] == 700
+        assert km_kwargs["timeout_seconds"] == 18.0
+        assert "Engineering company" in km_kwargs["prompt"]
+        assert f"II-{suffix}" in km_kwargs["prompt"]
     opportunity_kwargs = phase_kwargs["commercial_opportunity_reasoning"]
     assert opportunity_kwargs["reasoning_effort"] == "high"
     assert "reasoning_enabled" not in opportunity_kwargs
@@ -181,6 +195,9 @@ def test_split_v2_stages_km_quadrants_and_commercial_execution(monkeypatch) -> N
     assert [cell.code for cell in result.business_machine_4x4] == [
         "I-I",
         "II-I",
+        "II-II",
+        "II-III",
+        "II-IV",
         "III-I",
         "IV-I",
     ]
@@ -222,29 +239,49 @@ def test_full_reasoning_profile_has_no_legacy_30_fact_or_16_signal_cap() -> None
     assert reasoning.coverage["complete"] is True
 
 
-def test_split_v2_km_quadrant_envelope_is_bounded_and_merge_is_fail_closed() -> None:
-    schema = split_v2.CompactBusinessMachineQuadrant.model_json_schema()
-    assert schema["properties"]["business_machine_4x4"]["maxItems"] == 4
-    quadrants = [
-        split_v2.CompactBusinessMachineQuadrant(
-            business_machine_4x4=[_km_cell("I-I"), _km_cell("I-II")]
+def test_split_v2_km_envelopes_are_bounded_and_merge_is_fail_closed() -> None:
+    quadrant_schema = split_v2.CompactBusinessMachineQuadrant.model_json_schema()
+    assert quadrant_schema["properties"]["business_machine_4x4"]["maxItems"] == 4
+    cell_schema = split_v2.CompactBusinessMachineCell.model_json_schema()
+    assert cell_schema["properties"]["business_machine_4x4"]["maxItems"] == 1
+    requests = [
+        (
+            ("I-I", "I-II", "I-III", "I-IV"),
+            split_v2.CompactBusinessMachineQuadrant(
+                business_machine_4x4=[_km_cell("I-I"), _km_cell("I-II")]
+            ),
         ),
-        split_v2.CompactBusinessMachineQuadrant(
-            business_machine_4x4=[_km_cell("I-II"), _km_cell("II-I")]
+        (
+            ("II-I",),
+            split_v2.CompactBusinessMachineCell(
+                business_machine_4x4=[_km_cell("I-II")]
+            ),
         ),
-        split_v2.CompactBusinessMachineQuadrant(
-            business_machine_4x4=[_km_cell("III-I")]
+        (
+            ("II-II",),
+            split_v2.CompactBusinessMachineCell(
+                business_machine_4x4=[_km_cell("II-II")]
+            ),
         ),
-        split_v2.CompactBusinessMachineQuadrant(
-            business_machine_4x4=[_km_cell("IV-I")]
+        (
+            ("III-I", "III-II", "III-III", "III-IV"),
+            split_v2.CompactBusinessMachineQuadrant(
+                business_machine_4x4=[_km_cell("III-I")]
+            ),
+        ),
+        (
+            ("IV-I", "IV-II", "IV-III", "IV-IV"),
+            split_v2.CompactBusinessMachineQuadrant(
+                business_machine_4x4=[_km_cell("IV-I")]
+            ),
         ),
     ]
-    merged = split_v2._merge_km_quadrants(quadrants)
+    merged = split_v2._merge_km_results(requests)
     assert isinstance(merged, BusinessMachineSynthesis)
     assert [cell.code for cell in merged.business_machine_4x4] == [
         "I-I",
         "I-II",
-        "II-I",
+        "II-II",
         "III-I",
         "IV-I",
     ]

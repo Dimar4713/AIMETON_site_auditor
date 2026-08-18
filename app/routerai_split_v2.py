@@ -44,6 +44,13 @@ class CompactBusinessMachineQuadrant(BaseModel):
     )
 
 
+class CompactBusinessMachineCell(BaseModel):
+    business_machine_4x4: list[BusinessMachineCell] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+
+
 class CompactCommercialOpportunity(BaseModel):
     opportunity_type: CompactText80
     problem_hypothesis: CompactText220
@@ -113,14 +120,14 @@ def _expand_commercial(
     )
 
 
-def _merge_km_quadrants(
-    quadrants: list[CompactBusinessMachineQuadrant],
+def _merge_km_results(
+    requests: list[tuple[tuple[str, ...], BaseModel]],
 ) -> BusinessMachineSynthesis:
     cells: list[BusinessMachineCell] = []
     seen: set[str] = set()
-    for (_, allowed_codes), quadrant in zip(_KM_QUADRANTS, quadrants, strict=True):
+    for allowed_codes, result in requests:
         allowed = set(allowed_codes)
-        for cell in quadrant.business_machine_4x4:
+        for cell in result.business_machine_4x4:
             if cell.code not in allowed or cell.code in seen:
                 continue
             seen.add(cell.code)
@@ -149,6 +156,19 @@ confidence, source_ids и sales_relevance. Не создавай факты св
 Если данных нет, используй status=\"Нет данных\" и не компенсируй пробелы
 фантазией. Coverage metadata — только агрегаты полноты, не факты компании.
 Пиши кратко. Не включай ячейки других квадрантов.
+
+FULL EXTRACTED PROFILE:\n{profile_context}
+"""
+
+
+def _km_cell_prompt(code: str, profile_context: str) -> str:
+    return f"""Построй только одну каноническую ячейку {code} {_KM_LABELS[code]}
+бизнес-модели AIMETON / КМ из полного извлечённого профиля ниже.
+Разрешён только код {code}. Верни не более одной ячейки. Укажи finding, status,
+confidence, source_ids и sales_relevance. Не создавай факты сверх профиля.
+Если данных нет, используй status=\"Нет данных\" и не компенсируй пробелы
+фантазией. Coverage metadata — только агрегаты полноты, не факты компании.
+Пиши кратко. Не включай другие коды.
 
 FULL EXTRACTED PROFILE:\n{profile_context}
 """
@@ -195,20 +215,44 @@ async def analyze_with_routerai_split_v2(
 FULL EXTRACTED PROFILE:\n{profile_context}
 """
 
+    km_specs: list[tuple[str, tuple[str, ...], type[BaseModel], str, int]] = []
+    for quadrant, codes in _KM_QUADRANTS:
+        if quadrant == "II":
+            for code in codes:
+                km_specs.append(
+                    (
+                        f"km_reasoning_{code.replace('-', '_')}",
+                        (code,),
+                        CompactBusinessMachineCell,
+                        _km_cell_prompt(code, profile_context),
+                        700,
+                    )
+                )
+        else:
+            km_specs.append(
+                (
+                    f"km_reasoning_{quadrant}",
+                    codes,
+                    CompactBusinessMachineQuadrant,
+                    _km_quadrant_prompt(quadrant, codes, profile_context),
+                    1200,
+                )
+            )
+
     km_tasks = [
         request_json_strict(
-            f"km_reasoning_{quadrant}",
-            CompactBusinessMachineQuadrant,
+            phase,
+            model_type,
             system=(
                 "Возвращай только компактный валидный JSON по схеме. "
-                f"Используй только канонические коды квадранта {quadrant}."
+                f"Используй только канонические коды: {', '.join(codes)}."
             ),
-            prompt=_km_quadrant_prompt(quadrant, codes, profile_context),
-            max_tokens=1200,
+            prompt=prompt,
+            max_tokens=max_tokens,
             timeout_seconds=18.0,
             reasoning_effort="high",
         )
-        for quadrant, codes in _KM_QUADRANTS
+        for phase, codes, model_type, prompt, max_tokens in km_specs
     ]
     gathered = await asyncio.gather(
         *km_tasks,
@@ -222,7 +266,12 @@ FULL EXTRACTED PROFILE:\n{profile_context}
             reasoning_effort="high",
         ),
     )
-    km_result = _merge_km_quadrants(gathered[:-1])
+    km_result = _merge_km_results(
+        [
+            (codes, result)
+            for (_, codes, _, _, _), result in zip(km_specs, gathered[:-1], strict=True)
+        ]
+    )
     opportunity_result = gathered[-1]
 
     opportunity_context = json.dumps(
