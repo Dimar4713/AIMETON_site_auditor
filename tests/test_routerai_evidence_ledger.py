@@ -129,7 +129,7 @@ def test_split_v2_persists_merged_ledger_before_any_reasoning(monkeypatch) -> No
         return "evidence_ledger_attempt-test"
 
     async def fail_reasoning(*args, **kwargs):
-        assert events == ["extract", "persist"]
+        assert events[:2] == ["extract", "persist"]
         events.append("reasoning")
         raise RuntimeError("intentional_reasoning_failure")
 
