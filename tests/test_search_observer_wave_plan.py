@@ -1,4 +1,8 @@
-from app.search_observer_wave_plan import plan_bounded_search_waves
+from app.search_observer_wave_plan import (
+    assign_reserve_queries_to_directions,
+    plan_bounded_search_waves,
+    prioritize_reserve_queries,
+)
 
 
 def test_disabled_mode_preserves_legacy_single_wave_order():
@@ -65,3 +69,33 @@ def test_zero_reserve_keeps_single_wave_even_when_gate_enabled():
     assert plan.reserve_queries == []
     assert plan.steering_enabled is False
     assert plan.reason_code == "reserve_not_configured"
+
+
+def test_reserve_queries_map_to_closest_observed_direction_deterministically():
+    assignments = assign_reserve_queries_to_directions(
+        [
+            "стоматология красноярск официальный сайт",
+            "металлообработка красноярск завод",
+        ],
+        [
+            "клиника стоматология красноярск",
+            "завод металлообработка красноярск оборудование",
+        ],
+    )
+
+    assert [item.direction_index for item in assignments] == [0, 1]
+    assert all(item.lexical_overlap > 0 for item in assignments)
+
+
+def test_continuation_priority_reorders_but_never_drops_reserve_work():
+    assignments = assign_reserve_queries_to_directions(
+        ["стоматология красноярск", "металлообработка красноярск"],
+        ["металлообработка завод красноярск", "стоматология клиника красноярск"],
+    )
+    ordered = prioritize_reserve_queries(assignments, accepted_direction_indexes=[0])
+
+    assert ordered == [
+        "стоматология клиника красноярск",
+        "металлообработка завод красноярск",
+    ]
+    assert set(ordered) == {item.query for item in assignments}
