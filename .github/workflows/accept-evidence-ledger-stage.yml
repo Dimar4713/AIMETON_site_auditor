@@ -1,0 +1,129 @@
+name: Accept Evidence Ledger Stage
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/accept-evidence-ledger-stage.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 15
+    env:
+      EXPECTED_SHA: 1128b64d3bc401f64842aef49d7d78a6b5d60715
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      STAGE_URL: https://stage-auditor.aimeton.ru
+
+    steps:
+      - name: Wait for exact-SHA convergence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deadline=$((SECONDS + 780))
+          while (( SECONDS < deadline )); do
+            deployed="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt" 2>/dev/null || true)"
+            snapshot="$(curl -fsS --max-time 20 "$STAGE_URL/api/runtime/convergence" 2>/dev/null || true)"
+            if [[ "$deployed" == "$EXPECTED_SHA" ]] && python3 - "$snapshot" "$EXPECTED_SHA" <<'PY'
+          import json,sys
+          try: p=json.loads(sys.argv[1])
+          except Exception: raise SystemExit(1)
+          sha=sys.argv[2]
+          raise SystemExit(0 if p.get('state')=='converged' and p.get('deployment_sha')==sha and p.get('marker_error') is None and p.get('secrets_exposed') is False else 1)
+          PY
+            then exit 0; fi
+            sleep 12
+          done
+          echo 'exact-SHA Stage convergence not reached' >&2
+          exit 2
+
+      - name: Verify durable evidence ledger on Stage runtime without provider calls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tmp_host="$STACK_DIR/data/accept-evidence-ledger-${GITHUB_RUN_ID}.sqlite3"
+          tmp_container="/app/data/accept-evidence-ledger-${GITHUB_RUN_ID}.sqlite3"
+          cleanup() { rm -f "$tmp_host" "$tmp_host-wal" "$tmp_host-shm"; }
+          trap cleanup EXIT
+          docker exec -i \
+            -e AIMETON_MISSION_DB="$tmp_container" \
+            "$CONTAINER" python - "$GITHUB_RUN_ID" <<'PY'
+          import hashlib, json, sys
+          from app.mission_contract import MissionCreate
+          from app.mission_sqlite import SQLiteMissionRepository
+          from app.models import CompanyFact, EconomicSignal
+          from app.routerai_evidence_ledger import persist_merged_evidence_ledger
+          from app.routerai_evidence_units import EvidenceCoverage
+          from app.routerai_profile_extraction import MergedProfileExtraction
+          from app.trace_context import bind_trace_identity
+
+          run_id=sys.argv[1]
+          repo=SQLiteMissionRepository()
+          mission=repo.create(743000, MissionCreate(
+              title='Stage evidence ledger acceptance',
+              target_ref='fixture://large-company',
+              input_snapshot={'fixture':'evidence-ledger-stage'},
+              correlation_id=f'accept-ledger-{run_id}',
+          ))
+          facts=[CompanyFact(field='revenue', value=str(i), period=str(2000+i), source_ids=['S1']) for i in range(40)]
+          facts.append(CompanyFact(field='other', value='TAIL_FACT_STAGE', source_ids=['E99']))
+          merged=MergedProfileExtraction(
+              company_name='Large Stage Fixture',
+              business_summary='Coverage acceptance',
+              evidence=['FIRST_EVIDENCE','MIDDLE_EVIDENCE','TAIL_EVIDENCE'],
+              company_facts=facts,
+              economic_signals=[EconomicSignal(signal=f's{i}', evidence=f'e{i}', business_effect=f'b{i}', source_ids=['S1']) for i in range(20)],
+              risks_and_assumptions=['risk-first','risk-tail'],
+              coverage=EvidenceCoverage(
+                  official_chars_total=50000, official_chunks_total=5, official_chunks_processed=5,
+                  sources_total=99, sources_processed=99, source_chunks_total=7, source_chunks_processed=7,
+                  extraction_units_total=32, extraction_units_processed=32, complete=True,
+              ),
+          )
+          with bind_trace_identity(mission.id, f'attempt-{run_id}'):
+              record_id=persist_merged_evidence_ledger(merged)
+          reopened=SQLiteMissionRepository()
+          records=reopened.records_for_owner(743000, mission.id)
+          assert records is not None
+          ledger=[r for r in records if r['kind']=='evidence_ledger']
+          assert len(ledger)==1
+          rec=ledger[0]; payload=rec['payload']
+          assert record_id == f'evidence_ledger_attempt-{run_id}'
+          assert len(payload['company_facts']) == 41
+          assert payload['company_facts'][-1]['value'] == 'TAIL_FACT_STAGE'
+          assert len(payload['economic_signals']) == 20
+          assert payload['coverage']['complete'] is True
+          assert payload['coverage']['official_chars_total'] == 50000
+          assert reopened.records_for_owner(743001, mission.id) is None
+          canonical=json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',',':')).encode('utf-8')
+          assert rec['digest'] == 'sha256:' + hashlib.sha256(canonical).hexdigest()
+          rendered=json.dumps(payload, ensure_ascii=False).lower()
+          for forbidden in ('api_key','authorization','cookie','provider_payload','raw_prompt'):
+              assert forbidden not in rendered
+          print(json.dumps({
+              'mission_created': True,
+              'record_kind': rec['kind'],
+              'record_id_prefix': 'evidence_ledger_',
+              'facts': len(payload['company_facts']),
+              'signals': len(payload['economic_signals']),
+              'tail_fact_preserved': True,
+              'coverage_complete': payload['coverage']['complete'],
+              'official_chars_total': payload['coverage']['official_chars_total'],
+              'owner_isolation': True,
+              'digest_verified': True,
+              'provider_calls': 0,
+          }, sort_keys=True))
+          PY
+
+      - name: Confirm temporary acceptance DB cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test ! -e "$STACK_DIR/data/accept-evidence-ledger-${GITHUB_RUN_ID}.sqlite3"
+          test ! -e "$STACK_DIR/data/accept-evidence-ledger-${GITHUB_RUN_ID}.sqlite3-wal"
+          test ! -e "$STACK_DIR/data/accept-evidence-ledger-${GITHUB_RUN_ID}.sqlite3-shm"
