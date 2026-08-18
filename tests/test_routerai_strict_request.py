@@ -28,9 +28,7 @@ def _management_content() -> str:
     )
 
 
-def test_strict_request_uses_provider_json_schema(monkeypatch) -> None:
-    captured: dict = {}
-
+def _install_fake_client(monkeypatch, captured: dict) -> None:
     class FakeResponse:
         def raise_for_status(self) -> None:
             return None
@@ -59,6 +57,11 @@ def test_strict_request_uses_provider_json_schema(monkeypatch) -> None:
     monkeypatch.setenv("ROUTERAI_API_KEY", "test-only")
     monkeypatch.setattr(strict.httpx, "AsyncClient", lambda timeout: FakeClient())
 
+
+def test_strict_request_uses_provider_json_schema_without_reasoning_override(monkeypatch) -> None:
+    captured: dict = {}
+    _install_fake_client(monkeypatch, captured)
+
     result = asyncio.run(
         strict.request_json_strict(
             "profile_management",
@@ -76,7 +79,29 @@ def test_strict_request_uses_provider_json_schema(monkeypatch) -> None:
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert payload["response_format"]["json_schema"]["name"] == "profile_management"
     assert payload["response_format"]["json_schema"]["schema"] == ManagementSlice.model_json_schema()
+    assert "reasoning" not in payload
     assert result.company_facts[0].field == "executives"
+
+
+def test_strict_request_can_disable_reasoning_for_deterministic_extraction(monkeypatch) -> None:
+    captured: dict = {}
+    _install_fake_client(monkeypatch, captured)
+
+    asyncio.run(
+        strict.request_json_strict(
+            "profile_management",
+            ManagementSlice,
+            system="Structured only",
+            prompt="Extract management",
+            max_tokens=900,
+            timeout_seconds=18.0,
+            reasoning_enabled=False,
+        )
+    )
+
+    payload = captured["payload"]
+    assert payload["max_tokens"] == 900
+    assert payload["reasoning"] == {"enabled": False}
 
 
 def test_strict_request_surfaces_output_truncation(monkeypatch) -> None:
