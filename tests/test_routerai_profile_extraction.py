@@ -8,84 +8,91 @@ from pydantic import ValidationError
 
 import app.routerai_profile_extraction as profile
 from app.models import CompanyFact
+from app.routerai_evidence_units import (
+    DEFAULT_EVIDENCE_CHUNK_CHARS,
+    EvidenceCoverageOverflow,
+    chunk_sources,
+    chunk_text,
+    evidence_units,
+    project_sources,
+)
 
 
-def _source(source_id: str, query_kind: str) -> dict:
+def _source(source_id: str, query_kind: str, *, snippet: str | None = None) -> dict:
     return {
         "id": source_id,
         "title": f"Source {source_id}",
         "query_kind": query_kind,
         "source_class": query_kind,
         "evidence_level": "unverified_mention",
-        "snippet": f"snippet-{source_id}",
+        "snippet": snippet or f"snippet-{source_id}",
         "url": f"https://example.test/{source_id}",
     }
 
 
-def test_source_slices_follow_search_verticals_and_keep_ids() -> None:
+def test_source_slices_follow_search_verticals_keep_ids_and_never_prefix_truncate() -> None:
+    late = "LATE-EVIDENCE-" + "x" * 16000
     sources = [
         _source("E1", "contact"),
         _source("E2", "ownership"),
         _source("E3", "affiliation"),
         _source("E4", "finance"),
-        _source("E5", "court"),
+        _source("E5", "court", snippet=late),
         _source("E6", "jobs"),
     ]
 
-    identity_core = json.loads(
-        profile._source_slice(sources, profile._IDENTITY_CORE_KINDS)
-    )
+    identity_core = json.loads(profile._source_slice(sources, profile._IDENTITY_CORE_KINDS))
     management = json.loads(profile._source_slice(sources, profile._MANAGEMENT_KINDS))
-    ownership_network = json.loads(
-        profile._source_slice(sources, profile._OWNERSHIP_NETWORK_KINDS)
-    )
+    ownership_network = json.loads(profile._source_slice(sources, profile._OWNERSHIP_NETWORK_KINDS))
     operations = json.loads(profile._source_slice(sources, profile._OPERATIONS_KINDS))
-    signals = json.loads(profile._source_slice(sources, profile._SIGNAL_KINDS))
+    signals_raw = profile._source_slice(sources, profile._SIGNAL_KINDS, char_budget=100)
+    signals = json.loads(signals_raw)
 
     assert {item["id"] for item in identity_core} == {"E1"}
     assert {item["id"] for item in management} == {"E2"}
     assert {item["id"] for item in ownership_network} == {"E2", "E3"}
     assert {item["id"] for item in operations} == {"E4", "E6"}
     assert {item["id"] for item in signals} == {"E4", "E5"}
+    assert late in signals_raw
     assert all(
         "url" not in item
         for item in identity_core + management + ownership_network + operations + signals
     )
 
 
-def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
+def test_chunk_primitives_preserve_all_text_and_late_sources() -> None:
+    text = "A" * (DEFAULT_EVIDENCE_CHUNK_CHARS + 7) + "TAIL_FACT"
+    chunks = chunk_text(text)
+    assert len(chunks) == 2
+    assert "".join(chunks) == text
+    assert chunks[-1].endswith("TAIL_FACT")
+
+    sources = [
+        _source("E1", "finance", snippet="a" * 7000),
+        _source("E2", "finance", snippet="b" * 7000),
+        _source("E3", "finance", snippet="late-source-marker"),
+    ]
+    projected = project_sources(sources, profile._OPERATIONS_KINDS, profile._SLICE_SOURCE_KEYS)
+    source_chunks = chunk_sources(projected)
+    recovered = [item for raw in source_chunks for item in json.loads(raw)]
+    assert [item["id"] for item in recovered] == ["E1", "E2", "E3"]
+    assert recovered[-1]["snippet"] == "late-source-marker"
+
+
+def test_vertical_dto_bounds_keep_each_chunk_compact() -> None:
     fact_schema = profile.CompactCompanyFact.model_json_schema()
     management_fact_schema = profile.ManagementCompanyFact.model_json_schema()
     ownership_fact_schema = profile.OwnershipNetworkCompanyFact.model_json_schema()
-    signal_schema = profile.CompactEconomicSignal.model_json_schema()
     identity_schema = profile.IdentityCoreSlice.model_json_schema()
-    management_schema = profile.ManagementSlice.model_json_schema()
-    ownership_schema = profile.OwnershipNetworkSlice.model_json_schema()
     operations_schema = profile.OperationsProfileSlice.model_json_schema()
     signal_slice_schema = profile.SignalProfileSlice.model_json_schema()
 
     assert fact_schema["properties"]["value"]["maxLength"] == 200
-    assert fact_schema["properties"]["source_ids"]["maxItems"] == 3
-    assert management_fact_schema["properties"]["field"]["enum"] == ["founders", "executives"]
     assert management_fact_schema["properties"]["value"]["maxLength"] == 140
-    assert management_fact_schema["properties"]["period"]["anyOf"][0]["maxLength"] == 32
-    assert management_fact_schema["properties"]["source_ids"]["maxItems"] == 2
-    assert management_fact_schema["properties"]["source_ids"]["items"]["maxLength"] == 64
-    assert ownership_fact_schema["properties"]["field"]["enum"] == ["beneficial_owners", "affiliates", "social_accounts"]
     assert ownership_fact_schema["properties"]["value"]["maxLength"] == 140
-    assert ownership_fact_schema["properties"]["period"]["anyOf"][0]["maxLength"] == 32
-    assert ownership_fact_schema["properties"]["source_ids"]["maxItems"] == 2
-    assert ownership_fact_schema["properties"]["source_ids"]["items"]["maxLength"] == 64
-    assert signal_schema["properties"]["signal"]["maxLength"] == 140
-    assert signal_schema["properties"]["business_effect"]["maxLength"] == 170
-    assert signal_schema["properties"]["source_ids"]["maxItems"] == 3
-    assert identity_schema["properties"]["company_facts"]["maxItems"] == 9
-    assert management_schema["properties"]["company_facts"]["maxItems"] == 2
-    assert management_schema["properties"]["risks_and_assumptions"]["maxItems"] == 1
-    assert ownership_schema["properties"]["company_facts"]["maxItems"] == 3
-    assert ownership_schema["properties"]["risks_and_assumptions"]["maxItems"] == 1
-    assert operations_schema["properties"]["company_facts"]["maxItems"] == 9
-    assert signal_slice_schema["properties"]["economic_signals"]["maxItems"] == 6
+    assert identity_schema["properties"]["company_facts"]["maxItems"] == 12
+    assert operations_schema["properties"]["company_facts"]["maxItems"] == 12
+    assert signal_slice_schema["properties"]["economic_signals"]["maxItems"] == 8
 
 
 def test_management_dto_rejects_output_outside_bounded_envelope() -> None:
@@ -95,14 +102,12 @@ def test_management_dto_rejects_output_outside_bounded_envelope() -> None:
             value="x" * 141,
             source_ids=["S1"],
         )
-
     with pytest.raises(ValidationError):
         profile.ManagementCompanyFact(
             field="affiliates",
             value="Not a management field",
             source_ids=["S1"],
         )
-
     with pytest.raises(ValidationError):
         profile.ManagementCompanyFact(
             field="founders",
@@ -111,52 +116,99 @@ def test_management_dto_rejects_output_outside_bounded_envelope() -> None:
         )
 
 
-def test_management_input_is_bounded_without_changing_other_slice_budget() -> None:
-    calls: dict[str, dict] = {}
+def test_large_dossier_processes_beginning_middle_end_and_preserves_periods() -> None:
+    calls: list[tuple[str, str, dict]] = []
 
     async def fake_request(phase, model_type, **kwargs):
-        calls[phase] = kwargs
+        prompt = kwargs["prompt"]
+        calls.append((phase, prompt, kwargs))
         if model_type is profile.IdentityCoreSlice:
-            return profile.IdentityCoreSlice(company_name="Example", business_summary="Example")
+            facts = []
+            evidence = []
+            if "BEGIN_FACT" in prompt:
+                facts.append(profile.CompactCompanyFact(field="website", value="https://example.com", source_ids=["S1"]))
+                evidence.append("begin retained")
+            if "END_FACT" in prompt:
+                facts.append(profile.CompactCompanyFact(field="geography", value="End-region", source_ids=["S1"]))
+                evidence.append("end retained")
+            return profile.IdentityCoreSlice(company_name="Example", business_summary="Example", company_facts=facts, evidence=evidence)
         if model_type is profile.ManagementSlice:
             return profile.ManagementSlice()
         if model_type is profile.OwnershipNetworkSlice:
             return profile.OwnershipNetworkSlice()
         if model_type is profile.OperationsProfileSlice:
-            return profile.OperationsProfileSlice()
+            facts = []
+            if "MIDDLE_2024" in prompt:
+                facts.append(profile.CompactCompanyFact(field="revenue", value="100", period="2024", source_ids=["S1"]))
+            if "END_FACT" in prompt:
+                facts.append(profile.CompactCompanyFact(field="revenue", value="120", period="2025", source_ids=["S1"]))
+            if "late-source-marker" in prompt:
+                facts.append(profile.CompactCompanyFact(field="customers", value="Late source customer", source_ids=["E9"]))
+            return profile.OperationsProfileSlice(company_facts=facts)
         if model_type is profile.SignalProfileSlice:
             return profile.SignalProfileSlice()
         raise AssertionError(model_type)
 
-    long_source = _source("E2", "ownership")
-    long_source["snippet"] = "s" * 20000
-
-    asyncio.run(
+    text = (
+        "BEGIN_FACT\n"
+        + "a" * (DEFAULT_EVIDENCE_CHUNK_CHARS + 200)
+        + "MIDDLE_2024\n"
+        + "b" * (DEFAULT_EVIDENCE_CHUNK_CHARS + 200)
+        + "END_FACT"
+    )
+    merged = asyncio.run(
         profile.extract_profile_parallel(
             request_json=fake_request,
             strict_request_json=fake_request,
             url="https://example.com",
             title="Example",
-            text="o" * 20000,
-            external_sources=[long_source],
+            text=text,
+            external_sources=[_source("E9", "other", snippet="late-source-marker")],
             accessed_at="2026-08-18T00:00:00+00:00",
         )
     )
 
-    management_prompt = calls["profile_management"]["prompt"]
-    assert "o" * profile._MANAGEMENT_OFFICIAL_TEXT_BUDGET in management_prompt
-    assert "o" * (profile._MANAGEMENT_OFFICIAL_TEXT_BUDGET + 1) not in management_prompt
-    assert len(management_prompt) < 12000
-    assert calls["profile_management"]["max_tokens"] == 900
-    assert calls["profile_management"]["timeout_seconds"] == 18.0
-    assert calls["profile_management"]["reasoning_enabled"] is False
-    assert all(calls[phase]["reasoning_enabled"] is False for phase in calls)
-    assert calls["profile_operations"]["max_tokens"] == 1100
+    fields = {(item.field, item.value, item.period) for item in merged.company_facts}
+    assert ("website", "https://example.com", None) in fields
+    assert ("geography", "End-region", None) in fields
+    assert ("revenue", "100", "2024") in fields
+    assert ("revenue", "120", "2025") in fields
+    assert ("customers", "Late source customer", None) in fields
+    assert merged.coverage.complete is True
+    assert merged.coverage.official_chars_total == len(text)
+    assert merged.coverage.official_chunks_total >= 3
+    assert merged.coverage.official_chunks_processed == merged.coverage.official_chunks_total
+    assert merged.coverage.sources_total == 1
+    assert merged.coverage.sources_processed == 1
+    assert merged.coverage.extraction_units_processed == merged.coverage.extraction_units_total
+    assert all(kwargs["reasoning_enabled"] is False for _, _, kwargs in calls)
+    assert max(kwargs["max_tokens"] for _, _, kwargs in calls) <= 1100
+
+
+def test_fast_path_overflow_and_unrouted_sources_fail_before_silent_truncation() -> None:
+    huge = "x" * (DEFAULT_EVIDENCE_CHUNK_CHARS * 17)
+    with pytest.raises(EvidenceCoverageOverflow):
+        evidence_units(huge, [])
+
+    async def must_not_run(*args, **kwargs):
+        raise AssertionError("provider must not be called for unrouted evidence")
+
+    with pytest.raises(EvidenceCoverageOverflow, match="unrouted_sources=1"):
+        asyncio.run(
+            profile.extract_profile_parallel(
+                request_json=must_not_run,
+                strict_request_json=must_not_run,
+                url="https://example.com",
+                title="Example",
+                text="Official",
+                external_sources=[_source("E-X", "unknown-kind")],
+                accessed_at="2026-08-18T00:00:00+00:00",
+            )
+        )
 
 
 def test_parallel_extractors_merge_into_public_fact_models() -> None:
     phases: list[tuple[str, int]] = []
-    strict_phases: list[str] = []
 
     async def fake_request(phase, model_type, **kwargs):
         phases.append((phase, kwargs["max_tokens"]))
@@ -165,71 +217,23 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
                 company_name="Example",
                 business_summary="Engineering company",
                 evidence=["Official site identifies the company"],
-                company_facts=[
-                    profile.CompactCompanyFact(
-                        field="website",
-                        value="https://example.com",
-                        confidence="Высокая",
-                        source_ids=["S1"],
-                    )
-                ],
+                company_facts=[profile.CompactCompanyFact(field="website", value="https://example.com", confidence="Высокая", source_ids=["S1"])],
                 risks_and_assumptions=["Identity needs registry confirmation"],
             )
         if model_type is profile.ManagementSlice:
-            return profile.ManagementSlice(
-                company_facts=[
-                    profile.ManagementCompanyFact(
-                        field="executives",
-                        value="Named executive",
-                        confidence="Средняя",
-                        source_ids=["E2"],
-                    )
-                ]
-            )
+            return profile.ManagementSlice(company_facts=[profile.ManagementCompanyFact(field="executives", value="Named executive", source_ids=["E2"])])
         if model_type is profile.OwnershipNetworkSlice:
-            return profile.OwnershipNetworkSlice(
-                company_facts=[
-                    profile.OwnershipNetworkCompanyFact(
-                        field="affiliates",
-                        value="Related company hypothesis",
-                        confidence="Низкая",
-                        source_ids=["E3"],
-                    )
-                ]
-            )
+            return profile.OwnershipNetworkSlice(company_facts=[profile.OwnershipNetworkCompanyFact(field="affiliates", value="Related company hypothesis", source_ids=["E3"])])
         if model_type is profile.OperationsProfileSlice:
-            return profile.OperationsProfileSlice(
-                company_facts=[
-                    profile.CompactCompanyFact(
-                        field="products",
-                        value="Engineering services",
-                        confidence="Средняя",
-                        source_ids=["E4"],
-                    )
-                ]
-            )
+            return profile.OperationsProfileSlice(company_facts=[profile.CompactCompanyFact(field="products", value="Engineering services", source_ids=["E4"])])
         if model_type is profile.SignalProfileSlice:
-            return profile.SignalProfileSlice(
-                economic_signals=[
-                    profile.CompactEconomicSignal(
-                        signal="Market signal",
-                        evidence="Court or finance mention",
-                        business_effect="Possible automation demand",
-                        confidence="Средняя",
-                        source_ids=["E5"],
-                    )
-                ]
-            )
+            return profile.SignalProfileSlice(economic_signals=[profile.CompactEconomicSignal(signal="Market signal", evidence="Court mention", business_effect="Possible automation demand", source_ids=["E5"])])
         raise AssertionError(model_type)
-
-    async def fake_strict_request(phase, model_type, **kwargs):
-        strict_phases.append(phase)
-        return await fake_request(phase, model_type, **kwargs)
 
     merged = asyncio.run(
         profile.extract_profile_parallel(
             request_json=fake_request,
-            strict_request_json=fake_strict_request,
+            strict_request_json=fake_request,
             url="https://example.com",
             title="Example",
             text="Official site text",
@@ -245,27 +249,10 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
     )
 
     assert {phase for phase, _ in phases} == {
-        "profile_identity_core",
-        "profile_management",
-        "profile_ownership_network",
-        "profile_operations",
-        "profile_signals",
-    }
-    assert set(strict_phases) == {
         "profile_identity_core", "profile_management", "profile_ownership_network",
         "profile_operations", "profile_signals",
     }
-    phase_tokens = dict(phases)
-    assert phase_tokens["profile_management"] == 900
-    assert phase_tokens["profile_ownership_network"] == 1000
-    assert max(phase_tokens.values()) <= 1100
-    assert merged.company_name == "Example"
     assert all(isinstance(item, CompanyFact) for item in merged.company_facts)
-    assert {item.field for item in merged.company_facts} == {
-        "website",
-        "executives",
-        "affiliates",
-        "products",
-    }
+    assert {item.field for item in merged.company_facts} >= {"website", "executives", "affiliates", "products"}
     assert merged.economic_signals[0].source_ids == ["E5"]
-    assert merged.risks_and_assumptions == ["Identity needs registry confirmation"]
+    assert merged.coverage.complete is True

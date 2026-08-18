@@ -8,6 +8,7 @@ from app.models import (
     CompanyFact,
     EconomicSignal,
 )
+from app.routerai_evidence_units import EvidenceCoverage
 from app.routerai_profile_extraction import MergedProfileExtraction
 from app.routerai_split_synthesis import BusinessMachineSynthesis, CommercialSynthesis
 
@@ -36,6 +37,18 @@ def test_split_v2_uses_parallel_profile_then_existing_reasoning_and_assembler(mo
                 )
             ],
             risks_and_assumptions=[],
+            coverage=EvidenceCoverage(
+                official_chars_total=13,
+                official_chunks_total=1,
+                official_chunks_processed=1,
+                sources_total=0,
+                sources_processed=0,
+                source_chunks_total=0,
+                source_chunks_processed=0,
+                extraction_units_total=5,
+                extraction_units_processed=5,
+                complete=True,
+            ),
         )
 
     phases: list[str] = []
