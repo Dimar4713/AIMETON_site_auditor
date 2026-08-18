@@ -13,6 +13,21 @@ from app.routerai_profile_extraction import MergedProfileExtraction
 from app.routerai_split_synthesis import BusinessMachineSynthesis, CommercialSynthesis
 
 
+def _coverage() -> EvidenceCoverage:
+    return EvidenceCoverage(
+        official_chars_total=13,
+        official_chunks_total=1,
+        official_chunks_processed=1,
+        sources_total=0,
+        sources_processed=0,
+        source_chunks_total=0,
+        source_chunks_processed=0,
+        extraction_units_total=5,
+        extraction_units_processed=5,
+        complete=True,
+    )
+
+
 def test_split_v2_uses_parallel_profile_then_existing_reasoning_and_assembler(monkeypatch) -> None:
     async def fake_profile(**kwargs):
         return MergedProfileExtraction(
@@ -37,18 +52,7 @@ def test_split_v2_uses_parallel_profile_then_existing_reasoning_and_assembler(mo
                 )
             ],
             risks_and_assumptions=[],
-            coverage=EvidenceCoverage(
-                official_chars_total=13,
-                official_chunks_total=1,
-                official_chunks_processed=1,
-                sources_total=0,
-                sources_processed=0,
-                source_chunks_total=0,
-                source_chunks_processed=0,
-                extraction_units_total=5,
-                extraction_units_processed=5,
-                complete=True,
-            ),
+            coverage=_coverage(),
         )
 
     phases: list[str] = []
@@ -117,6 +121,40 @@ def test_split_v2_uses_parallel_profile_then_existing_reasoning_and_assembler(mo
     assert result.business_machine_4x4[0].code == "III-III"
     assert result.commercial_opportunity.score == 72
     assert result.readiness.provider_states["routerai"] == "active"
+
+
+def test_full_reasoning_profile_has_no_legacy_30_fact_or_16_signal_cap() -> None:
+    facts = [
+        CompanyFact(field="other", value=f"fact-{index}", source_ids=["S1"])
+        for index in range(75)
+    ]
+    signals = [
+        EconomicSignal(
+            signal=f"signal-{index}",
+            evidence=f"evidence-{index}",
+            business_effect=f"effect-{index}",
+            source_ids=["S1"],
+        )
+        for index in range(40)
+    ]
+    merged = MergedProfileExtraction(
+        company_name="Large Co",
+        business_summary="Large dossier",
+        evidence=[f"evidence-item-{index}" for index in range(25)],
+        company_facts=facts,
+        economic_signals=signals,
+        risks_and_assumptions=[f"risk-{index}" for index in range(20)],
+        coverage=_coverage(),
+    )
+
+    reasoning = split_v2._full_reasoning_profile(merged)
+
+    assert len(reasoning.company_facts) == 75
+    assert reasoning.company_facts[-1].value == "fact-74"
+    assert len(reasoning.economic_signals) == 40
+    assert reasoning.economic_signals[-1].signal == "signal-39"
+    assert len(reasoning.evidence) == 25
+    assert reasoning.coverage["complete"] is True
 
 
 def test_split_v2_commercial_envelope_is_bounded_and_expandable() -> None:
