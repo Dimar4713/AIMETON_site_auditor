@@ -63,6 +63,31 @@ jobs:
           echo "deployed_sha=$deployed"
           echo "container_status=$status"
 
+      - name: Require restart-aware exact-SHA Stage convergence before spend
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          convergence="$(curl --fail --silent --show-error --max-time 30 'https://stage-auditor.aimeton.ru/api/runtime/convergence')"
+          python3 - "$convergence" "$EXPECTED_SHA" <<'PY'
+          import json, re, sys
+          payload = json.loads(sys.argv[1])
+          expected_sha = sys.argv[2]
+          assert payload.get('state') == 'converged', payload
+          assert payload.get('deployment_sha') == expected_sha, payload
+          assert payload.get('marker_deployment_sha') == expected_sha, payload
+          assert re.fullmatch(r'[0-9a-f]{32}', payload.get('runtime_instance_id') or ''), payload
+          assert payload.get('marker_runtime_instance_id') == payload.get('runtime_instance_id'), payload
+          assert payload.get('secrets_exposed') is False, payload
+          assert payload.get('marker_error') is None, payload
+          checks = payload.get('checks')
+          assert isinstance(checks, list) and checks, payload
+          print('stage_convergence=converged')
+          print(f'deployment_sha={expected_sha}')
+          print(f'convergence_checks={len(checks)}')
+          PY
+
       - name: Run one Better DeepSeek-origin AIMETON field mission
         id: probe
         shell: bash
@@ -191,6 +216,7 @@ jobs:
               '- no raw prompt, source text, provider payload, credential or cookie published',
               '- no provider activation, routing, policy, timeout or budget configuration changed',
               '- workflow is dispatch-only and requires explicit paid-call and owner-spend authorization inputs',
+              '- paid field mission is admitted only after restart-aware exact-SHA Stage convergence is verified',
           ]
           print('\n'.join(lines))
           PY
