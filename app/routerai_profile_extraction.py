@@ -8,6 +8,15 @@ from typing import Annotated, Any, Awaitable, Callable, Literal
 from pydantic import BaseModel, Field
 
 from app.models import CompanyFact, EconomicSignal
+from app.routerai_evidence_units import (
+    DEFAULT_EVIDENCE_CHUNK_CHARS,
+    EvidenceCoverage,
+    EvidenceCoverageOverflow,
+    chunk_sources,
+    chunk_text,
+    evidence_units,
+    project_sources,
+)
 
 
 FactField = Literal[
@@ -56,9 +65,9 @@ class CompactEconomicSignal(BaseModel):
 class IdentityCoreSlice(BaseModel):
     company_name: str = Field(max_length=160)
     business_summary: str = Field(max_length=380)
-    evidence: list[ShortText] = Field(default_factory=list, max_length=3)
-    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=9)
-    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=2)
+    evidence: list[ShortText] = Field(default_factory=list, max_length=4)
+    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=12)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=3)
 
 
 class ManagementSlice(BaseModel):
@@ -72,13 +81,13 @@ class OwnershipNetworkSlice(BaseModel):
 
 
 class OperationsProfileSlice(BaseModel):
-    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=9)
-    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=3)
+    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=12)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=4)
 
 
 class SignalProfileSlice(BaseModel):
-    economic_signals: list[CompactEconomicSignal] = Field(default_factory=list, max_length=6)
-    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=3)
+    economic_signals: list[CompactEconomicSignal] = Field(default_factory=list, max_length=8)
+    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=4)
 
 
 @dataclass(frozen=True)
@@ -89,6 +98,7 @@ class MergedProfileExtraction:
     company_facts: list[CompanyFact]
     economic_signals: list[EconomicSignal]
     risks_and_assumptions: list[str]
+    coverage: EvidenceCoverage
 
 
 RequestJson = Callable[..., Awaitable[BaseModel]]
@@ -105,37 +115,32 @@ _SIGNAL_KINDS = {
     "arbitration", "court", "enforcement", "news", "review", "social",
     "tender", "finance", "other",
 }
+_ALL_ROUTED_KINDS = (
+    _IDENTITY_CORE_KINDS
+    | _MANAGEMENT_KINDS
+    | _OWNERSHIP_NETWORK_KINDS
+    | _OPERATIONS_KINDS
+    | _SIGNAL_KINDS
+)
 _SLICE_SOURCE_KEYS = (
     "id", "title", "query_kind", "result_kind", "source_class",
     "evidence_level", "snippet",
 )
-_MANAGEMENT_OFFICIAL_TEXT_BUDGET = 5000
-_MANAGEMENT_SOURCE_CHAR_BUDGET = 5000
 
 
 def _source_slice(
     sources: list[dict[str, Any]],
     kinds: set[str],
     *,
-    char_budget: int = 14000,
+    char_budget: int | None = None,
 ) -> str:
-    """Project only evidence needed by one extractor while preserving source IDs."""
-    selected: list[dict[str, Any]] = []
-    for source in sources:
-        kind = str(source.get("query_kind") or "unknown")
-        if kind not in kinds:
-            continue
-        item = {
-            key: source[key]
-            for key in _SLICE_SOURCE_KEYS
-            if source.get(key) not in (None, "", [], {})
-        }
-        selected.append(item)
+    """Compatibility helper: full projected evidence, never prefix-truncated."""
+    del char_budget
     return json.dumps(
-        selected,
+        project_sources(sources, kinds, _SLICE_SOURCE_KEYS),
         ensure_ascii=False,
         separators=(",", ":"),
-    )[:char_budget]
+    )
 
 
 def _to_fact(item: CompactCompanyFact) -> CompanyFact:
@@ -159,7 +164,7 @@ def _to_signal(item: CompactEconomicSignal) -> EconomicSignal:
     )
 
 
-def _unique_text(parts: list[str], limit: int) -> list[str]:
+def _unique_text(parts: list[str], limit: int | None = None) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
     for part in parts:
@@ -168,23 +173,51 @@ def _unique_text(parts: list[str], limit: int) -> list[str]:
             continue
         seen.add(normalized.casefold())
         result.append(normalized)
-        if len(result) >= limit:
+        if limit is not None and len(result) >= limit:
             break
     return result
 
 
 def _merge_facts(*groups: list[CompactCompanyFact]) -> list[CompanyFact]:
-    """Keep all distinct field/value facts but remove duplicate model phrasing."""
+    """Keep all distinct field/value/period facts; never apply a presentation cap."""
     result: list[CompanyFact] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for group in groups:
         for item in group:
-            key = (item.field, " ".join(item.value.split()).casefold())
+            key = (
+                item.field,
+                " ".join(item.value.split()).casefold(),
+                " ".join((item.period or "").split()).casefold(),
+            )
             if key in seen:
                 continue
             seen.add(key)
             result.append(_to_fact(item))
-    return result[:24]
+    return result
+
+
+def _merge_signals(*groups: list[CompactEconomicSignal]) -> list[EconomicSignal]:
+    result: list[EconomicSignal] = []
+    seen: set[tuple[str, str, str]] = set()
+    for group in groups:
+        for item in group:
+            key = (
+                " ".join(item.signal.split()).casefold(),
+                " ".join(item.evidence.split()).casefold(),
+                " ".join(item.business_effect.split()).casefold(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(_to_signal(item))
+    return result
+
+
+def _flatten_attr(results: list[BaseModel], attr: str) -> list[Any]:
+    flattened: list[Any] = []
+    for result in results:
+        flattened.extend(getattr(result, attr))
+    return flattened
 
 
 async def extract_profile_parallel(
@@ -197,22 +230,25 @@ async def extract_profile_parallel(
     external_sources: list[dict[str, Any]],
     accessed_at: str,
 ) -> MergedProfileExtraction:
-    """Run bounded vertical extractors in parallel, then merge deterministically."""
-    official_text = text[:10000]
-    management_official_text = text[:_MANAGEMENT_OFFICIAL_TEXT_BUDGET]
-    identity_core_context = _source_slice(external_sources, _IDENTITY_CORE_KINDS)
-    management_context = _source_slice(
-        external_sources,
-        _MANAGEMENT_KINDS,
-        char_budget=_MANAGEMENT_SOURCE_CHAR_BUDGET,
-    )
-    ownership_network_context = _source_slice(
-        external_sources,
-        _OWNERSHIP_NETWORK_KINDS,
-        char_budget=12000,
-    )
-    operations_context = _source_slice(external_sources, _OPERATIONS_KINDS)
-    signal_context = _source_slice(external_sources, _SIGNAL_KINDS)
+    """Coverage-preserving map→merge extraction followed by compact reasoning."""
+    unrouted = [
+        source for source in external_sources
+        if str(source.get("query_kind") or "unknown") not in _ALL_ROUTED_KINDS
+    ]
+    if unrouted:
+        raise EvidenceCoverageOverflow(f"unrouted_sources={len(unrouted)}")
+
+    projected_by_slice = {
+        "identity": project_sources(external_sources, _IDENTITY_CORE_KINDS, _SLICE_SOURCE_KEYS),
+        "management": project_sources(external_sources, _MANAGEMENT_KINDS, _SLICE_SOURCE_KEYS),
+        "ownership": project_sources(external_sources, _OWNERSHIP_NETWORK_KINDS, _SLICE_SOURCE_KEYS),
+        "operations": project_sources(external_sources, _OPERATIONS_KINDS, _SLICE_SOURCE_KEYS),
+        "signals": project_sources(external_sources, _SIGNAL_KINDS, _SLICE_SOURCE_KEYS),
+    }
+    units_by_slice = {
+        name: evidence_units(text, projected)
+        for name, projected in projected_by_slice.items()
+    }
 
     def deterministic_request(phase, model_type, **kwargs):
         if strict_request_json is not None:
@@ -223,141 +259,169 @@ async def extract_profile_parallel(
 
     common_rules = """
 Правила:
+- Это один coverage chunk полного evidence ledger; другие chunks обрабатываются отдельно.
 - S1 — официальный сайт; внешние источники имеют переданные id.
 - Не создавай факты, цифры, людей, контакты или source_ids, которых нет во входе.
 - Поисковый сниппет — сигнал, не проверенный первичный документ.
 - Пиши кратко; не повторяй один факт разными словами.
-- Для каждого разрешённого поля возвращай не более одного факта; несколько значений объединяй компактно в value.
-- Если данных нет, пропусти факт, а не выдумывай его.
+- Не скрывай отдельные значения/периоды одного поля: если они различны и помещаются в схему, верни отдельные факты.
+- Если данных в этом chunk нет, верни пустые массивы, а не выдумывай их.
 """
 
-    identity_core_prompt = f"""Извлеки только базовую идентичность и прямые контакты компании.
+    async def run_units(
+        phase: str,
+        model_type: type[BaseModel],
+        slice_name: str,
+        *,
+        system: str,
+        instructions: str,
+        max_tokens: int,
+        timeout_seconds: float,
+        include_accessed_at: bool = False,
+    ) -> list[BaseModel]:
+        calls = []
+        units = units_by_slice[slice_name]
+        for index, (official_chunk, source_chunk) in enumerate(units, start=1):
+            prompt = f"""{instructions}
+{common_rules}
+URL: {url}
+TITLE: {title}
+CHUNK: {index}/{len(units)}
+{f'ACCESSED AT: {accessed_at}' if include_accessed_at else ''}
+OFFICIAL PAGE TEXT CHUNK:\n{official_chunk}
+RELEVANT SOURCES CHUNK:\n{source_chunk}
+"""
+            calls.append(
+                deterministic_request(
+                    phase,
+                    model_type,
+                    system=system,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+        return list(await asyncio.gather(*calls))
+
+    identity_task = run_units(
+        "profile_identity_core",
+        IdentityCoreSlice,
+        "identity",
+        system="Возвращай только компактный валидный JSON по схеме.",
+        instructions="""Извлеки только базовую идентичность и прямые контакты компании.
 Разрешённые поля: legal_name, brand_name, inn, ogrn, registration_status, address,
 phones, emails, website, geography. Не извлекай собственников, руководителей,
-аффилированность, соцсети, финансы и коммерческое решение.
-{common_rules}
-URL: {url}
-TITLE: {title}
-ACCESSED AT: {accessed_at}
-OFFICIAL PAGE TEXT:\n{official_text}
-RELEVANT SOURCES:\n{identity_core_context}
-"""
-
-    management_prompt = f"""Извлеки только сведения о формальном управлении компанией.
-Разрешённые поля: founders, executives. Верни максимум один короткий факт на
-каждое поле и максимум два source_ids на факт. Не перечисляй биографии, должности
-в нескольких формулировках или пояснения вне схемы. Учредитель не является
-автоматически бенефициаром. Если прямых данных нет, верни пустые массивы. Не
-извлекай affiliates, social_accounts, контакты, финансы и продукты.
-{common_rules}
-URL: {url}
-TITLE: {title}
-OFFICIAL PAGE TEXT:\n{management_official_text}
-RELEVANT SOURCES:\n{management_context}
-"""
-
-    ownership_network_prompt = f"""Извлеки только ownership/network сведения компании.
-Разрешённые поля: beneficial_owners, affiliates, social_accounts. Верни максимум
-один короткий факт на каждое из трёх полей и максимум два source_ids на факт.
-Не добавляй пояснения вне схемы. Бенефициарность и аффилированность
-маркируй осторожно и не выводи их только из факта учредительства. Не повторяй
-founders/executives, адреса, телефоны, финансы и продукты.
-{common_rules}
-URL: {url}
-TITLE: {title}
-OFFICIAL PAGE TEXT:\n{official_text}
-RELEVANT SOURCES:\n{ownership_network_context}
-"""
-
-    operations_prompt = f"""Извлеки операционные и экономические факты компании.
+аффилированность, соцсети, финансы и коммерческое решение.""",
+        max_tokens=850,
+        timeout_seconds=20.0,
+        include_accessed_at=True,
+    )
+    management_task = run_units(
+        "profile_management",
+        ManagementSlice,
+        "management",
+        system="Возвращай только компактный валидный JSON по схеме.",
+        instructions="""Извлеки только сведения о формальном управлении компанией.
+Разрешённые поля: founders, executives. Объединяй список лиц одного типа компактно,
+но не теряй разные подтверждённые значения. Учредитель не является автоматически
+бенефициаром. Не извлекай affiliates, social_accounts, контакты, финансы и продукты.""",
+        max_tokens=900,
+        timeout_seconds=18.0,
+    )
+    ownership_task = run_units(
+        "profile_ownership_network",
+        OwnershipNetworkSlice,
+        "ownership",
+        system="Возвращай только компактный валидный JSON по схеме.",
+        instructions="""Извлеки только ownership/network сведения компании.
+Разрешённые поля: beneficial_owners, affiliates, social_accounts. Бенефициарность
+и аффилированность маркируй осторожно и не выводи только из факта учредительства.
+Не повторяй founders/executives, адреса, телефоны, финансы и продукты.""",
+        max_tokens=1000,
+        timeout_seconds=18.0,
+    )
+    operations_task = run_units(
+        "profile_operations",
+        OperationsProfileSlice,
+        "operations",
+        system="Возвращай только компактный валидный JSON по схеме.",
+        instructions="""Извлеки операционные и экономические факты компании.
 Разрешённые поля: headcount, revenue, profit, assets, taxes, products, customers,
-suppliers, other. Верни максимум один компактный факт на поле. Для финансовых
-значений обязательно указывай period, если он виден. Не формируй economic_signals
-и не делай коммерческое предложение.
-{common_rules}
-URL: {url}
-TITLE: {title}
-OFFICIAL PAGE TEXT:\n{official_text}
-RELEVANT SOURCES:\n{operations_context}
-"""
-
-    signal_prompt = f"""Извлеки только экономические/правовые/рыночные сигналы, которые
+suppliers, other. Для финансовых значений обязательно указывай period, если он
+виден. Разные периоды одного показателя сохраняй как разные факты. Не формируй
+economic_signals и не делай коммерческое предложение.""",
+        max_tokens=1100,
+        timeout_seconds=22.0,
+    )
+    signals_task = run_units(
+        "profile_signals",
+        SignalProfileSlice,
+        "signals",
+        system="Возвращай только компактный валидный JSON по схеме.",
+        instructions="""Извлеки только экономические/правовые/рыночные сигналы, которые
 могут влиять на бизнес или AI-пилот. Для каждого сигнала дай короткое evidence,
-business_effect и реальные source_ids. Не повторяй профиль компании.
-{common_rules}
-URL: {url}
-TITLE: {title}
-OFFICIAL PAGE TEXT:\n{official_text}
-RELEVANT SOURCES:\n{signal_context}
-"""
-
-    identity_core, management, ownership_network, operations, signals = await asyncio.gather(
-        deterministic_request(
-            "profile_identity_core",
-            IdentityCoreSlice,
-            system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=identity_core_prompt,
-            max_tokens=850,
-            timeout_seconds=20.0,
-        ),
-        deterministic_request(
-            "profile_management",
-            ManagementSlice,
-            system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=management_prompt,
-            max_tokens=900,
-            timeout_seconds=18.0,
-        ),
-        deterministic_request(
-            "profile_ownership_network",
-            OwnershipNetworkSlice,
-            system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=ownership_network_prompt,
-            max_tokens=1000,
-            timeout_seconds=18.0,
-        ),
-        deterministic_request(
-            "profile_operations",
-            OperationsProfileSlice,
-            system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=operations_prompt,
-            max_tokens=1100,
-            timeout_seconds=22.0,
-        ),
-        deterministic_request(
-            "profile_signals",
-            SignalProfileSlice,
-            system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=signal_prompt,
-            max_tokens=1000,
-            timeout_seconds=22.0,
-        ),
+business_effect и реальные source_ids. Не повторяй профиль компании.""",
+        max_tokens=1000,
+        timeout_seconds=22.0,
     )
 
-    assert isinstance(identity_core, IdentityCoreSlice)
-    assert isinstance(management, ManagementSlice)
-    assert isinstance(ownership_network, OwnershipNetworkSlice)
-    assert isinstance(operations, OperationsProfileSlice)
-    assert isinstance(signals, SignalProfileSlice)
+    identity_results, management_results, ownership_results, operations_results, signal_results = await asyncio.gather(
+        identity_task,
+        management_task,
+        ownership_task,
+        operations_task,
+        signals_task,
+    )
 
+    identity_results = [item for item in identity_results if isinstance(item, IdentityCoreSlice)]
+    management_results = [item for item in management_results if isinstance(item, ManagementSlice)]
+    ownership_results = [item for item in ownership_results if isinstance(item, OwnershipNetworkSlice)]
+    operations_results = [item for item in operations_results if isinstance(item, OperationsProfileSlice)]
+    signal_results = [item for item in signal_results if isinstance(item, SignalProfileSlice)]
+
+    company_name = next((item.company_name for item in identity_results if item.company_name.strip()), title)
+    business_summary = next((item.business_summary for item in identity_results if item.business_summary.strip()), "")
+    evidence = _unique_text(_flatten_attr(identity_results, "evidence"))
+    facts = _merge_facts(
+        _flatten_attr(identity_results, "company_facts"),
+        _flatten_attr(management_results, "company_facts"),
+        _flatten_attr(ownership_results, "company_facts"),
+        _flatten_attr(operations_results, "company_facts"),
+    )
+    signals = _merge_signals(_flatten_attr(signal_results, "economic_signals"))
     risks = _unique_text(
-        identity_core.risks_and_assumptions
-        + management.risks_and_assumptions
-        + ownership_network.risks_and_assumptions
-        + operations.risks_and_assumptions
-        + signals.risks_and_assumptions,
-        10,
+        _flatten_attr(identity_results, "risks_and_assumptions")
+        + _flatten_attr(management_results, "risks_and_assumptions")
+        + _flatten_attr(ownership_results, "risks_and_assumptions")
+        + _flatten_attr(operations_results, "risks_and_assumptions")
+        + _flatten_attr(signal_results, "risks_and_assumptions")
     )
+
+    official_chunks = chunk_text(text)
+    source_chunk_count = sum(
+        len(chunk_sources(projected, chunk_chars=DEFAULT_EVIDENCE_CHUNK_CHARS))
+        for projected in projected_by_slice.values()
+    )
+    unit_count = sum(len(units) for units in units_by_slice.values())
+    coverage = EvidenceCoverage(
+        official_chars_total=len(text),
+        official_chunks_total=len(official_chunks),
+        official_chunks_processed=len(official_chunks),
+        sources_total=len(external_sources),
+        sources_processed=len(external_sources),
+        source_chunks_total=source_chunk_count,
+        source_chunks_processed=source_chunk_count,
+        extraction_units_total=unit_count,
+        extraction_units_processed=unit_count,
+        complete=True,
+    )
+
     return MergedProfileExtraction(
-        company_name=identity_core.company_name,
-        business_summary=identity_core.business_summary,
-        evidence=_unique_text(identity_core.evidence, 3),
-        company_facts=_merge_facts(
-            identity_core.company_facts,
-            management.company_facts,
-            ownership_network.company_facts,
-            operations.company_facts,
-        ),
-        economic_signals=[_to_signal(item) for item in signals.economic_signals[:6]],
+        company_name=company_name,
+        business_summary=business_summary,
+        evidence=evidence,
+        company_facts=facts,
+        economic_signals=signals,
         risks_and_assumptions=risks,
+        coverage=coverage,
     )
