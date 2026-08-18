@@ -60,33 +60,32 @@ def test_split_v2_uses_parallel_profile_then_existing_reasoning_and_assembler(mo
                     )
                 ]
             )
-        if model_type is CommercialSynthesis:
-            return CommercialSynthesis(
-                commercial_opportunity=CommercialOpportunity(
-                    opportunity_type="AI automation",
-                    problem_hypothesis="Manual process",
-                    recommended_solution="AIMETON pilot",
-                    expected_value="Reduce manual work",
-                    score=72,
-                    qualification="Перспективная",
+        raise AssertionError(model_type)
+
+    async def fake_strict_request(phase, model_type, **kwargs):
+        phases.append(phase)
+        if model_type is split_v2.CompactCommercialSynthesis:
+            return split_v2.CompactCommercialSynthesis(
+                commercial_opportunity=split_v2.CompactCommercialOpportunity(
+                    opportunity_type="AI automation", problem_hypothesis="Manual process",
+                    recommended_solution="AIMETON pilot", expected_value="Reduce manual work",
+                    score=72, qualification="Перспективная",
                 ),
                 agents=[
-                    AgentRecommendation(name="A1", purpose="Search", benefit="Speed"),
-                    AgentRecommendation(name="A2", purpose="Analyze", benefit="Evidence"),
-                    AgentRecommendation(name="A3", purpose="Report", benefit="Structure"),
+                    split_v2.CompactAgentRecommendation(name="A1", purpose="Search", benefit="Speed"),
+                    split_v2.CompactAgentRecommendation(name="A2", purpose="Analyze", benefit="Evidence"),
+                    split_v2.CompactAgentRecommendation(name="A3", purpose="Report", benefit="Structure"),
                 ],
-                action_package=ActionPackage(
-                    decision_maker_hypothesis="Digital lead",
-                    contact_reason="Pilot",
-                    demo_scenario=["Run audit"],
-                    first_message="Pilot proposal",
-                    next_action="Demo",
+                action_package=split_v2.CompactActionPackage(
+                    decision_maker_hypothesis="Digital lead", contact_reason="Pilot",
+                    demo_scenario=["Run audit"], first_message="Pilot proposal", next_action="Demo",
                 ),
             )
         raise AssertionError(model_type)
 
     monkeypatch.setattr(split_v2, "extract_profile_parallel", fake_profile)
     monkeypatch.setattr(split_v2, "_request_json", fake_request)
+    monkeypatch.setattr(split_v2, "request_json_strict", fake_strict_request)
 
     result = asyncio.run(
         split_v2.analyze_with_routerai_split_v2(
@@ -103,3 +102,32 @@ def test_split_v2_uses_parallel_profile_then_existing_reasoning_and_assembler(mo
     assert result.business_machine_4x4[0].code == "III-III"
     assert result.commercial_opportunity.score == 72
     assert result.readiness.provider_states["routerai"] == "active"
+
+
+def test_split_v2_commercial_envelope_is_bounded_and_expandable() -> None:
+    schema = split_v2.CompactCommercialSynthesis.model_json_schema()
+    assert schema["properties"]["agents"]["minItems"] == 3
+    assert schema["properties"]["agents"]["maxItems"] == 5
+    action_ref = schema["properties"]["action_package"]["$ref"].split("/")[-1]
+    action_schema = schema["$defs"][action_ref]
+    assert action_schema["properties"]["demo_scenario"]["maxItems"] == 3
+    compact = split_v2.CompactCommercialSynthesis(
+        commercial_opportunity=split_v2.CompactCommercialOpportunity(
+            opportunity_type="AI audit", problem_hypothesis="Manual review",
+            recommended_solution="Pilot", expected_value="Faster evidence",
+            score=70, qualification="Перспективная",
+        ),
+        agents=[
+            split_v2.CompactAgentRecommendation(name="A1", purpose="Search", benefit="Speed"),
+            split_v2.CompactAgentRecommendation(name="A2", purpose="Analyze", benefit="Evidence"),
+            split_v2.CompactAgentRecommendation(name="A3", purpose="Report", benefit="Structure"),
+        ],
+        action_package=split_v2.CompactActionPackage(
+            decision_maker_hypothesis="Digital lead", contact_reason="Pilot",
+            demo_scenario=["Run audit"], first_message="Pilot proposal", next_action="Demo",
+        ),
+    )
+    expanded = split_v2._expand_commercial(compact)
+    assert isinstance(expanded, CommercialSynthesis)
+    assert len(expanded.agents) == 3
+    assert expanded.commercial_opportunity.score == 70

@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
 
 from app.models import SiteAnalysis
 from app.routerai_profile_extraction import extract_profile_parallel
@@ -14,6 +17,46 @@ from app.routerai_split_synthesis import (
     _request_json,
 )
 from app.routerai_strict_request import request_json_strict
+
+
+CompactText80 = Annotated[str, Field(max_length=80)]
+CompactText140 = Annotated[str, Field(max_length=140)]
+CompactText180 = Annotated[str, Field(max_length=180)]
+CompactText220 = Annotated[str, Field(max_length=220)]
+
+
+class CompactCommercialOpportunity(BaseModel):
+    opportunity_type: CompactText80
+    problem_hypothesis: CompactText220
+    recommended_solution: CompactText220
+    expected_value: CompactText180
+    score: int = Field(ge=0, le=100)
+    qualification: Literal["Приоритетная", "Перспективная", "Наблюдение", "Недостаточно данных"]
+
+
+class CompactAgentRecommendation(BaseModel):
+    name: CompactText80
+    purpose: CompactText140
+    benefit: CompactText140
+    priority: Literal["Высокий", "Средний", "Низкий"] = "Средний"
+
+
+class CompactActionPackage(BaseModel):
+    decision_maker_hypothesis: CompactText140
+    contact_reason: CompactText180
+    demo_scenario: list[CompactText140] = Field(default_factory=list, max_length=3)
+    first_message: CompactText220
+    next_action: CompactText140
+
+
+class CompactCommercialSynthesis(BaseModel):
+    commercial_opportunity: CompactCommercialOpportunity
+    agents: list[CompactAgentRecommendation] = Field(min_length=3, max_length=5)
+    action_package: CompactActionPackage
+
+
+def _expand_commercial(compact: CompactCommercialSynthesis) -> CommercialSynthesis:
+    return CommercialSynthesis.model_validate(compact.model_dump(mode="python"))
 
 
 async def analyze_with_routerai_split_v2(
@@ -71,7 +114,7 @@ EXTRACTED PROFILE:\n{profile_context}
     commercial_prompt = f"""Ты — AI-продажник AIMETON. На основе только
 извлечённого профиля выбери одну наиболее доказанную коммерческую AI-возможность.
 Сначала учитывай подтверждённые экономические сигналы и пробелы, затем предложи
-реалистичное решение, 3–10 AI-агентов/инструментов и пакет первого контакта.
+реалистичное решение, 3–5 AI-агентов/инструментов и компактный пакет первого контакта.
 Оценка 80+ допустима только при прямом подтверждении проблемы, масштаба и
 реалистичного пилота. Не обещай неподтверждённый эффект. Пиши кратко.
 
@@ -87,9 +130,9 @@ EXTRACTED PROFILE:\n{profile_context}
             max_tokens=2500,
             timeout_seconds=25.0,
         ),
-        _request_json(
+        request_json_strict(
             "commercial_reasoning",
-            CommercialSynthesis,
+            CompactCommercialSynthesis,
             system="Возвращай только компактный валидный JSON по схеме. Главный результат — доказанная коммерческая возможность.",
             prompt=commercial_prompt,
             max_tokens=1500,
@@ -104,6 +147,6 @@ EXTRACTED PROFILE:\n{profile_context}
         external_sources=external_sources,
         profile=profile,
         km=km_result,
-        commercial=commercial_result,
+        commercial=_expand_commercial(commercial_result),
         accessed_at=accessed_at,
     )
