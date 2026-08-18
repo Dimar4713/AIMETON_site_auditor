@@ -1,0 +1,85 @@
+name: One-shot RouterAI deterministic extraction patch
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/one-shot-routerai-all-extraction-no-reasoning.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/routerai-all-extraction-no-reasoning-700
+          fetch-depth: 0
+      - name: Prepare focused test environment
+        run: |
+          python -m venv .venv-one-shot
+          . .venv-one-shot/bin/activate
+          python -m pip install -q pytest pytest-asyncio pydantic httpx
+      - name: Apply deterministic extraction transport patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/routerai_profile_extraction.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    operations_context = _source_slice(external_sources, _OPERATIONS_KINDS)\n    signal_context = _source_slice(external_sources, _SIGNAL_KINDS)\n\n    common_rules = """\n'''
+          new = '''    operations_context = _source_slice(external_sources, _OPERATIONS_KINDS)\n    signal_context = _source_slice(external_sources, _SIGNAL_KINDS)\n\n    def deterministic_request(phase, model_type, **kwargs):\n        if strict_request_json is not None:\n            return strict_request_json(\n                phase, model_type, reasoning_enabled=False, **kwargs\n            )\n        return request_json(phase, model_type, **kwargs)\n\n    common_rules = """\n'''
+          if old not in text:
+              raise SystemExit('anchor for deterministic_request not found')
+          text = text.replace(old, new, 1)
+
+          start = text.index('    management_call = (')
+          end = text.index('    identity_core, management, ownership_network, operations, signals = await asyncio.gather(', start)
+          text = text[:start] + text[end:]
+
+          gather_start = text.index('    identity_core, management, ownership_network, operations, signals = await asyncio.gather(')
+          gather_end = text.index('\n    )\n\n    assert isinstance(identity_core', gather_start) + len('\n    )')
+          gather = text[gather_start:gather_end]
+          gather = gather.replace('        request_json(', '        deterministic_request(')
+          gather = gather.replace('        management_call,', '''        deterministic_request(\n            "profile_management",\n            ManagementSlice,\n            system="Возвращай только компактный валидный JSON по схеме.",\n            prompt=management_prompt,\n            max_tokens=900,\n            timeout_seconds=18.0,\n        ),''')
+          text = text[:gather_start] + gather + text[gather_end:]
+          path.write_text(text, encoding='utf-8')
+
+          test_path = Path('tests/test_routerai_profile_extraction.py')
+          tests = test_path.read_text(encoding='utf-8')
+          tests = tests.replace(
+              '    assert calls["profile_management"]["reasoning_enabled"] is False\n    assert "reasoning_enabled" not in calls["profile_operations"]\n',
+              '    assert calls["profile_management"]["reasoning_enabled"] is False\n    assert all(calls[phase]["reasoning_enabled"] is False for phase in calls)\n',
+              1,
+          )
+          tests = tests.replace(
+              '    assert strict_phases == ["profile_management"]\n',
+              '    assert set(strict_phases) == {\n        "profile_identity_core", "profile_management", "profile_ownership_network",\n        "profile_operations", "profile_signals",\n    }\n',
+              1,
+          )
+          test_path.write_text(tests, encoding='utf-8')
+          PY
+      - name: Run focused regression tests
+        shell: bash
+        run: |
+          . .venv-one-shot/bin/activate
+          pytest -q tests/test_routerai_profile_extraction.py tests/test_routerai_strict_request.py
+          grep -q 'max_tokens=900' app/routerai_profile_extraction.py
+          grep -q 'max_tokens=1000' app/routerai_profile_extraction.py
+          grep -q 'max_tokens=1100' app/routerai_profile_extraction.py
+          grep -q 'timeout_seconds=18.0' app/routerai_profile_extraction.py
+          grep -q 'reasoning_enabled=False' app/routerai_profile_extraction.py
+      - name: Commit patch and remove one-shot workflow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm .github/workflows/one-shot-routerai-all-extraction-no-reasoning.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/routerai_profile_extraction.py tests/test_routerai_profile_extraction.py .github/workflows/one-shot-routerai-all-extraction-no-reasoning.yml
+          git commit -m 'fix: disable reasoning across deterministic profile extraction'
+          git push origin HEAD:fix/routerai-all-extraction-no-reasoning-700
