@@ -291,7 +291,7 @@ RELEVANT SOURCES:\n{signal_context}
             ManagementSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
             prompt=management_prompt,
-            max_tokens=600,
+            max_tokens=900,
             timeout_seconds=18.0,
         ),
         request_json(

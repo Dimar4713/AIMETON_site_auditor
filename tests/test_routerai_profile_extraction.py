@@ -141,7 +141,7 @@ def test_management_input_is_bounded_without_changing_other_slice_budget() -> No
     assert "o" * profile._MANAGEMENT_OFFICIAL_TEXT_BUDGET in management_prompt
     assert "o" * (profile._MANAGEMENT_OFFICIAL_TEXT_BUDGET + 1) not in management_prompt
     assert len(management_prompt) < 12000
-    assert calls["profile_management"]["max_tokens"] == 600
+    assert calls["profile_management"]["max_tokens"] == 900
     assert calls["profile_management"]["timeout_seconds"] == 18.0
     assert calls["profile_operations"]["max_tokens"] == 1100
 
@@ -245,7 +245,7 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
     }
     assert strict_phases == ["profile_management"]
     phase_tokens = dict(phases)
-    assert phase_tokens["profile_management"] == 600
+    assert phase_tokens["profile_management"] == 900
     assert phase_tokens["profile_ownership_network"] == 700
     assert max(phase_tokens.values()) <= 1100
     assert merged.company_name == "Example"
