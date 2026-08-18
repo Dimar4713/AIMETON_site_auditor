@@ -11,6 +11,7 @@ import httpx
 
 from app.llm import MODEL, analyze_with_routerai
 from app.models import SiteAnalysis
+from app.routerai_evidence_units import DEFAULT_EVIDENCE_CHUNK_CHARS, chunk_text
 from app.routerai_split_synthesis import (
     SplitSynthesisPhaseError,
     SplitSynthesisPhaseTimeout,
@@ -58,14 +59,27 @@ def routerai_input_metrics(
     text: str,
     external_sources: list[dict] | None,
 ) -> dict[str, Any]:
-    """Return safe aggregate request-size metrics without retaining prompt content."""
+    """Return truthful aggregate input-size metrics without retaining content."""
     sources = external_sources or []
-    official_text_chars = len(text[:30000])
-    external_context_chars = len(
-        json.dumps(sources, ensure_ascii=False, indent=2)[:52000]
+    serialized_sources = json.dumps(
+        sources,
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
+    official_text_chars = len(text)
+    external_context_chars = len(serialized_sources)
     schema_chars = len(
         json.dumps(SiteAnalysis.model_json_schema(), ensure_ascii=False)
+    )
+    official_chunks_estimated = len(chunk_text(text))
+    external_chunks_estimated = (
+        0
+        if not serialized_sources or not sources
+        else max(
+            1,
+            (external_context_chars + DEFAULT_EVIDENCE_CHUNK_CHARS - 1)
+            // DEFAULT_EVIDENCE_CHUNK_CHARS,
+        )
     )
     return {
         "model": MODEL[:160],
@@ -76,6 +90,9 @@ def routerai_input_metrics(
         "dynamic_input_chars": (
             official_text_chars + external_context_chars + schema_chars
         ),
+        "official_chunks_estimated": official_chunks_estimated,
+        "external_chunks_estimated": external_chunks_estimated,
+        "input_truncated": False,
     }
 
 
