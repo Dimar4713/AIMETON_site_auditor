@@ -213,7 +213,6 @@ async def extract_profile_parallel(
     )
     operations_context = _source_slice(external_sources, _OPERATIONS_KINDS)
     signal_context = _source_slice(external_sources, _SIGNAL_KINDS)
-    management_request = strict_request_json or request_json
 
     common_rules = """
 Правила:
@@ -285,6 +284,27 @@ OFFICIAL PAGE TEXT:\n{official_text}
 RELEVANT SOURCES:\n{signal_context}
 """
 
+    management_call = (
+        strict_request_json(
+            "profile_management",
+            ManagementSlice,
+            system="Возвращай только компактный валидный JSON по схеме.",
+            prompt=management_prompt,
+            max_tokens=900,
+            timeout_seconds=18.0,
+            reasoning_enabled=False,
+        )
+        if strict_request_json is not None
+        else request_json(
+            "profile_management",
+            ManagementSlice,
+            system="Возвращай только компактный валидный JSON по схеме.",
+            prompt=management_prompt,
+            max_tokens=900,
+            timeout_seconds=18.0,
+        )
+    )
+
     identity_core, management, ownership_network, operations, signals = await asyncio.gather(
         request_json(
             "profile_identity_core",
@@ -294,14 +314,7 @@ RELEVANT SOURCES:\n{signal_context}
             max_tokens=850,
             timeout_seconds=20.0,
         ),
-        management_request(
-            "profile_management",
-            ManagementSlice,
-            system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=management_prompt,
-            max_tokens=900,
-            timeout_seconds=18.0,
-        ),
+        management_call,
         request_json(
             "profile_ownership_network",
             OwnershipNetworkSlice,

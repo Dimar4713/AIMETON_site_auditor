@@ -32,6 +32,7 @@ async def request_json_strict(
     prompt: str,
     max_tokens: int,
     timeout_seconds: float,
+    reasoning_enabled: bool | None = None,
 ) -> TModel:
     """Request provider-enforced JSON Schema output for a bounded split phase."""
     key = os.getenv("ROUTERAI_API_KEY")
@@ -56,6 +57,9 @@ async def request_json_strict(
             {"role": "user", "content": prompt},
         ],
     }
+    if reasoning_enabled is not None:
+        payload["reasoning"] = {"enabled": reasoning_enabled}
+
     try:
         async with httpx.AsyncClient(timeout=timeout_seconds) as client:
             response = await client.post(

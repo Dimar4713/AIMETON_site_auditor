@@ -149,6 +149,8 @@ def test_management_input_is_bounded_without_changing_other_slice_budget() -> No
     assert len(management_prompt) < 12000
     assert calls["profile_management"]["max_tokens"] == 900
     assert calls["profile_management"]["timeout_seconds"] == 18.0
+    assert calls["profile_management"]["reasoning_enabled"] is False
+    assert "reasoning_enabled" not in calls["profile_operations"]
     assert calls["profile_operations"]["max_tokens"] == 1100
 
 
