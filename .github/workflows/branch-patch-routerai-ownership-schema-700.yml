@@ -1,0 +1,101 @@
+name: One-shot RouterAI ownership schema envelope patch
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/branch-patch-routerai-ownership-schema-700.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Prepare isolated test environment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m venv .patch-venv
+          . .patch-venv/bin/activate
+          python -m pip install -q --disable-pip-version-check pytest pydantic httpx
+      - name: Apply exact evidence-driven schema patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          . .patch-venv/bin/activate
+          python3 - <<'PY'
+          from pathlib import Path
+
+          prod = Path('app/routerai_profile_extraction.py')
+          text = prod.read_text(encoding='utf-8')
+          old = '''class ManagementCompanyFact(CompactCompanyFact):\n    field: Literal["founders", "executives"]\n    value: str = Field(max_length=140)\n    period: str | None = Field(default=None, max_length=32)\n    source_ids: list[BoundedSourceId] = Field(default_factory=list, max_length=2)\n\n\nclass CompactEconomicSignal(BaseModel):'''
+          new = '''class ManagementCompanyFact(CompactCompanyFact):\n    field: Literal["founders", "executives"]\n    value: str = Field(max_length=140)\n    period: str | None = Field(default=None, max_length=32)\n    source_ids: list[BoundedSourceId] = Field(default_factory=list, max_length=2)\n\n\nclass OwnershipNetworkCompanyFact(CompactCompanyFact):\n    field: Literal["beneficial_owners", "affiliates", "social_accounts"]\n    value: str = Field(max_length=140)\n    period: str | None = Field(default=None, max_length=32)\n    source_ids: list[BoundedSourceId] = Field(default_factory=list, max_length=2)\n\n\nclass CompactEconomicSignal(BaseModel):'''
+          assert text.count(old) == 1
+          text = text.replace(old, new)
+          old_slice = '''class OwnershipNetworkSlice(BaseModel):\n    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=3)\n    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=2)'''
+          new_slice = '''class OwnershipNetworkSlice(BaseModel):\n    company_facts: list[OwnershipNetworkCompanyFact] = Field(default_factory=list, max_length=3)\n    risks_and_assumptions: list[ManagementShortText] = Field(default_factory=list, max_length=1)'''
+          assert text.count(old_slice) == 1
+          text = text.replace(old_slice, new_slice)
+          old_prompt = '''Разрешённые поля: beneficial_owners, affiliates, social_accounts. Верни максимум\nодин компактный факт на каждое из трёх полей. Бенефициарность и аффилированность'''
+          new_prompt = '''Разрешённые поля: beneficial_owners, affiliates, social_accounts. Верни максимум\nодин короткий факт на каждое из трёх полей и максимум два source_ids на факт.\nНе добавляй пояснения вне схемы. Бенефициарность и аффилированность'''
+          assert text.count(old_prompt) == 1
+          text = text.replace(old_prompt, new_prompt)
+          prod.write_text(text, encoding='utf-8')
+
+          tests = Path('tests/test_routerai_profile_extraction.py')
+          text = tests.read_text(encoding='utf-8')
+          anchor = '''    management_fact_schema = profile.ManagementCompanyFact.model_json_schema()\n    signal_schema = profile.CompactEconomicSignal.model_json_schema()'''
+          replacement = '''    management_fact_schema = profile.ManagementCompanyFact.model_json_schema()\n    ownership_fact_schema = profile.OwnershipNetworkCompanyFact.model_json_schema()\n    signal_schema = profile.CompactEconomicSignal.model_json_schema()'''
+          assert text.count(anchor) == 1
+          text = text.replace(anchor, replacement)
+          anchor = '''    assert management_fact_schema["properties"]["source_ids"]["items"]["maxLength"] == 64\n    assert signal_schema["properties"]["signal"]["maxLength"] == 140'''
+          replacement = '''    assert management_fact_schema["properties"]["source_ids"]["items"]["maxLength"] == 64\n    assert ownership_fact_schema["properties"]["field"]["enum"] == ["beneficial_owners", "affiliates", "social_accounts"]\n    assert ownership_fact_schema["properties"]["value"]["maxLength"] == 140\n    assert ownership_fact_schema["properties"]["period"]["anyOf"][0]["maxLength"] == 32\n    assert ownership_fact_schema["properties"]["source_ids"]["maxItems"] == 2\n    assert ownership_fact_schema["properties"]["source_ids"]["items"]["maxLength"] == 64\n    assert signal_schema["properties"]["signal"]["maxLength"] == 140'''
+          assert text.count(anchor) == 1
+          text = text.replace(anchor, replacement)
+          anchor = '''    assert ownership_schema["properties"]["company_facts"]["maxItems"] == 3\n    assert ownership_schema["properties"]["risks_and_assumptions"]["maxItems"] == 2'''
+          replacement = '''    assert ownership_schema["properties"]["company_facts"]["maxItems"] == 3\n    assert ownership_schema["properties"]["risks_and_assumptions"]["maxItems"] == 1'''
+          assert text.count(anchor) == 1
+          text = text.replace(anchor, replacement)
+          old_ctor = '''                    profile.CompactCompanyFact(\n                        field="affiliates",'''
+          new_ctor = '''                    profile.OwnershipNetworkCompanyFact(\n                        field="affiliates",'''
+          assert text.count(old_ctor) == 1
+          text = text.replace(old_ctor, new_ctor)
+          tests.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+          python3 -m compileall -q app/routerai_profile_extraction.py
+          python3 -m pytest -q tests/test_routerai_profile_extraction.py tests/test_routerai_strict_request.py
+      - name: Prove unchanged runtime budgets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source=Path('app/routerai_profile_extraction.py').read_text(encoding='utf-8')
+          assert 'max_tokens=1000' in source
+          assert 'max_tokens=900' in source
+          assert 'max_tokens=1100' in source
+          assert source.count('timeout_seconds=18.0') >= 2
+          assert '_MANAGEMENT_OFFICIAL_TEXT_BUDGET = 5000' in source
+          assert '_MANAGEMENT_SOURCE_CHAR_BUDGET = 5000' in source
+          assert 'OwnershipNetworkCompanyFact' in source
+          PY
+      - name: Commit patch and remove one-shot workflow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf .patch-venv
+          git rm .github/workflows/branch-patch-routerai-ownership-schema-700.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/routerai_profile_extraction.py tests/test_routerai_profile_extraction.py
+          git commit -m 'fix: bound RouterAI ownership schema after repeated live truncation'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
