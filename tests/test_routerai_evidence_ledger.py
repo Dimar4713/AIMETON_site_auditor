@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
+import pytest
+
+import app.routerai_split_v2 as split_v2
 from app.mission_contract import MissionCreate
 from app.mission_sqlite import SQLiteMissionRepository
 from app.models import CompanyFact, EconomicSignal
@@ -110,3 +114,39 @@ def test_direct_non_mission_call_skips_persistence(tmp_path) -> None:
     repo = SQLiteMissionRepository(tmp_path / "missions.sqlite3")
     assert persist_merged_evidence_ledger(_merged(), repository=repo) is None
     assert repo.list_for_admin() == []
+
+
+def test_split_v2_persists_merged_ledger_before_any_reasoning(monkeypatch) -> None:
+    events: list[str] = []
+
+    async def fake_extract(**kwargs):
+        events.append("extract")
+        return _merged()
+
+    def fake_persist(merged):
+        assert merged.company_facts[-1].value == "TAIL_FACT"
+        events.append("persist")
+        return "evidence_ledger_attempt-test"
+
+    async def fail_reasoning(*args, **kwargs):
+        assert events == ["extract", "persist"]
+        events.append("reasoning")
+        raise RuntimeError("intentional_reasoning_failure")
+
+    monkeypatch.setattr(split_v2, "extract_profile_parallel", fake_extract)
+    monkeypatch.setattr(split_v2, "persist_merged_evidence_ledger", fake_persist)
+    monkeypatch.setattr(split_v2, "_request_json", fail_reasoning)
+    monkeypatch.setattr(split_v2, "request_json_strict", fail_reasoning)
+
+    with pytest.raises(RuntimeError, match="intentional_reasoning_failure"):
+        asyncio.run(
+            split_v2.analyze_with_routerai_split_v2(
+                "https://example.test",
+                "Example",
+                "Official text",
+                [],
+            )
+        )
+
+    assert events[0:2] == ["extract", "persist"]
+    assert "reasoning" in events
