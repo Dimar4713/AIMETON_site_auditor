@@ -7,12 +7,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from app.models import SiteAnalysis
+from app.models import CompanyFact, EconomicSignal, SiteAnalysis
 from app.routerai_profile_extraction import extract_profile_parallel
 from app.routerai_split_synthesis import (
     BusinessMachineSynthesis,
     CommercialSynthesis,
-    ProfileExtraction,
     _assemble_site_analysis,
     _request_json,
 )
@@ -23,6 +22,18 @@ CompactText80 = Annotated[str, Field(max_length=80)]
 CompactText140 = Annotated[str, Field(max_length=140)]
 CompactText180 = Annotated[str, Field(max_length=180)]
 CompactText220 = Annotated[str, Field(max_length=220)]
+
+
+class FullReasoningProfile(BaseModel):
+    """Internal split-v2 profile: preserve the complete merged evidence ledger."""
+
+    company_name: str
+    business_summary: str
+    evidence: list[str] = Field(default_factory=list)
+    company_facts: list[CompanyFact] = Field(default_factory=list)
+    economic_signals: list[EconomicSignal] = Field(default_factory=list)
+    risks_and_assumptions: list[str] = Field(default_factory=list)
+    coverage: dict[str, int | bool] = Field(default_factory=dict)
 
 
 class CompactCommercialOpportunity(BaseModel):
@@ -59,13 +70,25 @@ def _expand_commercial(compact: CompactCommercialSynthesis) -> CommercialSynthes
     return CommercialSynthesis.model_validate(compact.model_dump(mode="python"))
 
 
+def _full_reasoning_profile(merged) -> FullReasoningProfile:
+    return FullReasoningProfile(
+        company_name=merged.company_name,
+        business_summary=merged.business_summary,
+        evidence=merged.evidence,
+        company_facts=merged.company_facts,
+        economic_signals=merged.economic_signals,
+        risks_and_assumptions=merged.risks_and_assumptions,
+        coverage=merged.coverage.safe_dict(),
+    )
+
+
 async def analyze_with_routerai_split_v2(
     url: str,
     title: str,
     text: str,
     external_sources: list[dict] | None = None,
 ) -> SiteAnalysis:
-    """Parallel vertical extraction → parallel reasoning → deterministic assembly."""
+    """Coverage-preserving extraction → parallel reasoning → deterministic assembly."""
     external_sources = external_sources or []
     accessed_at = datetime.now(timezone.utc).isoformat()
 
@@ -78,14 +101,7 @@ async def analyze_with_routerai_split_v2(
         external_sources=external_sources,
         accessed_at=accessed_at,
     )
-    profile = ProfileExtraction(
-        company_name=merged.company_name,
-        business_summary=merged.business_summary,
-        evidence=merged.evidence,
-        company_facts=merged.company_facts,
-        economic_signals=merged.economic_signals,
-        risks_and_assumptions=merged.risks_and_assumptions,
-    )
+    profile = _full_reasoning_profile(merged)
     profile_context = json.dumps(
         profile.model_dump(mode="json"),
         ensure_ascii=False,
@@ -106,7 +122,8 @@ III-IV Продукты, товар и услуга.
 IV-I Управление коммуникационными системами; IV-II Управление людьми;
 IV-III Управление технологиями; IV-IV Самоуправление.
 Если данных нет, используй status=\"Нет данных\" и не компенсируй пробелы
-фантазией. Пиши кратко.
+фантазией. Coverage metadata — только агрегаты полноты, не факты компании.
+Пиши кратко.
 
 EXTRACTED PROFILE:\n{profile_context}
 """
@@ -116,7 +133,8 @@ EXTRACTED PROFILE:\n{profile_context}
 Сначала учитывай подтверждённые экономические сигналы и пробелы, затем предложи
 реалистичное решение, 3–5 AI-агентов/инструментов и компактный пакет первого контакта.
 Оценка 80+ допустима только при прямом подтверждении проблемы, масштаба и
-реалистичного пилота. Не обещай неподтверждённый эффект. Пиши кратко.
+реалистичного пилота. Не обещай неподтверждённый эффект. Coverage metadata
+используй только чтобы понимать полноту входа. Пиши кратко.
 
 EXTRACTED PROFILE:\n{profile_context}
 """
