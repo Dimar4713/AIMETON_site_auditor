@@ -246,7 +246,7 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
     assert strict_phases == ["profile_management"]
     phase_tokens = dict(phases)
     assert phase_tokens["profile_management"] == 900
-    assert phase_tokens["profile_ownership_network"] == 700
+    assert phase_tokens["profile_ownership_network"] == 1000
     assert max(phase_tokens.values()) <= 1100
     assert merged.company_name == "Example"
     assert all(isinstance(item, CompanyFact) for item in merged.company_facts)

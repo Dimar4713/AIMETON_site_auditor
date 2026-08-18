@@ -299,7 +299,7 @@ RELEVANT SOURCES:\n{signal_context}
             OwnershipNetworkSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
             prompt=ownership_network_prompt,
-            max_tokens=700,
+            max_tokens=1000,
             timeout_seconds=18.0,
         ),
         request_json(
