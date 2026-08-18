@@ -19,6 +19,8 @@ from app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
 from app.search_observer import build_search_wave_telemetry
 from app.search_observer_llm import evaluate_search_wave_shadow
+from app.search_observer_runtime_steering import run_bounded_continuation_search
+from app.search_observer_verified_promotion import verified_continuation_promotion_permit
 from app.search_gateway import (
     SearchDiagnostics,
     SearchRequest,
@@ -257,7 +259,30 @@ def _score_metadata(result: PreScoreResult) -> dict[str, object]:
     return metadata
 
 
-async def run_hunt(req: HuntRequest) -> HuntResult:
+def _enabled_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _steering_reserve_queries() -> int:
+    raw = os.getenv("HUNTER_SEARCH_OBSERVER_STEERING_RESERVE_QUERIES", "2").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 2
+    return min(10, max(1, value))
+
+
+def _steering_regime(requested_search_regime: str) -> str:
+    requested = requested_search_regime.strip().lower()
+    if requested in {"precision", "balanced", "discovery"}:
+        return requested
+    env_regime = os.getenv("HUNTER_SEARCH_OBSERVER_STEERING_REGIME", "").strip().lower()
+    if env_regime in {"precision", "balanced", "discovery"}:
+        return env_regime
+    return "auto"
+
+
+async def run_hunt(req: HuntRequest, *, requested_search_regime: str = "auto") -> HuntResult:
     mission_id = f"hunt-{uuid4()}"
     correlation_id = f"corr-{uuid4()}"
     trace = HunterForensicTrace(mission_id, correlation_id)
@@ -345,8 +370,39 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             policy,
         )
 
-    responses = await asyncio.gather(*(search_query(query) for query in queries))
-    wave_telemetry = build_search_wave_telemetry(queries, responses)
+    async def search_many(batch: list[str]):
+        return list(await asyncio.gather(*(search_query(query) for query in batch)))
+
+    shadow_observer_enabled = _enabled_env("HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED")
+    steering_gate_enabled = _enabled_env("HUNTER_SEARCH_OBSERVER_STEERING_ENABLED")
+    effective_steering_regime = _steering_regime(requested_search_regime)
+    steering_runtime_enabled = (
+        steering_gate_enabled
+        and shadow_observer_enabled
+        and effective_steering_regime in {"precision", "balanced", "discovery"}
+    )
+
+    steering_runtime = None
+    shadow_recommendation = None
+    if steering_runtime_enabled:
+        steering_runtime = await run_bounded_continuation_search(
+            queries,
+            enabled=True,
+            requested_search_regime=effective_steering_regime,
+            requested_reserve_queries=_steering_reserve_queries(),
+            permit=verified_continuation_promotion_permit(),
+            search_many=search_many,
+            observe_wave=evaluate_search_wave_shadow,
+        )
+        responses = steering_runtime.responses
+        executed_queries = steering_runtime.executed_queries
+        wave_telemetry = steering_runtime.first_wave_telemetry
+        shadow_recommendation = steering_runtime.observer_recommendation
+    else:
+        responses = await search_many(queries)
+        executed_queries = list(queries)
+        wave_telemetry = build_search_wave_telemetry(queries, responses)
+
     trace.append(
         "hunt_search_wave_observed",
         state=TraceState.SUCCEEDED,
@@ -361,7 +417,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         },
         metadata={
             "observer_mode": "telemetry_only",
-            "routing_changed": False,
+            "routing_changed": bool(steering_runtime and steering_runtime.reserve_reordered),
             "duplicate_domain_ratio": wave_telemetry.duplicate_domain_ratio,
             "provider_result_counts": wave_telemetry.provider_result_counts,
             "attempt_states": wave_telemetry.attempt_states,
@@ -380,11 +436,9 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         },
     )
 
-    shadow_observer_enabled = os.getenv("HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED", "").strip().lower() in {
-        "1", "true", "yes", "on"
-    }
     if shadow_observer_enabled:
-        shadow_recommendation = await evaluate_search_wave_shadow(wave_telemetry)
+        if not steering_runtime_enabled:
+            shadow_recommendation = await evaluate_search_wave_shadow(wave_telemetry)
         if shadow_recommendation is None:
             trace.append(
                 "hunt_search_wave_shadow_observer",
@@ -403,16 +457,46 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
                 "hunt_search_wave_shadow_observer",
                 state=TraceState.SUCCEEDED,
                 reason_code="hunter_shadow_observer_advisory_captured",
-                summary="Shadow Search Observer advisory captured without execution",
+                summary="Shadow Search Observer advisory captured",
                 counters={"recommendation_count": len(shadow_recommendation.recommendations)},
                 metadata={
                     "observer_mode": "shadow",
-                    "routing_changed": False,
+                    "routing_changed": bool(steering_runtime and steering_runtime.reserve_reordered),
                     "sufficient_evidence": shadow_recommendation.sufficient_evidence,
                     "action_counts": action_counts,
                     "summary": shadow_recommendation.summary,
                 },
             )
+
+    if steering_runtime_enabled and steering_runtime is not None:
+        decision = steering_runtime.steering_decision
+        trace.append(
+            "hunt_search_wave_bounded_steering",
+            state=TraceState.SUCCEEDED,
+            reason_code=(
+                "hunter_bounded_continuation_reordered"
+                if steering_runtime.reserve_reordered
+                else "hunter_bounded_continuation_no_reorder"
+            ),
+            summary="Bounded continuation steering evaluated inside the original query budget",
+            counters={
+                "total_query_budget": steering_runtime.wave_plan.total_query_budget,
+                "first_wave_queries": len(steering_runtime.wave_plan.first_wave_queries),
+                "reserve_queries": len(steering_runtime.wave_plan.reserve_queries),
+                "accepted_directions": 0 if decision is None else len(decision.accepted_direction_indexes),
+            },
+            metadata={
+                "requested_search_regime": requested_search_regime,
+                "effective_search_regime": effective_steering_regime,
+                "routing_changed": steering_runtime.reserve_reordered,
+                "reserve_reordered": steering_runtime.reserve_reordered,
+                "promotion_evidence_id": None if decision is None else decision.promotion_evidence_id,
+                "steering_state": None if decision is None else str(decision.state),
+                "accepted_direction_indexes": [] if decision is None else decision.accepted_direction_indexes,
+                "accepted_actions": [] if decision is None else [str(item) for item in decision.accepted_actions],
+                "reason_codes": [] if decision is None else decision.reason_codes,
+            },
+        )
 
     for response in responses:
         search_diagnostics.append(response.diagnostics)
@@ -432,7 +516,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             trace_attempt_id=correlation_id,
             region=effective_req.region,
             search_zone=req.search_zone,
-            queries=queries,
+            queries=executed_queries,
             discovered=0,
             candidates=[],
             funnel=funnel,
@@ -776,7 +860,7 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         trace_attempt_id=correlation_id,
         region=effective_req.region,
         search_zone=req.search_zone,
-        queries=queries,
+        queries=executed_queries,
         discovered=len(unique),
         candidates=returned,
         funnel=funnel,
