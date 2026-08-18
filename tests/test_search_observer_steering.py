@@ -1,63 +1,12 @@
 from app.search_observer_llm import DirectionRecommendation, ObserverAction
-from app.search_observer_promotion import (
-    ActionFamily,
-    FamilyPromotionEvidence,
-    PromotionDecision,
-    PromotionState,
-)
 from app.search_observer_steering import (
     SteeringState,
     validate_bounded_continuation_steering,
 )
-
-
-def _family(family: ActionFamily, state: PromotionState) -> FamilyPromotionEvidence:
-    eligible = state == PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING
-    return FamilyPromotionEvidence(
-        family=family,
-        outcome_count=8 if eligible else 0,
-        decided_count=8 if eligible else 0,
-        supported_count=7 if eligible else 0,
-        contradicted_count=1 if eligible else 0,
-        inconclusive_count=0,
-        supported_ratio=0.875 if eligible else 0.0,
-        contradicted_ratio=0.125 if eligible else 0.0,
-        high_confidence_decided_count=4 if eligible else 0,
-        high_confidence_contradicted_ratio=0.0,
-        lower_confidence_decided_count=4 if eligible else 0,
-        lower_confidence_contradicted_ratio=0.25 if eligible else 0.0,
-        state=state,
-        reason_codes=["family_gate_satisfied"] if eligible else ["insufficient_family_samples"],
-    )
-
-
-def _promotion(*, continuation_eligible: bool = True) -> PromotionDecision:
-    continuation_state = (
-        PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING
-        if continuation_eligible
-        else PromotionState.SHADOW_ONLY
-    )
-    return PromotionDecision(
-        state=(
-            PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING
-            if continuation_eligible
-            else PromotionState.SHADOW_ONLY
-        ),
-        total_outcomes=30,
-        total_scorable=30,
-        heterogeneous_batch_count=4,
-        recent_batch_supported_ratios=[0.75, 0.80],
-        quality_evidence_complete=True,
-        quality_guard_passed=True,
-        routing_changed_count=0,
-        families=[
-            _family(ActionFamily.CONTINUATION, continuation_state),
-            _family(ActionFamily.ADJUSTMENT, PromotionState.SHADOW_ONLY),
-            _family(ActionFamily.STOP, PromotionState.SHADOW_ONLY),
-            _family(ActionFamily.ESCALATE, PromotionState.SHADOW_ONLY),
-        ],
-        reason_codes=["global_gate_satisfied"] if continuation_eligible else ["shadow_only"],
-    )
+from app.search_observer_verified_promotion import (
+    ContinuationPromotionPermit,
+    verified_continuation_promotion_permit,
+)
 
 
 def _rec(index: int, action: ObserverAction) -> DirectionRecommendation:
@@ -74,7 +23,7 @@ def test_runtime_gate_off_is_routing_equivalent_noop():
     result = validate_bounded_continuation_steering(
         [_rec(0, ObserverAction.CONTINUE)],
         enabled=False,
-        promotion=_promotion(),
+        permit=verified_continuation_promotion_permit(),
         remaining_query_budget=2,
         effective_regime="balanced",
         direction_count=3,
@@ -96,7 +45,7 @@ def test_only_continuation_family_can_be_admitted_and_budget_caps_it():
             _rec(3, ObserverAction.STOP),
         ],
         enabled=True,
-        promotion=_promotion(),
+        permit=verified_continuation_promotion_permit(),
         remaining_query_budget=1,
         effective_regime="discovery",
         direction_count=4,
@@ -108,21 +57,35 @@ def test_only_continuation_family_can_be_admitted_and_budget_caps_it():
     assert result.accepted_actions == [ObserverAction.CONTINUE]
     assert result.max_second_wave_queries == 1
     assert result.rejected_action_count == 1
+    assert result.promotion_evidence_id == "search-observer-n30-2026-08-13"
 
 
-def test_promotion_gate_is_fail_closed():
-    result = validate_bounded_continuation_steering(
-        [_rec(0, ObserverAction.CONTINUE)],
-        enabled=True,
-        promotion=_promotion(continuation_eligible=False),
-        remaining_query_budget=2,
-        effective_regime="precision",
-        direction_count=1,
+def test_promotion_gate_is_fail_closed_on_insufficient_or_disabled_permit():
+    insufficient = ContinuationPromotionPermit(
+        evidence_id="insufficient",
+        total_scorable=30,
+        continuation_decided=4,
+        continuation_supported=4,
+        continuation_contradicted=0,
+        heterogeneous_batch_count=4,
+        eligible_for_bounded_steering=True,
+    )
+    disabled = verified_continuation_promotion_permit().model_copy(
+        update={"eligible_for_bounded_steering": False}
     )
 
-    assert result.state == SteeringState.REJECTED
-    assert result.routing_changed is False
-    assert result.reason_codes == ["continuation_promotion_gate_not_satisfied"]
+    for permit in (None, insufficient, disabled):
+        result = validate_bounded_continuation_steering(
+            [_rec(0, ObserverAction.CONTINUE)],
+            enabled=True,
+            permit=permit,
+            remaining_query_budget=2,
+            effective_regime="precision",
+            direction_count=1,
+        )
+        assert result.state == SteeringState.REJECTED
+        assert result.routing_changed is False
+        assert result.reason_codes == ["continuation_promotion_gate_not_satisfied"]
 
 
 def test_adjustment_stop_and_escalate_remain_shadow_only():
@@ -134,7 +97,7 @@ def test_adjustment_stop_and_escalate_remain_shadow_only():
             _rec(3, ObserverAction.ESCALATE),
         ],
         enabled=True,
-        promotion=_promotion(),
+        permit=verified_continuation_promotion_permit(),
         remaining_query_budget=4,
         effective_regime="balanced",
         direction_count=4,
@@ -148,10 +111,11 @@ def test_adjustment_stop_and_escalate_remain_shadow_only():
 
 
 def test_invalid_regime_and_zero_budget_reject_before_scheduler():
+    permit = verified_continuation_promotion_permit()
     invalid_regime = validate_bounded_continuation_steering(
         [_rec(0, ObserverAction.CONTINUE)],
         enabled=True,
-        promotion=_promotion(),
+        permit=permit,
         remaining_query_budget=1,
         effective_regime="auto",
         direction_count=1,
@@ -159,7 +123,7 @@ def test_invalid_regime_and_zero_budget_reject_before_scheduler():
     no_budget = validate_bounded_continuation_steering(
         [_rec(0, ObserverAction.CONTINUE)],
         enabled=True,
-        promotion=_promotion(),
+        permit=permit,
         remaining_query_budget=0,
         effective_regime="balanced",
         direction_count=1,
