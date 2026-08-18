@@ -25,6 +25,7 @@ class BoundedContinuationRuntimeResult:
     responses: list[SearchResponse]
     first_wave_telemetry: SearchWaveTelemetry
     wave_plan: WavePlan
+    observer_recommendation: SearchObserverRecommendation | None
     steering_decision: BoundedSteeringDecision | None
     reserve_reordered: bool
 
@@ -46,7 +47,7 @@ async def run_bounded_continuation_search(
     prioritize reserve queries associated with continuation-qualified directions.
     Every planned reserve query is still executed: this phase cannot suppress
     coverage, add queries, change provider authority, or spend beyond the original
-    bounded query plan.
+    bounded query plan. The Observer is evaluated at most once per hunt here.
     """
     regime_is_explicit = requested_search_regime in {"precision", "balanced", "discovery"}
     wave_plan = plan_bounded_search_waves(
@@ -63,6 +64,7 @@ async def run_bounded_continuation_search(
             responses=responses,
             first_wave_telemetry=telemetry,
             wave_plan=wave_plan,
+            observer_recommendation=None,
             steering_decision=None,
             reserve_reordered=False,
         )
@@ -98,6 +100,7 @@ async def run_bounded_continuation_search(
         responses=first_responses + reserve_responses,
         first_wave_telemetry=telemetry,
         wave_plan=wave_plan,
+        observer_recommendation=recommendation,
         steering_decision=decision,
         reserve_reordered=reserve_queries != wave_plan.reserve_queries,
     )
