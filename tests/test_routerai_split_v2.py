@@ -29,10 +29,35 @@ def _coverage() -> EvidenceCoverage:
 
 
 def _km_cell(code: str) -> BusinessMachineCell:
+    operators = {
+        "I": "I — Коммуникационные системы",
+        "II": "II — Люди",
+        "III": "III — Технологии",
+        "IV": "IV — Менеджмент",
+    }
+    vertices = {
+        "I-I": "Взаимодействие",
+        "I-II": "Влияние",
+        "I-III": "Зависимость",
+        "I-IV": "Противодействие",
+        "II-I": "Учредители и собственники",
+        "II-II": "Ось люди-управленцы",
+        "II-III": "Обслуживающий персонал и роботы",
+        "II-IV": "Виртуозы и специалисты",
+        "III-I": "Знания и наука",
+        "III-II": "Стандартная процедура",
+        "III-III": "Рабочая процедура",
+        "III-IV": "Продукты, товар и услуга",
+        "IV-I": "Управление коммуникационными системами",
+        "IV-II": "Управление людьми",
+        "IV-III": "Управление технологиями",
+        "IV-IV": "Самоуправление",
+    }
+    quadrant = code.rsplit("-", 1)[0]
     return BusinessMachineCell(
         code=code,
-        detail_operator="placeholder",
-        vertex="placeholder",
+        detail_operator=operators[quadrant],
+        vertex=vertices[code],
         finding=f"Finding {code}",
         status="Подтверждено",
         confidence="Высокая",
@@ -78,7 +103,7 @@ def test_split_v2_stages_km_quadrants_and_commercial_execution(monkeypatch) -> N
         phases.append(phase)
         phase_kwargs[phase] = kwargs
         if model_type is split_v2.CompactBusinessMachineQuadrant:
-            quadrant = phase.rsplit("_", 1)[-1]
+            quadrant = phase.removeprefix("km_reasoning_")
             code = f"{quadrant}-I"
             return split_v2.CompactBusinessMachineQuadrant(
                 business_machine_4x4=[_km_cell(code)]
