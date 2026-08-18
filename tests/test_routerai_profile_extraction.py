@@ -150,7 +150,7 @@ def test_management_input_is_bounded_without_changing_other_slice_budget() -> No
     assert calls["profile_management"]["max_tokens"] == 900
     assert calls["profile_management"]["timeout_seconds"] == 18.0
     assert calls["profile_management"]["reasoning_enabled"] is False
-    assert "reasoning_enabled" not in calls["profile_operations"]
+    assert all(calls[phase]["reasoning_enabled"] is False for phase in calls)
     assert calls["profile_operations"]["max_tokens"] == 1100
 
 
@@ -251,7 +251,10 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
         "profile_operations",
         "profile_signals",
     }
-    assert strict_phases == ["profile_management"]
+    assert set(strict_phases) == {
+        "profile_identity_core", "profile_management", "profile_ownership_network",
+        "profile_operations", "profile_signals",
+    }
     phase_tokens = dict(phases)
     assert phase_tokens["profile_management"] == 900
     assert phase_tokens["profile_ownership_network"] == 1000

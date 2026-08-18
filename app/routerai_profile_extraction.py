@@ -214,6 +214,13 @@ async def extract_profile_parallel(
     operations_context = _source_slice(external_sources, _OPERATIONS_KINDS)
     signal_context = _source_slice(external_sources, _SIGNAL_KINDS)
 
+    def deterministic_request(phase, model_type, **kwargs):
+        if strict_request_json is not None:
+            return strict_request_json(
+                phase, model_type, reasoning_enabled=False, **kwargs
+            )
+        return request_json(phase, model_type, **kwargs)
+
     common_rules = """
 Правила:
 - S1 — официальный сайт; внешние источники имеют переданные id.
@@ -284,29 +291,8 @@ OFFICIAL PAGE TEXT:\n{official_text}
 RELEVANT SOURCES:\n{signal_context}
 """
 
-    management_call = (
-        strict_request_json(
-            "profile_management",
-            ManagementSlice,
-            system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=management_prompt,
-            max_tokens=900,
-            timeout_seconds=18.0,
-            reasoning_enabled=False,
-        )
-        if strict_request_json is not None
-        else request_json(
-            "profile_management",
-            ManagementSlice,
-            system="Возвращай только компактный валидный JSON по схеме.",
-            prompt=management_prompt,
-            max_tokens=900,
-            timeout_seconds=18.0,
-        )
-    )
-
     identity_core, management, ownership_network, operations, signals = await asyncio.gather(
-        request_json(
+        deterministic_request(
             "profile_identity_core",
             IdentityCoreSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
@@ -314,8 +300,15 @@ RELEVANT SOURCES:\n{signal_context}
             max_tokens=850,
             timeout_seconds=20.0,
         ),
-        management_call,
-        request_json(
+        deterministic_request(
+            "profile_management",
+            ManagementSlice,
+            system="Возвращай только компактный валидный JSON по схеме.",
+            prompt=management_prompt,
+            max_tokens=900,
+            timeout_seconds=18.0,
+        ),
+        deterministic_request(
             "profile_ownership_network",
             OwnershipNetworkSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
@@ -323,7 +316,7 @@ RELEVANT SOURCES:\n{signal_context}
             max_tokens=1000,
             timeout_seconds=18.0,
         ),
-        request_json(
+        deterministic_request(
             "profile_operations",
             OperationsProfileSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
@@ -331,7 +324,7 @@ RELEVANT SOURCES:\n{signal_context}
             max_tokens=1100,
             timeout_seconds=22.0,
         ),
-        request_json(
+        deterministic_request(
             "profile_signals",
             SignalProfileSlice,
             system="Возвращай только компактный валидный JSON по схеме.",
