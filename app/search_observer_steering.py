@@ -6,11 +6,7 @@ from typing import Iterable
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.search_observer_llm import DirectionRecommendation, ObserverAction
-from app.search_observer_promotion import (
-    ActionFamily,
-    PromotionDecision,
-    PromotionState,
-)
+from app.search_observer_verified_promotion import ContinuationPromotionPermit
 
 
 class SteeringModel(BaseModel):
@@ -30,24 +26,29 @@ class BoundedSteeringDecision(SteeringModel):
     accepted_actions: list[ObserverAction] = Field(default_factory=list)
     rejected_action_count: int = Field(default=0, ge=0)
     max_second_wave_queries: int = Field(default=0, ge=0)
+    promotion_evidence_id: str | None = None
     reason_codes: list[str] = Field(default_factory=list)
 
 
-def _continuation_family_eligible(promotion: PromotionDecision | None) -> bool:
-    if promotion is None or promotion.state != PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING:
+def _continuation_permit_eligible(permit: ContinuationPromotionPermit | None) -> bool:
+    if permit is None or not permit.eligible_for_bounded_steering:
         return False
-    return any(
-        item.family == ActionFamily.CONTINUATION
-        and item.state == PromotionState.ELIGIBLE_FOR_BOUNDED_STEERING
-        for item in promotion.families
-    )
+    if permit.total_scorable < 30 or permit.heterogeneous_batch_count < 2:
+        return False
+    if permit.continuation_decided < 5:
+        return False
+    if permit.continuation_supported + permit.continuation_contradicted != permit.continuation_decided:
+        return False
+    supported_ratio = permit.continuation_supported / permit.continuation_decided
+    contradicted_ratio = permit.continuation_contradicted / permit.continuation_decided
+    return supported_ratio >= 0.70 and contradicted_ratio <= 0.15
 
 
 def validate_bounded_continuation_steering(
     recommendations: Iterable[DirectionRecommendation],
     *,
     enabled: bool,
-    promotion: PromotionDecision | None,
+    permit: ContinuationPromotionPermit | None,
     remaining_query_budget: int,
     effective_regime: str,
     direction_count: int,
@@ -82,9 +83,10 @@ def validate_bounded_continuation_steering(
             reason_codes=["invalid_effective_search_regime"],
         )
 
-    if not _continuation_family_eligible(promotion):
+    if not _continuation_permit_eligible(permit):
         return BoundedSteeringDecision(
             state=SteeringState.REJECTED,
+            promotion_evidence_id=None if permit is None else permit.evidence_id,
             reason_codes=["continuation_promotion_gate_not_satisfied"],
         )
 
@@ -112,6 +114,7 @@ def validate_bounded_continuation_steering(
         return BoundedSteeringDecision(
             state=SteeringState.REJECTED,
             rejected_action_count=rejected,
+            promotion_evidence_id=permit.evidence_id,
             reason_codes=["no_eligible_continuation_recommendations"],
         )
 
@@ -122,5 +125,6 @@ def validate_bounded_continuation_steering(
         accepted_actions=accepted_actions,
         rejected_action_count=rejected,
         max_second_wave_queries=min(remaining_query_budget, len(accepted_indexes)),
+        promotion_evidence_id=permit.evidence_id,
         reason_codes=["bounded_continuation_admitted_for_scheduler"],
     )
