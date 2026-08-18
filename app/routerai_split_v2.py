@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 from app.models import CompanyFact, EconomicSignal, SiteAnalysis
+from app.routerai_evidence_ledger import persist_merged_evidence_ledger
 from app.routerai_profile_extraction import extract_profile_parallel
 from app.routerai_split_synthesis import (
     BusinessMachineSynthesis,
@@ -88,7 +89,7 @@ async def analyze_with_routerai_split_v2(
     text: str,
     external_sources: list[dict] | None = None,
 ) -> SiteAnalysis:
-    """Coverage-preserving extraction → parallel reasoning → deterministic assembly."""
+    """Coverage-preserving extraction → durable ledger → reasoning → assembly."""
     external_sources = external_sources or []
     accessed_at = datetime.now(timezone.utc).isoformat()
 
@@ -101,6 +102,10 @@ async def analyze_with_routerai_split_v2(
         external_sources=external_sources,
         accessed_at=accessed_at,
     )
+    # Durability is an admission gate for mission-bound reasoning. Direct calls have no
+    # trace identity and intentionally skip persistence.
+    persist_merged_evidence_ledger(merged)
+
     profile = _full_reasoning_profile(merged)
     profile_context = json.dumps(
         profile.model_dump(mode="json"),

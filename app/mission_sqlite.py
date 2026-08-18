@@ -12,7 +12,13 @@ from app.mission_contract import Mission, MissionCreate, MissionState, utc_now
 
 
 MISSION_SCHEMA_VERSION = 1
-_ALLOWED_RECORD_KINDS = {"turn", "sufficiency", "report_metadata", "report_payload"}
+_ALLOWED_RECORD_KINDS = {
+    "turn",
+    "sufficiency",
+    "report_metadata",
+    "report_payload",
+    "evidence_ledger",
+}
 
 
 class SQLiteMissionRepository:
