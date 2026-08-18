@@ -104,6 +104,28 @@ def test_strict_request_can_disable_reasoning_for_deterministic_extraction(monke
     assert payload["reasoning"] == {"enabled": False}
 
 
+def test_strict_request_can_bound_reasoning_effort_without_disabling_reasoning(monkeypatch) -> None:
+    captured: dict = {}
+    _install_fake_client(monkeypatch, captured)
+
+    asyncio.run(
+        strict.request_json_strict(
+            "commercial_reasoning",
+            ManagementSlice,
+            system="Structured only",
+            prompt="Choose opportunity",
+            max_tokens=1500,
+            timeout_seconds=25.0,
+            reasoning_effort="high",
+        )
+    )
+
+    payload = captured["payload"]
+    assert payload["max_tokens"] == 1500
+    assert payload["reasoning"] == {"effort": "high"}
+    assert "enabled" not in payload["reasoning"]
+
+
 def test_strict_request_surfaces_output_truncation(monkeypatch) -> None:
     class FakeResponse:
         def raise_for_status(self) -> None:

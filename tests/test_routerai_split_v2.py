@@ -4,10 +4,7 @@ import asyncio
 
 import app.routerai_split_v2 as split_v2
 from app.models import (
-    ActionPackage,
-    AgentRecommendation,
     BusinessMachineCell,
-    CommercialOpportunity,
     CompanyFact,
     EconomicSignal,
 )
@@ -42,6 +39,7 @@ def test_split_v2_uses_parallel_profile_then_existing_reasoning_and_assembler(mo
         )
 
     phases: list[str] = []
+    commercial_kwargs: dict = {}
 
     async def fake_request(phase, model_type, **kwargs):
         phases.append(phase)
@@ -64,6 +62,7 @@ def test_split_v2_uses_parallel_profile_then_existing_reasoning_and_assembler(mo
 
     async def fake_strict_request(phase, model_type, **kwargs):
         phases.append(phase)
+        commercial_kwargs.update(kwargs)
         if model_type is split_v2.CompactCommercialSynthesis:
             return split_v2.CompactCommercialSynthesis(
                 commercial_opportunity=split_v2.CompactCommercialOpportunity(
@@ -97,6 +96,9 @@ def test_split_v2_uses_parallel_profile_then_existing_reasoning_and_assembler(mo
     )
 
     assert set(phases) == {"km_reasoning", "commercial_reasoning"}
+    assert commercial_kwargs["reasoning_effort"] == "high"
+    assert commercial_kwargs["max_tokens"] == 1500
+    assert commercial_kwargs["timeout_seconds"] == 25.0
     assert result.company_name == "Example"
     assert result.sources[0].id == "S1"
     assert result.business_machine_4x4[0].code == "III-III"

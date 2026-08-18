@@ -137,6 +137,7 @@ EXTRACTED PROFILE:\n{profile_context}
             prompt=commercial_prompt,
             max_tokens=1500,
             timeout_seconds=25.0,
+            reasoning_effort="high",
         ),
     )
 

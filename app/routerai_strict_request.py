@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 import re
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 import httpx
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ from app.routerai_split_synthesis import (
 
 
 TModel = TypeVar("TModel", bound=BaseModel)
+ReasoningEffort = Literal["high", "xhigh"]
 
 
 def _schema_name(phase: str) -> str:
@@ -33,6 +34,7 @@ async def request_json_strict(
     max_tokens: int,
     timeout_seconds: float,
     reasoning_enabled: bool | None = None,
+    reasoning_effort: ReasoningEffort | None = None,
 ) -> TModel:
     """Request provider-enforced JSON Schema output for a bounded split phase."""
     key = os.getenv("ROUTERAI_API_KEY")
@@ -57,8 +59,13 @@ async def request_json_strict(
             {"role": "user", "content": prompt},
         ],
     }
+    reasoning: dict[str, bool | str] = {}
     if reasoning_enabled is not None:
-        payload["reasoning"] = {"enabled": reasoning_enabled}
+        reasoning["enabled"] = reasoning_enabled
+    if reasoning_effort is not None:
+        reasoning["effort"] = reasoning_effort
+    if reasoning:
+        payload["reasoning"] = reasoning
 
     try:
         async with httpx.AsyncClient(timeout=timeout_seconds) as client:
