@@ -61,14 +61,22 @@ class CompactActionPackage(BaseModel):
     next_action: CompactText140
 
 
-class CompactCommercialSynthesis(BaseModel):
-    commercial_opportunity: CompactCommercialOpportunity
+class CompactCommercialExecution(BaseModel):
     agents: list[CompactAgentRecommendation] = Field(min_length=3, max_length=5)
     action_package: CompactActionPackage
 
 
-def _expand_commercial(compact: CompactCommercialSynthesis) -> CommercialSynthesis:
-    return CommercialSynthesis.model_validate(compact.model_dump(mode="python"))
+def _expand_commercial(
+    opportunity: CompactCommercialOpportunity,
+    execution: CompactCommercialExecution,
+) -> CommercialSynthesis:
+    return CommercialSynthesis.model_validate(
+        {
+            "commercial_opportunity": opportunity.model_dump(mode="python"),
+            "agents": [item.model_dump(mode="python") for item in execution.agents],
+            "action_package": execution.action_package.model_dump(mode="python"),
+        }
+    )
 
 
 def _full_reasoning_profile(merged) -> FullReasoningProfile:
@@ -89,7 +97,7 @@ async def analyze_with_routerai_split_v2(
     text: str,
     external_sources: list[dict] | None = None,
 ) -> SiteAnalysis:
-    """Coverage-preserving extraction → durable ledger → reasoning → assembly."""
+    """Coverage-preserving extraction → durable ledger → staged reasoning → assembly."""
     external_sources = external_sources or []
     accessed_at = datetime.now(timezone.utc).isoformat()
 
@@ -133,18 +141,18 @@ IV-III Управление технологиями; IV-IV Самоуправл
 EXTRACTED PROFILE:\n{profile_context}
 """
 
-    commercial_prompt = f"""Ты — AI-продажник AIMETON. На основе только
+    opportunity_prompt = f"""Ты — AI-продажник AIMETON. На основе только полного
 извлечённого профиля выбери одну наиболее доказанную коммерческую AI-возможность.
-Сначала учитывай подтверждённые экономические сигналы и пробелы, затем предложи
-реалистичное решение, 3–5 AI-агентов/инструментов и компактный пакет первого контакта.
-Оценка 80+ допустима только при прямом подтверждении проблемы, масштаба и
-реалистичного пилота. Не обещай неподтверждённый эффект. Coverage metadata
-используй только чтобы понимать полноту входа. Пиши кратко.
+Сначала учитывай подтверждённые экономические сигналы и пробелы. Определи проблему,
+реалистичное AIMETON-решение, ожидаемую ценность, score и qualification. Не формируй
+агентов, demo или текст первого контакта на этом этапе. Оценка 80+ допустима только
+при прямом подтверждении проблемы, масштаба и реалистичного пилота. Не обещай
+неподтверждённый эффект. Coverage metadata используй только для понимания полноты.
 
-EXTRACTED PROFILE:\n{profile_context}
+FULL EXTRACTED PROFILE:\n{profile_context}
 """
 
-    km_result, commercial_result = await asyncio.gather(
+    km_result, opportunity_result = await asyncio.gather(
         _request_json(
             "km_reasoning",
             BusinessMachineSynthesis,
@@ -154,14 +162,39 @@ EXTRACTED PROFILE:\n{profile_context}
             timeout_seconds=25.0,
         ),
         request_json_strict(
-            "commercial_reasoning",
-            CompactCommercialSynthesis,
-            system="Возвращай только компактный валидный JSON по схеме. Главный результат — доказанная коммерческая возможность.",
-            prompt=commercial_prompt,
+            "commercial_opportunity_reasoning",
+            CompactCommercialOpportunity,
+            system="Возвращай только валидный JSON по схеме. Выбери одну наиболее доказанную коммерческую возможность.",
+            prompt=opportunity_prompt,
             max_tokens=1500,
             timeout_seconds=25.0,
             reasoning_effort="high",
         ),
+    )
+
+    opportunity_context = json.dumps(
+        opportunity_result.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    execution_prompt = f"""Собери компактный пакет исполнения для уже выбранной
+коммерческой возможности. Не переоценивай и не заменяй выбранную возможность.
+Верни 3–5 конкретных AI-агентов/инструментов и пакет первого контакта. Каждый пункт
+должен быть совместим с фактами полного профиля; ничего не выдумывай. Это
+структурирование уже принятого решения, глубокое рассуждение не требуется.
+
+FULL EXTRACTED PROFILE:\n{profile_context}
+
+SELECTED OPPORTUNITY:\n{opportunity_context}
+"""
+    execution_result = await request_json_strict(
+        "commercial_execution",
+        CompactCommercialExecution,
+        system="Возвращай только компактный валидный JSON по схеме для исполнения выбранной возможности.",
+        prompt=execution_prompt,
+        max_tokens=1000,
+        timeout_seconds=15.0,
+        reasoning_enabled=False,
     )
 
     return _assemble_site_analysis(
@@ -171,6 +204,6 @@ EXTRACTED PROFILE:\n{profile_context}
         external_sources=external_sources,
         profile=profile,
         km=km_result,
-        commercial=_expand_commercial(commercial_result),
+        commercial=_expand_commercial(opportunity_result, execution_result),
         accessed_at=accessed_at,
     )
