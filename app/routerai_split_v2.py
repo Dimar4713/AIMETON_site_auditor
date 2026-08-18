@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from app.models import CompanyFact, EconomicSignal, SiteAnalysis
+from app.models import BusinessMachineCell, CompanyFact, EconomicSignal, SiteAnalysis
 from app.routerai_evidence_ledger import persist_merged_evidence_ledger
 from app.routerai_profile_extraction import extract_profile_parallel
 from app.routerai_split_synthesis import (
@@ -35,6 +35,13 @@ class FullReasoningProfile(BaseModel):
     economic_signals: list[EconomicSignal] = Field(default_factory=list)
     risks_and_assumptions: list[str] = Field(default_factory=list)
     coverage: dict[str, int | bool] = Field(default_factory=dict)
+
+
+class CompactBusinessMachineQuadrant(BaseModel):
+    business_machine_4x4: list[BusinessMachineCell] = Field(
+        default_factory=list,
+        max_length=4,
+    )
 
 
 class CompactCommercialOpportunity(BaseModel):
@@ -66,6 +73,33 @@ class CompactCommercialExecution(BaseModel):
     action_package: CompactActionPackage
 
 
+_KM_QUADRANTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("I", ("I-I", "I-II", "I-III", "I-IV")),
+    ("II", ("II-I", "II-II", "II-III", "II-IV")),
+    ("III", ("III-I", "III-II", "III-III", "III-IV")),
+    ("IV", ("IV-I", "IV-II", "IV-III", "IV-IV")),
+)
+
+_KM_LABELS = {
+    "I-I": "Взаимодействие",
+    "I-II": "Влияние",
+    "I-III": "Зависимость",
+    "I-IV": "Противодействие",
+    "II-I": "Учредители и собственники",
+    "II-II": "Ось люди-управленцы",
+    "II-III": "Обслуживающий персонал и роботы",
+    "II-IV": "Виртуозы и специалисты",
+    "III-I": "Знания и наука",
+    "III-II": "Стандартная процедура",
+    "III-III": "Рабочая процедура",
+    "III-IV": "Продукты, товар и услуга",
+    "IV-I": "Управление коммуникационными системами",
+    "IV-II": "Управление людьми",
+    "IV-III": "Управление технологиями",
+    "IV-IV": "Самоуправление",
+}
+
+
 def _expand_commercial(
     opportunity: CompactCommercialOpportunity,
     execution: CompactCommercialExecution,
@@ -79,6 +113,21 @@ def _expand_commercial(
     )
 
 
+def _merge_km_quadrants(
+    quadrants: list[CompactBusinessMachineQuadrant],
+) -> BusinessMachineSynthesis:
+    cells: list[BusinessMachineCell] = []
+    seen: set[str] = set()
+    for (_, allowed_codes), quadrant in zip(_KM_QUADRANTS, quadrants, strict=True):
+        allowed = set(allowed_codes)
+        for cell in quadrant.business_machine_4x4:
+            if cell.code not in allowed or cell.code in seen:
+                continue
+            seen.add(cell.code)
+            cells.append(cell)
+    return BusinessMachineSynthesis(business_machine_4x4=cells[:16])
+
+
 def _full_reasoning_profile(merged) -> FullReasoningProfile:
     return FullReasoningProfile(
         company_name=merged.company_name,
@@ -89,6 +138,20 @@ def _full_reasoning_profile(merged) -> FullReasoningProfile:
         risks_and_assumptions=merged.risks_and_assumptions,
         coverage=merged.coverage.safe_dict(),
     )
+
+
+def _km_quadrant_prompt(quadrant: str, codes: tuple[str, ...], profile_context: str) -> str:
+    canon = "; ".join(f"{code} {_KM_LABELS[code]}" for code in codes)
+    return f"""Построй только квадрант {quadrant} канонической бизнес-модели AIMETON / КМ
+из полного извлечённого профиля ниже. Разрешены только коды: {canon}.
+Верни не более четырёх ячеек. Для каждой ячейки укажи finding, status,
+confidence, source_ids и sales_relevance. Не создавай факты сверх профиля.
+Если данных нет, используй status=\"Нет данных\" и не компенсируй пробелы
+фантазией. Coverage metadata — только агрегаты полноты, не факты компании.
+Пиши кратко. Не включай ячейки других квадрантов.
+
+FULL EXTRACTED PROFILE:\n{profile_context}
+"""
 
 
 async def analyze_with_routerai_split_v2(
@@ -121,26 +184,6 @@ async def analyze_with_routerai_split_v2(
         separators=(",", ":"),
     )
 
-    km_prompt = f"""Построй каноническую бизнес-модель AIMETON / КМ только из
-извлечённого профиля ниже. Сформируй до 16 ячеек. Не создавай факты сверх
-профиля. Для каждой ячейки укажи finding, status, confidence, source_ids и
-sales_relevance.
-
-Канон:
-I-I Взаимодействие; I-II Влияние; I-III Зависимость; I-IV Противодействие.
-II-I Учредители и собственники; II-II Ось люди-управленцы;
-II-III Обслуживающий персонал и роботы; II-IV Виртуозы и специалисты.
-III-I Знания и наука; III-II Стандартная процедура; III-III Рабочая процедура;
-III-IV Продукты, товар и услуга.
-IV-I Управление коммуникационными системами; IV-II Управление людьми;
-IV-III Управление технологиями; IV-IV Самоуправление.
-Если данных нет, используй status=\"Нет данных\" и не компенсируй пробелы
-фантазией. Coverage metadata — только агрегаты полноты, не факты компании.
-Пиши кратко.
-
-EXTRACTED PROFILE:\n{profile_context}
-"""
-
     opportunity_prompt = f"""Ты — AI-продажник AIMETON. На основе только полного
 извлечённого профиля выбери одну наиболее доказанную коммерческую AI-возможность.
 Сначала учитывай подтверждённые экономические сигналы и пробелы. Определи проблему,
@@ -152,15 +195,23 @@ EXTRACTED PROFILE:\n{profile_context}
 FULL EXTRACTED PROFILE:\n{profile_context}
 """
 
-    km_result, opportunity_result = await asyncio.gather(
-        _request_json(
-            "km_reasoning",
-            BusinessMachineSynthesis,
-            system="Возвращай только компактный валидный JSON по схеме и соблюдай канонические коды КМ.",
-            prompt=km_prompt,
-            max_tokens=2500,
-            timeout_seconds=25.0,
-        ),
+    km_tasks = [
+        request_json_strict(
+            f"km_reasoning_{quadrant}",
+            CompactBusinessMachineQuadrant,
+            system=(
+                "Возвращай только компактный валидный JSON по схеме. "
+                f"Используй только канонические коды квадранта {quadrant}."
+            ),
+            prompt=_km_quadrant_prompt(quadrant, codes, profile_context),
+            max_tokens=1200,
+            timeout_seconds=18.0,
+            reasoning_effort="high",
+        )
+        for quadrant, codes in _KM_QUADRANTS
+    ]
+    gathered = await asyncio.gather(
+        *km_tasks,
         request_json_strict(
             "commercial_opportunity_reasoning",
             CompactCommercialOpportunity,
@@ -171,6 +222,8 @@ FULL EXTRACTED PROFILE:\n{profile_context}
             reasoning_effort="high",
         ),
     )
+    km_result = _merge_km_quadrants(gathered[:-1])
+    opportunity_result = gathered[-1]
 
     opportunity_context = json.dumps(
         opportunity_result.model_dump(mode="json"),

@@ -28,7 +28,45 @@ def _coverage() -> EvidenceCoverage:
     )
 
 
-def test_split_v2_stages_commercial_reasoning_then_deterministic_execution(monkeypatch) -> None:
+def _km_cell(code: str) -> BusinessMachineCell:
+    operators = {
+        "I": "I — Коммуникационные системы",
+        "II": "II — Люди",
+        "III": "III — Технологии",
+        "IV": "IV — Менеджмент",
+    }
+    vertices = {
+        "I-I": "Взаимодействие",
+        "I-II": "Влияние",
+        "I-III": "Зависимость",
+        "I-IV": "Противодействие",
+        "II-I": "Учредители и собственники",
+        "II-II": "Ось люди-управленцы",
+        "II-III": "Обслуживающий персонал и роботы",
+        "II-IV": "Виртуозы и специалисты",
+        "III-I": "Знания и наука",
+        "III-II": "Стандартная процедура",
+        "III-III": "Рабочая процедура",
+        "III-IV": "Продукты, товар и услуга",
+        "IV-I": "Управление коммуникационными системами",
+        "IV-II": "Управление людьми",
+        "IV-III": "Управление технологиями",
+        "IV-IV": "Самоуправление",
+    }
+    quadrant = code.rsplit("-", 1)[0]
+    return BusinessMachineCell(
+        code=code,
+        detail_operator=operators[quadrant],
+        vertex=vertices[code],
+        finding=f"Finding {code}",
+        status="Подтверждено",
+        confidence="Высокая",
+        source_ids=["S1"],
+        sales_relevance=f"Sales {code}",
+    )
+
+
+def test_split_v2_stages_km_quadrants_and_commercial_execution(monkeypatch) -> None:
     async def fake_profile(**kwargs):
         return MergedProfileExtraction(
             company_name="Example",
@@ -59,28 +97,17 @@ def test_split_v2_stages_commercial_reasoning_then_deterministic_execution(monke
     phase_kwargs: dict[str, dict] = {}
 
     async def fake_request(phase, model_type, **kwargs):
-        phases.append(phase)
-        phase_kwargs[phase] = kwargs
-        if model_type is BusinessMachineSynthesis:
-            return BusinessMachineSynthesis(
-                business_machine_4x4=[
-                    BusinessMachineCell(
-                        code="III-III",
-                        detail_operator="III — Технологии",
-                        vertex="Рабочая процедура",
-                        finding="Есть рабочий процесс",
-                        status="Подтверждено",
-                        confidence="Высокая",
-                        source_ids=["S1"],
-                        sales_relevance="Подходит для пилота",
-                    )
-                ]
-            )
-        raise AssertionError(model_type)
+        raise AssertionError((phase, model_type))
 
     async def fake_strict_request(phase, model_type, **kwargs):
         phases.append(phase)
         phase_kwargs[phase] = kwargs
+        if model_type is split_v2.CompactBusinessMachineQuadrant:
+            quadrant = phase.removeprefix("km_reasoning_")
+            code = f"{quadrant}-I"
+            return split_v2.CompactBusinessMachineQuadrant(
+                business_machine_4x4=[_km_cell(code)]
+            )
         if model_type is split_v2.CompactCommercialOpportunity:
             return split_v2.CompactCommercialOpportunity(
                 opportunity_type="AI automation",
@@ -123,10 +150,20 @@ def test_split_v2_stages_commercial_reasoning_then_deterministic_execution(monke
     )
 
     assert set(phases) == {
-        "km_reasoning",
+        "km_reasoning_I",
+        "km_reasoning_II",
+        "km_reasoning_III",
+        "km_reasoning_IV",
         "commercial_opportunity_reasoning",
         "commercial_execution",
     }
+    for quadrant in ("I", "II", "III", "IV"):
+        km_kwargs = phase_kwargs[f"km_reasoning_{quadrant}"]
+        assert km_kwargs["reasoning_effort"] == "high"
+        assert km_kwargs["max_tokens"] == 1200
+        assert km_kwargs["timeout_seconds"] == 18.0
+        assert "Engineering company" in km_kwargs["prompt"]
+        assert f"квадрант {quadrant}" in km_kwargs["prompt"]
     opportunity_kwargs = phase_kwargs["commercial_opportunity_reasoning"]
     assert opportunity_kwargs["reasoning_effort"] == "high"
     assert "reasoning_enabled" not in opportunity_kwargs
@@ -141,7 +178,12 @@ def test_split_v2_stages_commercial_reasoning_then_deterministic_execution(monke
     assert "Engineering company" in execution_kwargs["prompt"]
     assert result.company_name == "Example"
     assert result.sources[0].id == "S1"
-    assert result.business_machine_4x4[0].code == "III-III"
+    assert [cell.code for cell in result.business_machine_4x4] == [
+        "I-I",
+        "II-I",
+        "III-I",
+        "IV-I",
+    ]
     assert result.commercial_opportunity.score == 72
     assert result.readiness.provider_states["routerai"] == "active"
 
@@ -178,6 +220,34 @@ def test_full_reasoning_profile_has_no_legacy_30_fact_or_16_signal_cap() -> None
     assert reasoning.economic_signals[-1].signal == "signal-39"
     assert len(reasoning.evidence) == 25
     assert reasoning.coverage["complete"] is True
+
+
+def test_split_v2_km_quadrant_envelope_is_bounded_and_merge_is_fail_closed() -> None:
+    schema = split_v2.CompactBusinessMachineQuadrant.model_json_schema()
+    assert schema["properties"]["business_machine_4x4"]["maxItems"] == 4
+    quadrants = [
+        split_v2.CompactBusinessMachineQuadrant(
+            business_machine_4x4=[_km_cell("I-I"), _km_cell("I-II")]
+        ),
+        split_v2.CompactBusinessMachineQuadrant(
+            business_machine_4x4=[_km_cell("I-II"), _km_cell("II-I")]
+        ),
+        split_v2.CompactBusinessMachineQuadrant(
+            business_machine_4x4=[_km_cell("III-I")]
+        ),
+        split_v2.CompactBusinessMachineQuadrant(
+            business_machine_4x4=[_km_cell("IV-I")]
+        ),
+    ]
+    merged = split_v2._merge_km_quadrants(quadrants)
+    assert isinstance(merged, BusinessMachineSynthesis)
+    assert [cell.code for cell in merged.business_machine_4x4] == [
+        "I-I",
+        "I-II",
+        "II-I",
+        "III-I",
+        "IV-I",
+    ]
 
 
 def test_split_v2_commercial_envelopes_are_bounded_and_expandable() -> None:
