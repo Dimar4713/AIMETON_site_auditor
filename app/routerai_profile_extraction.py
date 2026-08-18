@@ -19,6 +19,8 @@ FactField = Literal[
 ]
 Confidence = Literal["Высокая", "Средняя", "Низкая"]
 ShortText = Annotated[str, Field(max_length=180)]
+ManagementShortText = Annotated[str, Field(max_length=120)]
+BoundedSourceId = Annotated[str, Field(max_length=64)]
 
 
 class CompactCompanyFact(BaseModel):
@@ -27,6 +29,13 @@ class CompactCompanyFact(BaseModel):
     period: str | None = Field(default=None, max_length=64)
     confidence: Confidence = "Средняя"
     source_ids: list[str] = Field(default_factory=list, max_length=3)
+
+
+class ManagementCompanyFact(CompactCompanyFact):
+    field: Literal["founders", "executives"]
+    value: str = Field(max_length=140)
+    period: str | None = Field(default=None, max_length=32)
+    source_ids: list[BoundedSourceId] = Field(default_factory=list, max_length=2)
 
 
 class CompactEconomicSignal(BaseModel):
@@ -46,8 +55,8 @@ class IdentityCoreSlice(BaseModel):
 
 
 class ManagementSlice(BaseModel):
-    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=2)
-    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=1)
+    company_facts: list[ManagementCompanyFact] = Field(default_factory=list, max_length=2)
+    risks_and_assumptions: list[ManagementShortText] = Field(default_factory=list, max_length=1)
 
 
 class OwnershipNetworkSlice(BaseModel):
@@ -93,6 +102,8 @@ _SLICE_SOURCE_KEYS = (
     "id", "title", "query_kind", "result_kind", "source_class",
     "evidence_level", "snippet",
 )
+_MANAGEMENT_OFFICIAL_TEXT_BUDGET = 5000
+_MANAGEMENT_SOURCE_CHAR_BUDGET = 5000
 
 
 def _source_slice(
@@ -181,8 +192,13 @@ async def extract_profile_parallel(
 ) -> MergedProfileExtraction:
     """Run bounded vertical extractors in parallel, then merge deterministically."""
     official_text = text[:10000]
+    management_official_text = text[:_MANAGEMENT_OFFICIAL_TEXT_BUDGET]
     identity_core_context = _source_slice(external_sources, _IDENTITY_CORE_KINDS)
-    management_context = _source_slice(external_sources, _MANAGEMENT_KINDS, char_budget=10000)
+    management_context = _source_slice(
+        external_sources,
+        _MANAGEMENT_KINDS,
+        char_budget=_MANAGEMENT_SOURCE_CHAR_BUDGET,
+    )
     ownership_network_context = _source_slice(
         external_sources,
         _OWNERSHIP_NETWORK_KINDS,
@@ -215,13 +231,15 @@ RELEVANT SOURCES:\n{identity_core_context}
 """
 
     management_prompt = f"""Извлеки только сведения о формальном управлении компанией.
-Разрешённые поля: founders, executives. Верни максимум один компактный факт на
-каждое из двух полей. Учредитель не является автоматически бенефициаром. Не
+Разрешённые поля: founders, executives. Верни максимум один короткий факт на
+каждое поле и максимум два source_ids на факт. Не перечисляй биографии, должности
+в нескольких формулировках или пояснения вне схемы. Учредитель не является
+автоматически бенефициаром. Если прямых данных нет, верни пустые массивы. Не
 извлекай affiliates, social_accounts, контакты, финансы и продукты.
 {common_rules}
 URL: {url}
 TITLE: {title}
-OFFICIAL PAGE TEXT:\n{official_text}
+OFFICIAL PAGE TEXT:\n{management_official_text}
 RELEVANT SOURCES:\n{management_context}
 """
 
