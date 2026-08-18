@@ -222,18 +222,32 @@ def test_full_reasoning_profile_has_no_legacy_30_fact_or_16_signal_cap() -> None
     assert reasoning.coverage["complete"] is True
 
 
-def test_split_v2_km_quadrant_envelope_is_bounded_and_merge_deduplicates() -> None:
+def test_split_v2_km_quadrant_envelope_is_bounded_and_merge_is_fail_closed() -> None:
     schema = split_v2.CompactBusinessMachineQuadrant.model_json_schema()
     assert schema["properties"]["business_machine_4x4"]["maxItems"] == 4
-    first = split_v2.CompactBusinessMachineQuadrant(
-        business_machine_4x4=[_km_cell("I-I"), _km_cell("I-II")]
-    )
-    second = split_v2.CompactBusinessMachineQuadrant(
-        business_machine_4x4=[_km_cell("I-II"), _km_cell("II-I")]
-    )
-    merged = split_v2._merge_km_quadrants([first, second])
+    quadrants = [
+        split_v2.CompactBusinessMachineQuadrant(
+            business_machine_4x4=[_km_cell("I-I"), _km_cell("I-II")]
+        ),
+        split_v2.CompactBusinessMachineQuadrant(
+            business_machine_4x4=[_km_cell("I-II"), _km_cell("II-I")]
+        ),
+        split_v2.CompactBusinessMachineQuadrant(
+            business_machine_4x4=[_km_cell("III-I")]
+        ),
+        split_v2.CompactBusinessMachineQuadrant(
+            business_machine_4x4=[_km_cell("IV-I")]
+        ),
+    ]
+    merged = split_v2._merge_km_quadrants(quadrants)
     assert isinstance(merged, BusinessMachineSynthesis)
-    assert [cell.code for cell in merged.business_machine_4x4] == ["I-I", "I-II", "II-I"]
+    assert [cell.code for cell in merged.business_machine_4x4] == [
+        "I-I",
+        "I-II",
+        "II-I",
+        "III-I",
+        "IV-I",
+    ]
 
 
 def test_split_v2_commercial_envelopes_are_bounded_and_expandable() -> None:
