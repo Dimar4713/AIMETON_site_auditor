@@ -56,6 +56,7 @@ def test_source_slices_follow_search_verticals_and_keep_ids() -> None:
 def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
     fact_schema = profile.CompactCompanyFact.model_json_schema()
     management_fact_schema = profile.ManagementCompanyFact.model_json_schema()
+    ownership_fact_schema = profile.OwnershipNetworkCompanyFact.model_json_schema()
     signal_schema = profile.CompactEconomicSignal.model_json_schema()
     identity_schema = profile.IdentityCoreSlice.model_json_schema()
     management_schema = profile.ManagementSlice.model_json_schema()
@@ -70,6 +71,11 @@ def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
     assert management_fact_schema["properties"]["period"]["anyOf"][0]["maxLength"] == 32
     assert management_fact_schema["properties"]["source_ids"]["maxItems"] == 2
     assert management_fact_schema["properties"]["source_ids"]["items"]["maxLength"] == 64
+    assert ownership_fact_schema["properties"]["field"]["enum"] == ["beneficial_owners", "affiliates", "social_accounts"]
+    assert ownership_fact_schema["properties"]["value"]["maxLength"] == 140
+    assert ownership_fact_schema["properties"]["period"]["anyOf"][0]["maxLength"] == 32
+    assert ownership_fact_schema["properties"]["source_ids"]["maxItems"] == 2
+    assert ownership_fact_schema["properties"]["source_ids"]["items"]["maxLength"] == 64
     assert signal_schema["properties"]["signal"]["maxLength"] == 140
     assert signal_schema["properties"]["business_effect"]["maxLength"] == 170
     assert signal_schema["properties"]["source_ids"]["maxItems"] == 3
@@ -77,7 +83,7 @@ def test_vertical_dto_bounds_are_materially_smaller_than_monolith() -> None:
     assert management_schema["properties"]["company_facts"]["maxItems"] == 2
     assert management_schema["properties"]["risks_and_assumptions"]["maxItems"] == 1
     assert ownership_schema["properties"]["company_facts"]["maxItems"] == 3
-    assert ownership_schema["properties"]["risks_and_assumptions"]["maxItems"] == 2
+    assert ownership_schema["properties"]["risks_and_assumptions"]["maxItems"] == 1
     assert operations_schema["properties"]["company_facts"]["maxItems"] == 9
     assert signal_slice_schema["properties"]["economic_signals"]["maxItems"] == 6
 
@@ -181,7 +187,7 @@ def test_parallel_extractors_merge_into_public_fact_models() -> None:
         if model_type is profile.OwnershipNetworkSlice:
             return profile.OwnershipNetworkSlice(
                 company_facts=[
-                    profile.CompactCompanyFact(
+                    profile.OwnershipNetworkCompanyFact(
                         field="affiliates",
                         value="Related company hypothesis",
                         confidence="Низкая",

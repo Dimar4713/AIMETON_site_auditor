@@ -38,6 +38,13 @@ class ManagementCompanyFact(CompactCompanyFact):
     source_ids: list[BoundedSourceId] = Field(default_factory=list, max_length=2)
 
 
+class OwnershipNetworkCompanyFact(CompactCompanyFact):
+    field: Literal["beneficial_owners", "affiliates", "social_accounts"]
+    value: str = Field(max_length=140)
+    period: str | None = Field(default=None, max_length=32)
+    source_ids: list[BoundedSourceId] = Field(default_factory=list, max_length=2)
+
+
 class CompactEconomicSignal(BaseModel):
     signal: str = Field(max_length=140)
     evidence: str = Field(max_length=170)
@@ -60,8 +67,8 @@ class ManagementSlice(BaseModel):
 
 
 class OwnershipNetworkSlice(BaseModel):
-    company_facts: list[CompactCompanyFact] = Field(default_factory=list, max_length=3)
-    risks_and_assumptions: list[ShortText] = Field(default_factory=list, max_length=2)
+    company_facts: list[OwnershipNetworkCompanyFact] = Field(default_factory=list, max_length=3)
+    risks_and_assumptions: list[ManagementShortText] = Field(default_factory=list, max_length=1)
 
 
 class OperationsProfileSlice(BaseModel):
@@ -245,7 +252,8 @@ RELEVANT SOURCES:\n{management_context}
 
     ownership_network_prompt = f"""Извлеки только ownership/network сведения компании.
 Разрешённые поля: beneficial_owners, affiliates, social_accounts. Верни максимум
-один компактный факт на каждое из трёх полей. Бенефициарность и аффилированность
+один короткий факт на каждое из трёх полей и максимум два source_ids на факт.
+Не добавляй пояснения вне схемы. Бенефициарность и аффилированность
 маркируй осторожно и не выводи их только из факта учредительства. Не повторяй
 founders/executives, адреса, телефоны, финансы и продукты.
 {common_rules}
