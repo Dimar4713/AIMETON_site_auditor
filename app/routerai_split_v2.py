@@ -118,9 +118,10 @@ def _merge_km_quadrants(
 ) -> BusinessMachineSynthesis:
     cells: list[BusinessMachineCell] = []
     seen: set[str] = set()
-    for quadrant in quadrants:
+    for (_, allowed_codes), quadrant in zip(_KM_QUADRANTS, quadrants, strict=True):
+        allowed = set(allowed_codes)
         for cell in quadrant.business_machine_4x4:
-            if cell.code in seen:
+            if cell.code not in allowed or cell.code in seen:
                 continue
             seen.add(cell.code)
             cells.append(cell)
