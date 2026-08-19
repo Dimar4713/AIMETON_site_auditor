@@ -53,7 +53,7 @@ jobs:
       (!github.event.issue.pull_request &&
        github.event.comment.body == '/sync-project-item' &&
        github.event.comment.user.login == 'Dimar4713')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
     env:
       GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
       PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
