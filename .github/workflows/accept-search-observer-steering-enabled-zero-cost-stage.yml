@@ -1,0 +1,223 @@
+name: Accept Search Observer Steering Enabled Zero Cost Stage
+
+on:
+  workflow_run:
+    workflows:
+      - Accept Search Observer Steering Disabled Stage
+    types:
+      - completed
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: search-observer-steering-enabled-zero-cost-stage
+  cancel-in-progress: false
+
+jobs:
+  enabled-zero-cost-stage:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 12
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Require exact deployed SHA and healthy runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected="$EXPECTED_SHA"
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          cd "$STACK_DIR"
+          test -f app-source-sha.txt
+          test "$(tr -d '[:space:]' < app-source-sha.txt)" = "$expected"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$status" == healthy || "$status" == running ]]
+          echo "validated_sha=$expected"
+          echo "container_status=$status"
+
+      - name: Prove production steering remains disabled
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          value="$(docker inspect "$CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' | awk -F= '$1=="HUNTER_SEARCH_OBSERVER_STEERING_ENABLED" {print $2}' | tail -n1)"
+          normalized="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+          case "$normalized" in
+            1|true|yes|on)
+              echo "production steering gate is unexpectedly enabled" >&2
+              exit 1
+              ;;
+          esac
+          echo "production_steering_gate=disabled"
+
+      - name: Exercise enabled explicit-regime run_hunt with fake gateway and observer only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i \
+            -w /app \
+            -e PYTHONPATH=/app \
+            -e AIMETON_RUNTIME_DB=/tmp/search-observer-steering-enabled-zero-cost-stage.sqlite3 \
+            -e HUNTER_SEARCH_OBSERVER_STEERING_ENABLED=true \
+            -e HUNTER_SEARCH_OBSERVER_STEERING_REGIME=balanced \
+            -e HUNTER_SEARCH_OBSERVER_RESERVE_QUERIES=2 \
+            -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=false \
+            "$CONTAINER" python - <<'PY'
+          import asyncio
+          from app import discovery
+          from app.hunter_search_policy_authority import HunterSearchPolicyAuthority, ResolvedHunterSearchPolicy
+          from app.models import HuntRequest
+          from app.search_gateway.models import GatewayState, SearchDiagnostics, SearchPolicy, SearchResponse
+          from app.search_observer_llm import DirectionRecommendation, ObserverAction, SearchObserverRecommendation
+
+          queries = [
+              "стоматология красноярск официальный сайт",
+              "металлообработка красноярск завод",
+              "металлообработка завод красноярск оборудование",
+              "стоматология клиника красноярск",
+          ]
+          events = []
+
+          class FakeGateway:
+              async def search(self, request, _policy):
+                  events.append(f"search:{request.query}")
+                  return SearchResponse(
+                      results=[],
+                      diagnostics=SearchDiagnostics(
+                          state=GatewayState.SUCCESS,
+                          selected_provider="offline-fake",
+                      ),
+                  )
+
+          async def no_llm_plan(**_kwargs):
+              return None
+
+          async def observer(_telemetry):
+              events.append("observer")
+              return SearchObserverRecommendation(
+                  sufficient_evidence=True,
+                  recommendations=[
+                      DirectionRecommendation(
+                          direction_index=0,
+                          action=ObserverAction.CONTINUE,
+                          confidence=0.9,
+                          rationale="productive continuation",
+                      )
+                  ],
+                  summary="continue productive direction",
+              )
+
+          discovery.generate_hunter_query_plan = no_llm_plan
+          discovery._build_queries = lambda _req: list(queries)
+          discovery.get_search_gateway = lambda: FakeGateway()
+          discovery.evaluate_search_wave_shadow = observer
+          discovery.resolve_hunter_search_policy = lambda: ResolvedHunterSearchPolicy(
+              policy=SearchPolicy(),
+              authority=HunterSearchPolicyAuthority.ADMIN,
+              selected_policy_fingerprint="sha256:offline-admin",
+              env_policy_fingerprint="sha256:offline-env",
+              admin_projection_fingerprint="sha256:offline-admin",
+              policy_equivalent=False,
+              admin_policy_persisted=True,
+          )
+
+          async def main():
+              enabled, regime, reserve = discovery._observer_runtime_steering_config()
+              assert enabled is True
+              assert regime == "balanced"
+              assert reserve == 2
+              result = await discovery.run_hunt(
+                  HuntRequest(
+                      region="Красноярск",
+                      industries=["Стоматология"],
+                      max_queries=4,
+                      results_per_query=1,
+                      max_candidates=10,
+                      output_limit=10,
+                      concurrency=1,
+                  )
+              )
+              assert events[:2] == [f"search:{queries[0]}", f"search:{queries[1]}"]
+              assert events[2] == "observer"
+              searched = [event.removeprefix("search:") for event in events if event.startswith("search:")]
+              assert searched == [queries[0], queries[1], queries[3], queries[2]], searched
+              assert len(searched) == len(queries)
+              assert set(searched) == set(queries)
+              assert len(set(searched)) == len(queries)
+              assert result.queries == searched
+              assert result.discovered == 0
+              print("enabled_run_hunt=passed")
+              print("observer_calls=1")
+              print("reserve_reordered=true")
+              print("all_original_queries_once=true")
+              print("query_budget_increase=0")
+              print("external_provider_calls=0")
+              print("external_llm_calls=0")
+
+          asyncio.run(main())
+          PY
+
+      - name: Remove synthetic canary runtime state
+        if: always()
+        shell: bash
+        run: |
+          docker exec "$CONTAINER" sh -lc 'rm -f /tmp/search-observer-steering-enabled-zero-cost-stage.sqlite3 /tmp/search-observer-steering-enabled-zero-cost-stage.sqlite3-wal /tmp/search-observer-steering-enabled-zero-cost-stage.sqlite3-shm'
+
+      - name: Publish zero-cost enabled canary summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "exact_sha=$EXPECTED_SHA"
+          echo "production_steering_gate=disabled"
+          echo "canary_process_steering_gate=enabled"
+          echo "explicit_regime=balanced"
+          echo "observer_calls=1_fake_only"
+          echo "external_provider_calls=0"
+          echo "external_llm_calls=0"
+          echo "paid_calls=0"
+          echo "query_budget_increase=0"
+          echo "reserve_reordered=true"
+
+      - name: Publish terminal evidence to issue 753
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const expected = process.env.EXPECTED_SHA;
+            const status = process.env.JOB_STATUS || 'unknown';
+            const passed = status === 'success';
+            const body = [
+              '## Search Observer enabled zero-cost Stage canary',
+              '',
+              `- exact SHA: \`${expected}\``,
+              `- prerequisite disabled acceptance run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.payload.workflow_run.id}`,
+              `- workflow run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `- terminal job status: ${status}`,
+              '- production steering gate: **remains disabled**',
+              '- canary steering: **enabled only inside isolated docker exec process**',
+              '- explicit regime: **balanced**',
+              '- fake Observer calls: **1**',
+              '- external provider/search calls: **0 by construction**',
+              '- external LLM calls: **0 by construction**',
+              '- paid calls: **0**',
+              '- total query budget increase: **0**',
+              '',
+              `### Verdict\n${passed ? '✅ Enabled zero-cost Stage canary passed.' : '❌ Enabled zero-cost Stage canary did not pass.'}`,
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 753,
+              body,
+            });
