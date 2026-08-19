@@ -28,6 +28,7 @@ def test_routerai_input_metrics_are_truthful_untruncated_and_content_free() -> N
         "external_context_chars",
         "external_source_count",
         "schema_chars",
+        "estimated_total_input_chars",
         "dynamic_input_chars",
         "official_chunks_estimated",
         "external_chunks_estimated",
@@ -39,9 +40,9 @@ def test_routerai_input_metrics_are_truthful_untruncated_and_content_free() -> N
     assert metrics["schema_chars"] == len(
         json.dumps(SiteAnalysis.model_json_schema(), ensure_ascii=False)
     )
-    assert metrics["dynamic_input_chars"] == (
-        len(text) + len(serialized_sources) + metrics["schema_chars"]
-    )
+    expected_total = len(text) + len(serialized_sources) + metrics["schema_chars"]
+    assert metrics["estimated_total_input_chars"] == expected_total
+    assert metrics["dynamic_input_chars"] == expected_total
     assert metrics["official_chunks_estimated"] == 4
     assert metrics["external_chunks_estimated"] == (
         len(serialized_sources) + DEFAULT_EVIDENCE_CHUNK_CHARS - 1
