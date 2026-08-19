@@ -1,12 +1,10 @@
 name: Reconcile Search Observer Steering Disabled Stage
 
 on:
-  workflow_dispatch:
-    inputs:
-      expected_sha:
-        description: Exact deployed commit SHA used by the original disabled Stage acceptance
-        required: true
-        type: string
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/reconcile-search-observer-steering-disabled-stage.yml
 
 permissions:
   actions: read
@@ -14,7 +12,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: reconcile-search-observer-steering-disabled-stage-${{ inputs.expected_sha }}
+  group: reconcile-search-observer-steering-disabled-stage-06c861d50be5bb6d66c93cd7d791207ccba440bd
   cancel-in-progress: false
 
 jobs:
@@ -25,14 +23,14 @@ jobs:
       - name: Resolve unique original acceptance run and publish terminal evidence
         uses: actions/github-script@v7
         env:
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_SHA: 06c861d50be5bb6d66c93cd7d791207ccba440bd
         with:
           github-token: ${{ github.token }}
           retries: 3
           script: |
             const expected = (process.env.EXPECTED_SHA || '').trim();
             if (!/^[0-9a-f]{40}$/.test(expected)) {
-              core.setFailed('expected_sha must be an exact 40-character lowercase commit SHA');
+              core.setFailed('EXPECTED_SHA must be an exact 40-character lowercase commit SHA');
               return;
             }
 
