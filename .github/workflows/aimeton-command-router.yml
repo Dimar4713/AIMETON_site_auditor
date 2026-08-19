@@ -31,7 +31,7 @@ jobs:
           script: |
             const body = (process.env.COMMENT_BODY || '').trim();
             const issueNumber = Number(process.env.ISSUE_NUMBER || '0');
-            const match = body.match(/^\/(deploy-stage|accept-admin-trace-stage|accept-aimeton-self-audit-stage|accept-routerai-synthesis-stage|accept-checkpoint-stage|accept-mobile-ui-stage|accept-service-catalog-stage|accept-hunter-runtime-stage|accept-logging-pressure-stage|accept-live-analysis-stage|accept-interface-audit-stage|accept-ui-stage|accept-user-workspace-stage|accept-admin-workspace-stage|accept-mission-stage-v2|accept-integrated-stage-continuity|accept-integrated-stage-core|audit-server-architecture|accept-integrated-stage-companies-bootstrap|audit-auth-persistence|diagnose-mission-stage|reconcile-stage-data-mount|repair-admin-stage|accept-auth-stage|benchmark-searxng-concurrency-stage|accept-hunter-real-e2e-stage|benchmark-search-observer-shadow-stage|benchmark-search-observer-model-arena-stage|validate-search-observer-second-wave-zero-cost|validate-search-observer-second-wave-live-stage|validate-search-observer-heterogeneous-batch-stage|inventory-search-gap-trace-stage)\s+([0-9a-f]{40})$/);
+            const match = body.match(/^\/(deploy-stage|accept-admin-trace-stage|accept-aimeton-self-audit-stage|accept-routerai-synthesis-stage|accept-checkpoint-stage|accept-mobile-ui-stage|accept-service-catalog-stage|accept-hunter-runtime-stage|accept-logging-pressure-stage|accept-live-analysis-stage|accept-interface-audit-stage|accept-ui-stage|accept-user-workspace-stage|accept-admin-workspace-stage|accept-mission-stage-v2|accept-integrated-stage-continuity|accept-integrated-stage-core|audit-server-architecture|accept-integrated-stage-companies-bootstrap|audit-auth-persistence|diagnose-mission-stage|reconcile-stage-data-mount|repair-admin-stage|accept-auth-stage|benchmark-searxng-concurrency-stage|accept-hunter-real-e2e-stage|benchmark-search-observer-shadow-stage|benchmark-search-observer-model-arena-stage|validate-search-observer-second-wave-zero-cost|accept-search-observer-steering-disabled-stage|validate-search-observer-second-wave-live-stage|validate-search-observer-heterogeneous-batch-stage|inventory-search-gap-trace-stage)\s+([0-9a-f]{40})$/);
 
             if (!match) {
               core.notice('Ignored unsupported slash command; no downstream workflow dispatched.');
@@ -212,6 +212,11 @@ jobs:
               'validate-search-observer-second-wave-zero-cost': {
                 issue_number: 573,
                 workflow_id: 'validate-search-observer-second-wave-zero-cost.yml',
+                inputs: {expected_sha: sha},
+              },
+              'accept-search-observer-steering-disabled-stage': {
+                issue_number: 753,
+                workflow_id: 'accept-search-observer-steering-disabled-stage.yml',
                 inputs: {expected_sha: sha},
               },
               'validate-search-observer-second-wave-live-stage': {

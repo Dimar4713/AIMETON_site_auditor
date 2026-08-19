@@ -1,0 +1,152 @@
+name: Accept Search Observer Steering Disabled Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact deployed commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-observer-steering-disabled-stage
+  cancel-in-progress: false
+
+jobs:
+  disabled-stage:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      STACK_DIR: /opt/aimeton/auditor-stack
+      CONTAINER: aimeton-auditor
+    steps:
+      - name: Require exact deployed SHA and healthy runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ inputs.expected_sha }}'
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          cd "$STACK_DIR"
+          [[ "$(cat app-source-sha.txt)" == "$expected" ]]
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+          [[ "$status" == healthy || "$status" == running ]]
+          echo "validated_sha=$expected"
+          echo "container_status=$status"
+
+      - name: Prove production steering gate is disabled
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker inspect "$CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | awk -F= '$1=="HUNTER_SEARCH_OBSERVER_STEERING_ENABLED" {print $2}' \
+            | while IFS= read -r value; do
+                normalized="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+                case "$normalized" in
+                  1|true|yes|on)
+                    echo "steering gate is unexpectedly enabled in Stage container" >&2
+                    exit 1
+                    ;;
+                esac
+              done
+          echo "steering_gate=disabled"
+
+      - name: Exercise deployed run_hunt through fake gateway only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec -i \
+            -w /app \
+            -e PYTHONPATH=/app \
+            -e AIMETON_RUNTIME_DB=/tmp/search-observer-steering-disabled-stage.sqlite3 \
+            -e HUNTER_SEARCH_OBSERVER_STEERING_ENABLED=false \
+            -e HUNTER_SEARCH_OBSERVER_STEERING_REGIME=auto \
+            -e HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED=false \
+            "$CONTAINER" python - <<'PY'
+          import asyncio
+          from app import discovery
+          from app.hunter_search_policy_authority import HunterSearchPolicyAuthority, ResolvedHunterSearchPolicy
+          from app.models import HuntRequest
+          from app.search_gateway.models import GatewayState, SearchDiagnostics, SearchPolicy, SearchResponse
+
+          queries = ["offline-q1", "offline-q2", "offline-q3", "offline-q4"]
+          calls = []
+
+          class FakeGateway:
+              async def search(self, request, _policy):
+                  calls.append(request.query)
+                  return SearchResponse(
+                      results=[],
+                      diagnostics=SearchDiagnostics(
+                          state=GatewayState.SUCCESS,
+                          selected_provider="offline-fake",
+                      ),
+                  )
+
+          async def no_llm_plan(**_kwargs):
+              return None
+
+          async def forbidden_observer(_telemetry):
+              raise AssertionError("disabled Stage acceptance must not invoke Search Observer")
+
+          discovery.generate_hunter_query_plan = no_llm_plan
+          discovery._build_queries = lambda _req: list(queries)
+          discovery.get_search_gateway = lambda: FakeGateway()
+          discovery.evaluate_search_wave_shadow = forbidden_observer
+          discovery.resolve_hunter_search_policy = lambda: ResolvedHunterSearchPolicy(
+              policy=SearchPolicy(),
+              authority=HunterSearchPolicyAuthority.ADMIN,
+              selected_policy_fingerprint="sha256:offline-admin",
+              env_policy_fingerprint="sha256:offline-env",
+              admin_projection_fingerprint="sha256:offline-admin",
+              policy_equivalent=False,
+              admin_policy_persisted=True,
+          )
+
+          async def main():
+              enabled, regime, reserve = discovery._observer_runtime_steering_config()
+              assert enabled is False
+              assert regime == "auto"
+              assert reserve >= 0
+              result = await discovery.run_hunt(
+                  HuntRequest(
+                      region="Offline",
+                      industries=["Test"],
+                      max_queries=4,
+                      results_per_query=1,
+                      max_candidates=4,
+                      output_limit=4,
+                      concurrency=1,
+                  )
+              )
+              assert calls == queries
+              assert result.queries == queries
+              assert result.discovered == 0
+              print("offline_run_hunt=passed")
+              print("observer_calls=0")
+              print("query_plan_preserved=true")
+              print("external_provider_calls=0")
+
+          asyncio.run(main())
+          PY
+
+      - name: Remove synthetic acceptance runtime state
+        if: always()
+        shell: bash
+        run: |
+          docker exec "$CONTAINER" sh -lc 'rm -f /tmp/search-observer-steering-disabled-stage.sqlite3 /tmp/search-observer-steering-disabled-stage.sqlite3-wal /tmp/search-observer-steering-disabled-stage.sqlite3-shm'
+
+      - name: Publish zero-cost acceptance summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "exact_sha=${{ inputs.expected_sha }}"
+          echo "steering_gate=disabled"
+          echo "run_hunt_path=passed"
+          echo "observer_calls=0"
+          echo "external_provider_calls=0"
+          echo "paid_calls=0"
+          echo "routing_equivalent=true"
