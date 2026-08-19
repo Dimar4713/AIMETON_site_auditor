@@ -13,12 +13,23 @@ on:
     paths-ignore:
       - "docs/**"
       - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact commit SHA to validate
+        required: true
+        type: string
+      evidence_issue:
+        description: Optional Issue number for terminal evidence
+        required: false
+        type: string
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
-  group: baseline-ci-${{ github.event.pull_request.number || github.ref }}
+  group: baseline-ci-${{ github.event.pull_request.number || inputs.expected_sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,14 +37,17 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 20
     env:
-      TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_sha || github.event.pull_request.head.sha || github.sha }}
+      EVIDENCE_ISSUE: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_issue || '' }}
       VENV_DIR: ${{ runner.temp }}/aimeton-baseline-${{ github.run_id }}
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Materialize exact commit without marketplace actions
         shell: bash
         run: |
           set -Eeuo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
           cd "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           if [[ ! -d .git ]]; then
@@ -119,6 +133,49 @@ jobs:
             tail -n 80 pytest-output.txt 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish terminal evidence for owner-dispatched validation
+        if: always() && env.EVIDENCE_ISSUE != ''
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set +e
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          try:
+              issue_number = int(os.environ['EVIDENCE_ISSUE'])
+          except (KeyError, ValueError):
+              raise SystemExit(0)
+          body = '\n'.join([
+              '## Self-hosted Baseline evidence',
+              '',
+              f"- exact SHA: `{os.environ['TARGET_SHA']}`",
+              f"- run: {os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              f"- runner: `{os.environ.get('RUNNER_NAME', 'unknown')}`",
+              f"- machine: `{os.uname().nodename}`",
+              f"- terminal job status: **{os.environ.get('JOB_STATUS', 'unknown')}**",
+              '- GitHub-hosted runner minutes: **0**',
+              '- GitHub Marketplace actions: **disabled**',
+          ])
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{issue_number}/comments",
+              data=json.dumps({'body': body}).encode('utf-8'),
+              method='POST',
+              headers={
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              if response.status not in (200, 201):
+                  raise SystemExit(response.status)
+          PY
 
       - name: Cleanup isolated Python environment
         if: always()
