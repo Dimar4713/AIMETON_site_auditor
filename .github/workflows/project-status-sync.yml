@@ -5,8 +5,6 @@ on:
     types: [opened, reopened, closed, labeled, unlabeled]
   pull_request:
     types: [opened, reopened, closed, ready_for_review, converted_to_draft, labeled, unlabeled]
-  issue_comment:
-    types: [created]
   workflow_dispatch:
     inputs:
       operation:
@@ -48,12 +46,8 @@ concurrency:
 
 jobs:
   sync:
-    if: >-
-      github.event_name != 'issue_comment' ||
-      (!github.event.issue.pull_request &&
-       github.event.comment.body == '/sync-project-item' &&
-       github.event.comment.user.login == 'Dimar4713')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
       PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
@@ -61,9 +55,13 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       EVENT_NAME: ${{ github.event_name }}
       EVENT_ACTION: ${{ github.event.action }}
+      TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       OPERATION: ${{ github.event_name == 'workflow_dispatch' && inputs.operation || github.event_name == 'issues' && github.event.action == 'labeled' && (github.event.label.name == 'project:audit-roadmap' || github.event.label.name == 'project:repair-roadmap') && 'repair_roadmap' || 'sync_item' }}
       MANUAL_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'sync_item' && inputs.target_status || '' }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'project:audit-roadmap' || false }}
+      MANUAL_ITEM_KIND: ${{ github.event_name == 'workflow_dispatch' && inputs.item_kind || '' }}
+      MANUAL_ITEM_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.item_number || '' }}
+
     steps:
       - name: Validate Project automation configuration
         shell: bash
@@ -73,40 +71,77 @@ jobs:
           test -n "${PROJECT_OWNER:-}" || { echo "Missing variable PROJECT_OWNER"; exit 1; }
           test -n "${PROJECT_NUMBER:-}" || { echo "Missing variable PROJECT_NUMBER"; exit 1; }
 
-      - uses: actions/checkout@v4
+      - name: Materialize exact repository source without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
 
-      - name: Resolve event item
+      - name: Resolve event item without marketplace actions
         if: env.OPERATION == 'sync_item'
         id: item
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.PROJECTS_TOKEN }}
-          script: |
-            const kind = context.eventName === 'workflow_dispatch'
-              ? '${{ inputs.item_kind }}'
-              : (context.payload.pull_request ? 'pull_request' : 'issue');
-            const number = context.eventName === 'workflow_dispatch'
-              ? Number('${{ inputs.item_number }}')
-              : (context.payload.issue?.number ?? context.payload.pull_request?.number);
-            if (!Number.isInteger(number) || number <= 0) {
-              core.setFailed('item_number must be a positive integer for sync_item');
-              return;
-            }
-            const item = kind === 'pull_request'
-              ? (await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: number})).data
-              : (await github.rest.issues.get({owner: context.repo.owner, repo: context.repo.repo, issue_number: number})).data;
-            core.setOutput('kind', kind);
-            core.setOutput('number', String(number));
-            core.setOutput('node_id', item.node_id);
-            core.setOutput('state', item.state);
-            core.setOutput('state_reason', item.state_reason || '');
-            core.setOutput('title', item.title || '');
-            core.setOutput('labels', (item.labels || []).map(x => typeof x === 'string' ? x : x.name).filter(Boolean).join(','));
-            core.setOutput('created_at', item.created_at || '');
-            core.setOutput('event_at', context.eventName === 'workflow_dispatch' ? new Date().toISOString() : (item.updated_at || new Date().toISOString()));
-            core.setOutput('closed_at', item.closed_at || '');
-            core.setOutput('merged', String(Boolean(item.merged)));
-            core.setOutput('merged_at', item.merged_at || '');
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as handle:
+              event = json.load(handle)
+          manual = os.environ.get('EVENT_NAME') == 'workflow_dispatch'
+          kind = os.environ.get('MANUAL_ITEM_KIND') if manual else ('pull_request' if event.get('pull_request') else 'issue')
+          raw_number = os.environ.get('MANUAL_ITEM_NUMBER') if manual else ((event.get('issue') or event.get('pull_request') or {}).get('number'))
+          try:
+              number = int(raw_number)
+          except (TypeError, ValueError):
+              raise SystemExit('item_number must be a positive integer for sync_item')
+          if number <= 0 or kind not in {'issue', 'pull_request'}:
+              raise SystemExit('invalid sync item')
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          token = os.environ['GH_TOKEN']
+          endpoint = f'pulls/{number}' if kind == 'pull_request' else f'issues/{number}'
+          req = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/{endpoint}',
+              headers={
+                  'Authorization': f'Bearer {token}',
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as response:
+              item = json.load(response)
+          values = {
+              'kind': kind,
+              'number': str(number),
+              'node_id': item.get('node_id') or '',
+              'state': item.get('state') or '',
+              'state_reason': item.get('state_reason') or '',
+              'title': item.get('title') or '',
+              'labels': ','.join((x if isinstance(x, str) else x.get('name', '')) for x in item.get('labels', []) if x),
+              'created_at': item.get('created_at') or '',
+              'event_at': item.get('updated_at') or '',
+              'closed_at': item.get('closed_at') or '',
+              'merged': str(bool(item.get('merged'))).lower(),
+              'merged_at': item.get('merged_at') or '',
+          }
+          output = os.environ['GITHUB_OUTPUT']
+          with open(output, 'a', encoding='utf-8') as handle:
+              for key, value in values.items():
+                  safe = str(value).replace('\n', ' ')
+                  handle.write(f'{key}={safe}\n')
+          PY
 
       - name: Synchronize Project V2 item, status, fields and actual dates
         id: project_sync
@@ -126,26 +161,50 @@ jobs:
           PR_MERGED_AT: ${{ steps.item.outputs.merged_at }}
         run: |
           set -o pipefail
-          python scripts/project_status_sync_entry.py 2>&1 | tee project-sync-result.json
+          python3 scripts/project_status_sync_entry.py 2>&1 | tee project-sync-result.json
 
       - name: Assign and verify planned dates after item synchronization
         if: env.OPERATION == 'sync_item' && env.DRY_RUN != 'true'
         shell: bash
         run: |
           set -o pipefail
-          python scripts/project_plan_dates.py 2>&1 | tee project-plan-dates-result.json
+          python3 scripts/project_plan_dates.py 2>&1 | tee project-plan-dates-result.json
 
-      - name: Publish Roadmap repair evidence
+      - name: Publish Roadmap repair evidence without marketplace actions
         if: always() && env.OPERATION == 'repair_roadmap' && github.event_name == 'issues'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.PROJECTS_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const path = 'project-sync-result.json';
-            const raw = fs.existsSync(path) ? fs.readFileSync(path, 'utf8').trim() : 'Project sync produced no report file.';
-            const report = raw.length > 55000 ? `${raw.slice(0, 55000)}\n…truncated` : raw;
-            const outcome = '${{ steps.project_sync.outcome }}';
-            const dryRun = String(process.env.DRY_RUN).toLowerCase() === 'true';
-            const heading = dryRun ? 'Roadmap repair dry-run evidence' : 'Roadmap repair apply evidence';
-            await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: context.payload.issue.number, body: `## ${heading}\n\n- outcome: \`${outcome}\`\n- workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n\`\`\`json\n${report}\n\`\`\``});
+        shell: bash
+        run: |
+          set +e
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          path = 'project-sync-result.json'
+          try:
+              with open(path, encoding='utf-8') as handle:
+                  raw = handle.read().strip()
+          except FileNotFoundError:
+              raw = 'Project sync produced no report file.'
+          report = raw[:55000] + ('\n…truncated' if len(raw) > 55000 else '')
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as handle:
+              event = json.load(handle)
+          issue_number = event['issue']['number']
+          dry_run = str(os.environ.get('DRY_RUN', '')).lower() == 'true'
+          heading = 'Roadmap repair dry-run evidence' if dry_run else 'Roadmap repair apply evidence'
+          body = f"## {heading}\n\n- workflow run: {os.environ.get('GITHUB_SERVER_URL','https://github.com')}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}\n\n```json\n{report}\n```"
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{issue_number}/comments",
+              data=json.dumps({'body': body}, ensure_ascii=False).encode('utf-8'),
+              method='POST',
+              headers={
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as response:
+              if response.status not in (200, 201):
+                  raise SystemExit(response.status)
+          PY
