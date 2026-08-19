@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: search-observer-steering-disabled-stage
@@ -150,3 +151,36 @@ jobs:
           echo "external_provider_calls=0"
           echo "paid_calls=0"
           echo "routing_equivalent=true"
+
+      - name: Publish terminal evidence to issue 753
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          JOB_STATUS: ${{ job.status }}
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const expected = process.env.EXPECTED_SHA;
+            const status = process.env.JOB_STATUS || 'unknown';
+            const passed = status === 'success';
+            const body = [
+              '## Search Observer steering disabled Stage acceptance',
+              '',
+              `- exact SHA: \`${expected}\``,
+              `- workflow run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `- terminal job status: ${status}`,
+              '- acceptance provider/search/LLM calls: **0 by construction**',
+              '- paid calls: **0**',
+              '- steering gate expected: **disabled**',
+              '',
+              `### Verdict\n${passed ? '✅ Disabled Stage acceptance passed.' : '❌ Disabled Stage acceptance did not pass.'}`,
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 753,
+              body,
+            });

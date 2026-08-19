@@ -1,0 +1,108 @@
+name: Reconcile Search Observer Steering Disabled Stage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/reconcile-search-observer-steering-disabled-stage.yml
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: reconcile-search-observer-steering-disabled-stage-06c861d50be5bb6d66c93cd7d791207ccba440bd
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Resolve unique original acceptance run and publish terminal evidence
+        uses: actions/github-script@v7
+        env:
+          EXPECTED_SHA: 06c861d50be5bb6d66c93cd7d791207ccba440bd
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const expected = (process.env.EXPECTED_SHA || '').trim();
+            if (!/^[0-9a-f]{40}$/.test(expected)) {
+              core.setFailed('EXPECTED_SHA must be an exact 40-character lowercase commit SHA');
+              return;
+            }
+
+            const workflowId = 'accept-search-observer-steering-disabled-stage.yml';
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: workflowId,
+              event: 'workflow_dispatch',
+              per_page: 100,
+            });
+
+            const matches = runs.filter(run => run.head_sha === expected);
+            if (matches.length !== 1) {
+              const body = [
+                '## Search Observer steering disabled Stage reconciliation',
+                '',
+                `- exact SHA: \`${expected}\``,
+                `- matching workflow_dispatch runs: ${matches.length}`,
+                '- verdict: ❌ ambiguous_or_missing_original_run',
+                '',
+                'No acceptance was re-dispatched. Reconciliation fails closed rather than guessing.',
+              ].join('\n');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: 753,
+                body,
+              });
+              core.setFailed(`Expected exactly one original acceptance run for ${expected}; found ${matches.length}.`);
+              return;
+            }
+
+            const target = matches[0];
+            let run = target;
+            const deadline = Date.now() + 5 * 60 * 1000;
+            while (run.status !== 'completed' && Date.now() < deadline) {
+              await new Promise(resolve => setTimeout(resolve, 15000));
+              const refreshed = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: target.id,
+              });
+              run = refreshed.data;
+            }
+
+            const terminal = run.status === 'completed';
+            const conclusion = run.conclusion || 'not_completed';
+            const passed = terminal && conclusion === 'success';
+            const body = [
+              '## Search Observer steering disabled Stage reconciliation',
+              '',
+              `- exact SHA: \`${expected}\``,
+              `- original acceptance run: ${run.html_url}`,
+              `- run id: ${run.id}`,
+              `- status: ${run.status}`,
+              `- conclusion: ${conclusion}`,
+              '- re-dispatched acceptance: **no**',
+              '- external provider/LLM calls added by reconciliation: **0**',
+              '- paid calls added by reconciliation: **0**',
+              '',
+              `### Verdict\n${passed ? '✅ Original zero-cost disabled Stage acceptance reached success.' : '❌ Original disabled Stage acceptance is not proven successful.'}`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 753,
+              body,
+            });
+            await core.summary.addRaw(body).write();
+
+            if (!passed) {
+              core.setFailed(`Original acceptance run ${run.id} ended with status=${run.status}, conclusion=${conclusion}.`);
+            }
