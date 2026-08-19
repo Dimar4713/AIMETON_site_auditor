@@ -15,95 +15,176 @@ jobs:
   validate-pr:
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 5
+    env:
+      TARGET_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Materialize PR head without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
       - name: Validate PR governance contract
+        shell: bash
         env:
           BODY: ${{ github.event.pull_request.body }}
         run: |
-          printf '%s' "$BODY" > /tmp/body.md
-          python scripts/acceptance_governance.py pr --body-file /tmp/body.md
+          set -Eeuo pipefail
+          printf '%s' "$BODY" > /tmp/aimeton-pr-body-${GITHUB_RUN_ID}.md
+          python3 scripts/acceptance_governance.py pr --body-file /tmp/aimeton-pr-body-${GITHUB_RUN_ID}.md
+          rm -f /tmp/aimeton-pr-body-${GITHUB_RUN_ID}.md
 
   publish-merge-evidence:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
     runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Publish evidence to explicitly linked Issues
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const body = context.payload.pull_request.body || '';
-            const heading = /^#{1,6}\s+Acceptance criteria affected\s*$/im;
-            const match = heading.exec(body);
-            if (!match) {
-              core.setFailed('Missing Acceptance criteria affected section');
-              return;
-            }
-            const tail = body.slice(match.index + match[0].length);
-            const nextHeading = /^#{1,6}\s+/m.exec(tail);
-            const criteria = (nextHeading ? tail.slice(0, nextHeading.index) : tail).trim();
-            if (!criteria) {
-              core.setFailed('Acceptance criteria affected section is empty');
-              return;
-            }
-            const refs = [...body.matchAll(/\b(?:part\s+of|closes?|fixes?|resolves?)\s+#(\d+)\b/gi)]
-              .map(x => Number(x[1]));
-            const unique = [...new Set(refs)];
-            if (!unique.length) {
-              core.setFailed('No explicitly linked Issue');
-              return;
-            }
-            const pr = context.payload.pull_request;
-            const evidence = [
+      - name: Publish merge evidence without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as handle:
+              event = json.load(handle)
+          pr = event['pull_request']
+          body = pr.get('body') or ''
+          heading = re.search(r'^#{1,6}\s+Acceptance criteria affected\s*$', body, re.I | re.M)
+          if not heading:
+              raise SystemExit('Missing Acceptance criteria affected section')
+          tail = body[heading.end():]
+          next_heading = re.search(r'^#{1,6}\s+', tail, re.M)
+          criteria = (tail[:next_heading.start()] if next_heading else tail).strip()
+          if not criteria:
+              raise SystemExit('Acceptance criteria affected section is empty')
+          refs = sorted({int(value) for value in re.findall(r'\b(?:part\s+of|closes?|fixes?|resolves?)\s+#(\d+)\b', body, re.I)})
+          if not refs:
+              raise SystemExit('No explicitly linked Issue')
+          repo = os.environ['GITHUB_REPOSITORY']
+          server = os.environ.get('GITHUB_SERVER_URL', 'https://github.com')
+          run_id = os.environ['GITHUB_RUN_ID']
+          evidence = '\n'.join([
               '## Merge evidence',
               '',
-              `- PR: #${pr.number}`,
-              `- merge SHA: \`${pr.merge_commit_sha}\``,
-              `- workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              f"- PR: #{pr['number']}",
+              f"- merge SHA: `{pr.get('merge_commit_sha')}`",
+              f"- workflow run: {server}/{repo}/actions/runs/{run_id}",
               '',
               '### Acceptance criteria affected',
               '',
               criteria,
               '',
-              '> Checklist was not changed automatically. Exact criterion matching remains manual unless a future rule proves an unambiguous mapping.'
-            ].join('\n');
-            for (const issue_number of unique) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body: evidence
-              });
-            }
+              '> Checklist was not changed automatically. Exact criterion matching remains manual unless a future rule proves an unambiguous mapping.',
+          ])
+          token = os.environ['GH_TOKEN']
+          for issue_number in refs:
+              url = f'https://api.github.com/repos/{repo}/issues/{issue_number}/comments'
+              data = json.dumps({'body': evidence}, ensure_ascii=False).encode('utf-8')
+              request = urllib.request.Request(
+                  url,
+                  data=data,
+                  method='POST',
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Accept': 'application/vnd.github+json',
+                      'Content-Type': 'application/json',
+                      'X-GitHub-Api-Version': '2022-11-28',
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  if response.status not in (200, 201):
+                      raise SystemExit(f'comment publish failed: {response.status}')
+          PY
 
   guard-issue-closure:
     if: github.event_name == 'issues' && github.event.action == 'closed' && github.event.issue.state_reason == 'completed'
     runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 5
+    env:
+      TARGET_SHA: ${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Materialize governance script without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+
       - name: Validate completed Issue
         id: guard
         continue-on-error: true
+        shell: bash
         env:
           BODY: ${{ github.event.issue.body }}
         run: |
-          printf '%s' "$BODY" > /tmp/body.md
-          python scripts/acceptance_governance.py issue --body-file /tmp/body.md
-      - name: Reopen invalid completion
+          set -Eeuo pipefail
+          printf '%s' "$BODY" > /tmp/aimeton-issue-body-${GITHUB_RUN_ID}.md
+          python3 scripts/acceptance_governance.py issue --body-file /tmp/aimeton-issue-body-${GITHUB_RUN_ID}.md
+          rm -f /tmp/aimeton-issue-body-${GITHUB_RUN_ID}.md
+
+      - name: Reopen invalid completion without marketplace actions
         if: steps.guard.outcome == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              state: 'open'
-            });
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: '## Completion blocked\n\nIssue was reopened because mandatory checkboxes remain open and no `Debt transfer` section references a separate Issue. No checklist item was changed automatically.'
-            });
-            core.setFailed('Issue completion reverted by governance guard');
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as handle:
+              event = json.load(handle)
+          issue_number = event['issue']['number']
+          repo = os.environ['GITHUB_REPOSITORY']
+          token = os.environ['GH_TOKEN']
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accept': 'application/vnd.github+json',
+              'Content-Type': 'application/json',
+              'X-GitHub-Api-Version': '2022-11-28',
+          }
+          patch = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/issues/{issue_number}',
+              data=json.dumps({'state': 'open'}).encode('utf-8'),
+              method='PATCH',
+              headers=headers,
+          )
+          with urllib.request.urlopen(patch, timeout=30) as response:
+              if response.status != 200:
+                  raise SystemExit(f'issue reopen failed: {response.status}')
+          message = '## Completion blocked\n\nIssue was reopened because mandatory checkboxes remain open and no `Debt transfer` section references a separate Issue. No checklist item was changed automatically.'
+          post = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/issues/{issue_number}/comments',
+              data=json.dumps({'body': message}).encode('utf-8'),
+              method='POST',
+              headers=headers,
+          )
+          with urllib.request.urlopen(post, timeout=30) as response:
+              if response.status not in (200, 201):
+                  raise SystemExit(f'comment publish failed: {response.status}')
+          raise SystemExit('Issue completion reverted by governance guard')
+          PY
