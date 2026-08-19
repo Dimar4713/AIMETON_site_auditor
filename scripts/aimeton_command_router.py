@@ -11,6 +11,7 @@ OWNER = "Dimar4713"
 
 ROUTES: dict[str, tuple[int, str, dict[str, str]]] = {
     "deploy-stage": (337, "deploy-stage.yml", {"commit_sha": "{sha}"}),
+    "validate-baseline-self-hosted": (767, "baseline-ci.yml", {"expected_sha": "{sha}", "evidence_issue": "767"}),
     "accept-admin-trace-stage": (293, "accept-admin-trace-stage.yml", {"expected_sha": "{sha}"}),
     "accept-aimeton-self-audit-stage": (293, "accept-aimeton-self-audit-stage.yml", {"expected_sha": "{sha}"}),
     "accept-routerai-synthesis-stage": (700, "accept-routerai-synthesis-stage.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true"}),
