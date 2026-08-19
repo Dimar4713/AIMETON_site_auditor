@@ -71,6 +71,9 @@ def routerai_input_metrics(
     schema_chars = len(
         json.dumps(SiteAnalysis.model_json_schema(), ensure_ascii=False)
     )
+    estimated_total_input_chars = (
+        official_text_chars + external_context_chars + schema_chars
+    )
     official_chunks_estimated = len(chunk_text(text))
     external_chunks_estimated = (
         0
@@ -87,9 +90,8 @@ def routerai_input_metrics(
         "external_context_chars": external_context_chars,
         "external_source_count": len(sources),
         "schema_chars": schema_chars,
-        "dynamic_input_chars": (
-            official_text_chars + external_context_chars + schema_chars
-        ),
+        "estimated_total_input_chars": estimated_total_input_chars,
+        "dynamic_input_chars": estimated_total_input_chars,
         "official_chunks_estimated": official_chunks_estimated,
         "external_chunks_estimated": external_chunks_estimated,
         "input_truncated": False,
@@ -185,6 +187,7 @@ async def run_bounded_routerai_analysis(
     except (asyncio.TimeoutError, httpx.TimeoutException, SplitSynthesisPhaseTimeout) as exc:
         duration_ms = max(0, round((time.perf_counter() - started) * 1000))
         error_metadata = dict(input_metrics)
+        error_metadata["outcome"] = "timeout"
         phase = getattr(exc, "phase", None)
         if phase:
             error_metadata["failed_phase"] = str(phase)[:128]
@@ -202,6 +205,7 @@ async def run_bounded_routerai_analysis(
     except Exception as exc:
         duration_ms = max(0, round((time.perf_counter() - started) * 1000))
         error_metadata = dict(input_metrics)
+        error_metadata["outcome"] = "failed"
         phase = getattr(exc, "phase", None)
         if phase:
             error_metadata["failed_phase"] = str(phase)[:128]
@@ -220,6 +224,8 @@ async def run_bounded_routerai_analysis(
         raise
 
     duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+    success_metadata = dict(input_metrics)
+    success_metadata["outcome"] = "succeeded"
     _trace(
         operation="llm_finished",
         state=TraceState.SUCCEEDED,
@@ -227,6 +233,6 @@ async def run_bounded_routerai_analysis(
         summary="RouterAI analytical synthesis completed",
         duration_ms=duration_ms,
         budget_seconds=budget_seconds,
-        extra_metadata=input_metrics,
+        extra_metadata=success_metadata,
     )
     return result
