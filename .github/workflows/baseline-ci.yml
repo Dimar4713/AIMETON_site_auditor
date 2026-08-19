@@ -24,42 +24,63 @@ concurrency:
 jobs:
   baseline:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      VENV_DIR: ${{ runner.temp }}/aimeton-baseline-${{ github.run_id }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
+      - name: Materialize exact commit without marketplace actions
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then
+            git init
+          fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+      - name: Create isolated local Python environment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf "$VENV_DIR"
+          python3 -m venv "$VENV_DIR"
+          "$VENV_DIR/bin/python" -m pip install --upgrade pip
+          "$VENV_DIR/bin/pip" install -r requirements.txt
 
       - name: Record environment
+        shell: bash
         run: |
-          python --version
-          pip freeze | sort | tee baseline-dependencies.txt
+          set -Eeuo pipefail
+          "$VENV_DIR/bin/python" --version
+          "$VENV_DIR/bin/pip" freeze | sort | tee baseline-dependencies.txt
 
       - name: Validate deployment script syntax
+        shell: bash
         run: bash -n scripts/deploy_stage.sh
 
       - name: Run tests
+        shell: bash
         run: |
           set -o pipefail
-          pytest -q --tb=short 2>&1 | tee pytest-output.txt
+          "$VENV_DIR/bin/pytest" -q --tb=short 2>&1 | tee pytest-output.txt
 
       - name: Verify application import
-        run: python -c "from app.main import app; assert app.title == 'AIMETON Site Auditor'; print(app.version)"
+        shell: bash
+        run: "$VENV_DIR/bin/python -c \"from app.main import app; assert app.title == 'AIMETON Site Auditor'; print(app.version)\""
 
       - name: Local API and MCP route smoke
+        shell: bash
         run: |
-          python - <<'PY'
+          "$VENV_DIR/bin/python" - <<'PY'
           from fastapi.testclient import TestClient
           from app.main import app
 
@@ -80,12 +101,26 @@ jobs:
               print(payload)
           PY
 
-      - name: Upload baseline diagnostics
+      - name: Record baseline diagnostics without artifact service
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: baseline-diagnostics-${{ github.sha }}
-          path: |
-            baseline-dependencies.txt
-            pytest-output.txt
-          if-no-files-found: error
+        shell: bash
+        run: |
+          set +e
+          {
+            echo '## Baseline CI evidence'
+            echo
+            echo "- runner: \`$RUNNER_NAME\`"
+            echo "- machine: \`$(hostname)\`"
+            echo "- exact SHA: \`$TARGET_SHA\`"
+            echo '- GitHub Marketplace actions: `disabled`'
+            echo
+            echo '### pytest tail'
+            echo '```text'
+            tail -n 80 pytest-output.txt 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup isolated Python environment
+        if: always()
+        shell: bash
+        run: rm -rf "$VENV_DIR"
