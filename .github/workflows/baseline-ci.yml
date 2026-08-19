@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   baseline:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 15
 
     steps:
