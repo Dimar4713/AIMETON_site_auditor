@@ -19,6 +19,8 @@ from app.models import HuntCandidate, HuntFunnel, HuntRequest, HuntResult
 from app.scraper import FetchError, fetch_site
 from app.search_observer import build_search_wave_telemetry
 from app.search_observer_llm import evaluate_search_wave_shadow
+from app.search_observer_runtime_steering import run_bounded_continuation_search
+from app.search_observer_verified_promotion import verified_continuation_promotion_permit
 from app.search_gateway import (
     SearchDiagnostics,
     SearchRequest,
@@ -60,6 +62,9 @@ STRONG_INDUSTRY_MARKERS_BY_REQUEST = {
     ),
 }
 
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_STEERING_REGIMES = {"auto", "precision", "balanced", "discovery"}
+
 
 @dataclass(frozen=True)
 class PreScoreResult:
@@ -71,6 +76,19 @@ class PreScoreResult:
 
 def _domain(url: str) -> str:
     return (urlparse(url).hostname or "").lower().removeprefix("www.")
+
+
+def _observer_runtime_steering_config() -> tuple[bool, str, int]:
+    enabled = os.getenv("HUNTER_SEARCH_OBSERVER_STEERING_ENABLED", "").strip().lower() in _TRUE_VALUES
+    regime = os.getenv("HUNTER_SEARCH_OBSERVER_STEERING_REGIME", "auto").strip().lower() or "auto"
+    if regime not in _STEERING_REGIMES:
+        regime = "auto"
+    raw_reserve = os.getenv("HUNTER_SEARCH_OBSERVER_RESERVE_QUERIES", "2").strip()
+    try:
+        reserve_queries = int(raw_reserve)
+    except ValueError:
+        reserve_queries = 2
+    return enabled, regime, max(0, min(10, reserve_queries))
 
 
 def _build_queries(req: HuntRequest) -> list[str]:
@@ -345,13 +363,57 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             policy,
         )
 
-    responses = await asyncio.gather(*(search_query(query) for query in queries))
-    wave_telemetry = build_search_wave_telemetry(queries, responses)
+    async def search_many(batch: list[str]):
+        return await asyncio.gather(*(search_query(query) for query in batch))
+
+    steering_enabled, steering_regime, reserve_queries = _observer_runtime_steering_config()
+    steering_result = await run_bounded_continuation_search(
+        queries,
+        enabled=steering_enabled,
+        requested_search_regime=steering_regime,
+        requested_reserve_queries=reserve_queries,
+        permit=verified_continuation_promotion_permit(),
+        search_many=search_many,
+        observe_wave=evaluate_search_wave_shadow,
+    )
+    responses = steering_result.responses
+    queries = steering_result.executed_queries
+    wave_telemetry = steering_result.first_wave_telemetry
+    steering_decision = steering_result.steering_decision
+    trace.append(
+        "hunt_search_continuation_steering",
+        state=TraceState.SUCCEEDED,
+        reason_code=(
+            "hunter_continuation_steering_evaluated"
+            if steering_decision is not None
+            else "hunter_continuation_steering_inactive"
+        ),
+        summary="Bounded continuation steering gate evaluated before reserve execution",
+        counters={
+            "first_wave_query_count": len(steering_result.wave_plan.first_wave_queries),
+            "reserve_query_count": len(steering_result.wave_plan.reserve_queries),
+            "executed_query_count": len(steering_result.executed_queries),
+            "accepted_direction_count": (
+                0 if steering_decision is None else len(steering_decision.accepted_direction_indexes)
+            ),
+        },
+        metadata={
+            "enabled_requested": steering_enabled,
+            "requested_regime": steering_regime,
+            "steering_enabled": steering_result.wave_plan.steering_enabled,
+            "reserve_reordered": steering_result.reserve_reordered,
+            "routing_changed": steering_result.reserve_reordered,
+            "reason_code": steering_result.wave_plan.reason_code,
+            "decision_reason_codes": (
+                [] if steering_decision is None else list(steering_decision.reason_codes)
+            ),
+        },
+    )
     trace.append(
         "hunt_search_wave_observed",
         state=TraceState.SUCCEEDED,
         reason_code="hunter_search_wave_observed",
-        summary="Hunter search wave yield telemetry captured for shadow observer",
+        summary="Hunter first-wave yield telemetry captured for Search Observer",
         counters={
             "query_count": wave_telemetry.query_count,
             "result_count": wave_telemetry.result_count,
@@ -360,8 +422,8 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
             "latency_ms_total": wave_telemetry.latency_ms_total,
         },
         metadata={
-            "observer_mode": "telemetry_only",
-            "routing_changed": False,
+            "observer_mode": "steering" if steering_result.wave_plan.steering_enabled else "telemetry_only",
+            "routing_changed": steering_result.reserve_reordered,
             "duplicate_domain_ratio": wave_telemetry.duplicate_domain_ratio,
             "provider_result_counts": wave_telemetry.provider_result_counts,
             "attempt_states": wave_telemetry.attempt_states,
@@ -380,10 +442,8 @@ async def run_hunt(req: HuntRequest) -> HuntResult:
         },
     )
 
-    shadow_observer_enabled = os.getenv("HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED", "").strip().lower() in {
-        "1", "true", "yes", "on"
-    }
-    if shadow_observer_enabled:
+    shadow_observer_enabled = os.getenv("HUNTER_SEARCH_OBSERVER_SHADOW_ENABLED", "").strip().lower() in _TRUE_VALUES
+    if shadow_observer_enabled and not steering_result.wave_plan.steering_enabled:
         shadow_recommendation = await evaluate_search_wave_shadow(wave_telemetry)
         if shadow_recommendation is None:
             trace.append(
