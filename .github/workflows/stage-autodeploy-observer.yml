@@ -63,11 +63,14 @@ jobs:
                 for (let i = 0; i < 30; i += 1) {
                   const runs = await runsFor('deploy-stage.yml');
                   deploy = runs.find(run => run.event === 'workflow_run') || null;
-                  if (deploy) break;
+                  if (deploy && deploy.status === 'completed') break;
+                  if (deploy) state = `deploy_seen_${deploy.status}`;
                   await sleep(10000);
                 }
-                if (deploy) {
-                  state = `deploy_seen_${deploy.status}${deploy.conclusion ? `_${deploy.conclusion}` : ''}`;
+                if (deploy && deploy.status === 'completed') {
+                  state = `deploy_seen_completed_${deploy.conclusion || 'unknown'}`;
+                } else if (deploy) {
+                  state = `deploy_seen_${deploy.status || 'unknown'}_timeout`;
                 }
               }
             }
