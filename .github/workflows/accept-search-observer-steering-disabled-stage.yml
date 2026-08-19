@@ -20,23 +20,43 @@ jobs:
   disabled-stage:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       CONTAINER: aimeton-auditor
     steps:
-      - name: Require exact deployed SHA and healthy runtime
+      - name: Wait for exact deployed SHA and healthy runtime
         shell: bash
         run: |
           set -Eeuo pipefail
           expected='${{ inputs.expected_sha }}'
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
           cd "$STACK_DIR"
-          [[ "$(cat app-source-sha.txt)" == "$expected" ]]
-          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
-          [[ "$status" == healthy || "$status" == running ]]
-          echo "validated_sha=$expected"
-          echo "container_status=$status"
+
+          deadline=$((SECONDS + 300))
+          observed_sha='missing'
+          status='missing'
+          while (( SECONDS < deadline )); do
+            if [[ -f app-source-sha.txt ]]; then
+              observed_sha="$(tr -d '[:space:]' < app-source-sha.txt)"
+            else
+              observed_sha='missing'
+            fi
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+            if [[ "$observed_sha" == "$expected" && ( "$status" == healthy || "$status" == running ) ]]; then
+              echo "validated_sha=$expected"
+              echo "container_status=$status"
+              exit 0
+            fi
+            echo "waiting_for_stage_convergence expected_sha=$expected observed_sha=$observed_sha container_status=${status:-missing}"
+            sleep 5
+          done
+
+          echo "Stage did not converge to exact SHA within 300s" >&2
+          echo "expected_sha=$expected" >&2
+          echo "observed_sha=$observed_sha" >&2
+          echo "container_status=${status:-missing}" >&2
+          exit 1
 
       - name: Prove production steering gate is disabled
         shell: bash
@@ -172,6 +192,7 @@ jobs:
               `- exact SHA: \`${expected}\``,
               `- workflow run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               `- terminal job status: ${status}`,
+              '- Stage convergence wait: up to 300s',
               '- acceptance provider/search/LLM calls: **0 by construction**',
               '- paid calls: **0**',
               '- steering gate expected: **disabled**',
