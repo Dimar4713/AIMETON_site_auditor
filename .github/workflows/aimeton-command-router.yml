@@ -18,7 +18,7 @@ jobs:
     if: >-
       github.event.comment.user.login == 'Dimar4713' &&
       startsWith(github.event.comment.body, '/')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 5
     steps:
       - name: Parse, authorize and dispatch one command
