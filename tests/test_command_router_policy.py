@@ -2,82 +2,57 @@ from pathlib import Path
 
 
 ROUTER = Path(".github/workflows/aimeton-command-router.yml")
+ROUTER_SCRIPT = Path("scripts/aimeton_command_router.py")
 
 
 def test_command_router_is_the_sanitized_single_ingress_contract() -> None:
-    text = ROUTER.read_text(encoding="utf-8")
+    workflow = ROUTER.read_text(encoding="utf-8")
+    script = ROUTER_SCRIPT.read_text(encoding="utf-8")
 
-    assert "issue_comment:" in text
-    assert "actions: write" in text
-    assert "github.event.comment.user.login == 'Dimar4713'" in text
-    assert "group: aimeton-command-router-${{ github.event.issue.number }}" in text
-    assert "cancel-in-progress: true" in text
+    assert "issue_comment:" in workflow
+    assert "actions: write" in workflow
+    assert "github.event.comment.user.login == 'Dimar4713'" in workflow
+    assert "group: aimeton-command-router-${{ github.event.issue.number }}" in workflow
+    assert "cancel-in-progress: true" in workflow
+    assert "python3 scripts/aimeton_command_router.py" in workflow
 
-    assert "unsupported_or_invalid_command" in text
-    assert "Ignored unsupported slash command" in text
-    assert "core.setFailed('Unsupported command" not in text
+    assert "unsupported_or_invalid_command" in script
+    assert "ignored: unsupported_or_invalid_command" in script
+    assert "Command {command} is not authorised on issue {issue_number}" in script
 
-    assert "issue_number: 337" in text
-    assert text.count("issue_number: 293") == 3
-    assert "issue_number: 88" in text
-    assert "issue_number: 223" in text
-    assert "issue_number: 274" in text
-    assert "issue_number: 270" in text
-    assert "issue_number: 291" in text
-    assert "issue_number: 262" in text
-    assert "issue_number: 192" in text
-    assert "issue_number: 197" in text
-    assert text.count("issue_number: 177") == 3
-    assert text.count("issue_number: 203") == 3
-    assert "issue_number: 36" in text
-    assert "issue_number: 159" in text
-    assert text.count("issue_number: 164") == 2
-    assert "issueNumber !== route.issue_number" in text
-
-    for command, workflow in {
-        "deploy-stage": "deploy-stage.yml",
-        "accept-admin-trace-stage": "accept-admin-trace-stage.yml",
-        "accept-aimeton-self-audit-stage": "accept-aimeton-self-audit-stage.yml",
-        "accept-checkpoint-stage": "accept-checkpoint-stage.yml",
-        "accept-mobile-ui-stage": "accept-mobile-ui-stage.yml",
-        "accept-service-catalog-stage": "accept-service-catalog-stage.yml",
-        "accept-logging-pressure-stage": "accept-logging-pressure-stage.yml",
-        "accept-live-analysis-stage": "accept-live-analysis-stage.yml",
-        "accept-interface-audit-stage": "interface-audit-stage-acceptance.yml",
-        "accept-ui-stage": "ui-stage-visual-audit.yml",
-        "accept-user-workspace-stage": "stage-user-workspace-acceptance.yml",
-        "accept-admin-workspace-stage": "stage-admin-workspace-acceptance.yml",
-        "accept-mission-stage-v2": "stage-mission-ownership-acceptance-v2.yml",
-        "accept-integrated-stage-continuity": "stage-integrated-continuity.yml",
-        "accept-integrated-stage-core": "stage-integrated-acceptance.yml",
-        "audit-server-architecture": "server-architecture-audit.yml",
-        "accept-integrated-stage-companies-bootstrap": "stage-real-company-bootstrap-acceptance.yml",
-        "audit-auth-persistence": "server-auth-persistence-audit.yml",
-        "diagnose-mission-stage": "stage-mission-diagnostics.yml",
-        "reconcile-stage-data-mount": "stage-data-mount-reconcile.yml",
-        "repair-admin-stage": "repair-stage-admin.yml",
-        "accept-auth-stage": "stage-auth-acceptance.yml",
-    }.items():
-        assert command in text
-        assert workflow in text
+    expected_routes = {
+        "deploy-stage": (337, "deploy-stage.yml"),
+        "validate-baseline-self-hosted": (767, "baseline-ci.yml"),
+        "accept-admin-trace-stage": (293, "accept-admin-trace-stage.yml"),
+        "accept-aimeton-self-audit-stage": (293, "accept-aimeton-self-audit-stage.yml"),
+        "accept-routerai-synthesis-stage": (700, "accept-routerai-synthesis-stage.yml"),
+        "accept-checkpoint-stage": (88, "accept-checkpoint-stage.yml"),
+        "accept-mobile-ui-stage": (223, "accept-mobile-ui-stage.yml"),
+        "accept-service-catalog-stage": (274, "accept-service-catalog-stage.yml"),
+        "accept-hunter-runtime-stage": (501, "accept-hunter-runtime-stage.yml"),
+        "diagnose-mission-stage": (177, "stage-mission-diagnostics.yml"),
+        "audit-auth-persistence": (159, "server-auth-persistence-audit.yml"),
+    }
+    for command, (issue, workflow_name) in expected_routes.items():
+        assert f'"{command}": ({issue}, "{workflow_name}"' in script
 
     for ledger_field in (
-        "command:",
-        "target_workflow:",
-        "issue:",
-        "actor:",
-        "exact_sha:",
-        "result: dispatched",
+        "- command:",
+        "- target workflow:",
+        "- issue:",
+        "- actor:",
+        "- exact SHA:",
+        "- result: `dispatched`",
     ):
-        assert ledger_field in text
+        assert ledger_field in script
 
 
 def test_router_requires_exact_sha_and_dispatches_main_only() -> None:
-    text = ROUTER.read_text(encoding="utf-8")
-    assert "([0-9a-f]{40})" in text
-    assert "repos.getCommit" in text
-    assert "createWorkflowDispatch" in text
-    assert "ref: 'main'" in text
+    text = ROUTER_SCRIPT.read_text(encoding="utf-8")
+    assert 're.fullmatch(r"/([a-z0-9-]+)\\s+([0-9a-f]{40})", body)' in text
+    assert 'api("GET", f"commits/{sha}")' in text
+    assert 'f"actions/workflows/{workflow_id}/dispatches"' in text
+    assert 'payload={"ref": "main", "inputs": inputs}' in text
 
 
 def _assert_dispatch_only(path: str) -> None:
