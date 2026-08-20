@@ -25,36 +25,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deployment-gate:
-    runs-on: ubuntu-latest
-    outputs:
-      should_deploy: ${{ steps.decide.outputs.should_deploy }}
-    steps:
-      - name: Require exact-SHA deployment for successful main baseline
-        id: decide
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-        run: |
-          set -Eeuo pipefail
-          should_deploy=false
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            should_deploy=true
-          elif [[ "$WORKFLOW_CONCLUSION" == "success" && "$WORKFLOW_HEAD_BRANCH" == "main" ]]; then
-            should_deploy=true
-          fi
-          echo "Exact-SHA stage deployment required: $should_deploy"
-          echo "should_deploy=$should_deploy" >> "$GITHUB_OUTPUT"
-
   deploy:
-    needs: deployment-gate
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       needs.deployment-gate.outputs.should_deploy == 'true')
+       github.event.workflow_run.head_branch == 'main')
     runs-on:
       - self-hosted
       - Linux
