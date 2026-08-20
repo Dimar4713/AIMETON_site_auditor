@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from app.models import SiteAnalysis  # import smoke keeps normal package path active
-from scripts.resolve_stage_convergence_gates import resolve_ready_gates, resolve_target_sha
+import pytest
+
+from scripts.resolve_stage_convergence_gates import (
+    readiness_snapshot,
+    resolve_ready_gates,
+    resolve_target_sha,
+)
 
 
 def _run(name: str, run_id: int, created_at: str, *, conclusion: str = "success") -> dict:
@@ -19,17 +24,34 @@ def test_manual_target_sha_requires_exact_sha():
     assert resolve_target_sha(event_name="workflow_dispatch", manual_sha=sha, event_payload={}) == sha
 
 
-def test_automatic_target_requires_successful_main_deploy():
+def test_automatic_target_accepts_each_successful_main_gate_event():
     sha = "b" * 40
-    payload = {
-        "workflow_run": {
-            "name": "Deploy Stage",
-            "conclusion": "success",
-            "head_branch": "main",
-            "head_sha": sha,
+    for name in (
+        "Deploy Stage",
+        "Configure DaData Stage",
+        "Runtime Persistence Reconcile",
+        "Stage Auth Persistence Guard",
+    ):
+        payload = {
+            "workflow_run": {
+                "name": name,
+                "conclusion": "success",
+                "head_branch": "main",
+                "head_sha": sha,
+            }
         }
-    }
-    assert resolve_target_sha(event_name="workflow_run", manual_sha="", event_payload=payload) == sha
+        assert resolve_target_sha(event_name="workflow_run", manual_sha="", event_payload=payload) == sha
+
+
+def test_automatic_target_rejects_unrelated_or_failed_event():
+    sha = "b" * 40
+    for payload in (
+        {"workflow_run": {"name": "Baseline CI", "conclusion": "success", "head_branch": "main", "head_sha": sha}},
+        {"workflow_run": {"name": "Deploy Stage", "conclusion": "failure", "head_branch": "main", "head_sha": sha}},
+        {"workflow_run": {"name": "Deploy Stage", "conclusion": "success", "head_branch": "feature", "head_sha": sha}},
+    ):
+        with pytest.raises(ValueError, match="automatic_convergence_requires_successful_main_gate"):
+            resolve_target_sha(event_name="workflow_run", manual_sha="", event_payload=payload)
 
 
 def test_ready_gates_must_all_be_successful_after_latest_deploy():
@@ -48,9 +70,10 @@ def test_ready_gates_must_all_be_successful_after_latest_deploy():
     assert gates.dadata_run_id == 3
     assert gates.persistence_run_id == 4
     assert gates.auth_guard_run_id == 5
+    assert all(readiness_snapshot(runs).values())
 
 
-def test_predeploy_or_failed_gate_does_not_converge():
+def test_predeploy_or_failed_gate_does_not_converge_and_probe_is_nonblocking():
     sha = "d" * 40
     runs = [
         _run("Configure DaData Stage", 1, "2026-08-20T10:00:00Z"),
@@ -59,7 +82,9 @@ def test_predeploy_or_failed_gate_does_not_converge():
         _run("Stage Auth Persistence Guard", 5, "2026-08-20T11:03:00Z"),
     ]
     assert resolve_ready_gates(runs, sha) is None
-
-
-def test_import_smoke_is_not_the_acceptance_authority():
-    assert SiteAnalysis is not None
+    assert readiness_snapshot(runs) == {
+        "Deploy Stage": True,
+        "Configure DaData Stage": False,
+        "Runtime Persistence Reconcile": False,
+        "Stage Auth Persistence Guard": True,
+    }
