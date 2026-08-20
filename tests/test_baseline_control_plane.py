@@ -38,3 +38,10 @@ def test_baseline_workflows_remain_self_hosted_and_marketplace_free() -> None:
         assert "actions/checkout@" not in content
         assert "actions/setup-python@" not in content
         assert "actions/upload-artifact@" not in content
+
+
+def test_baseline_job_env_does_not_use_runner_context_before_job_assignment() -> None:
+    for path in (AUTOMATIC, DISPATCH):
+        content = path.read_text(encoding="utf-8")
+        assert "VENV_DIR: ${{ runner." not in content
+        assert "VENV_DIR: /tmp/aimeton-baseline-${{ github.run_id }}" in content
