@@ -3,13 +3,12 @@ name: Runtime Persistence Reconcile
 on:
   workflow_run:
     workflows:
-      - Deploy Stage
+      - Configure DaData Stage
     types:
       - completed
   workflow_dispatch:
 
 permissions:
-  actions: read
   contents: read
   issues: write
 
@@ -18,39 +17,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deployment-gate:
-    runs-on: ubuntu-latest
-    outputs:
-      real_deploy: ${{ steps.gate.outputs.real_deploy }}
-    steps:
-      - name: Require a successful deploy job
-        id: gate
-        uses: actions/github-script@v7
-        with:
-          script: |
-            if (context.eventName === 'workflow_dispatch') {
-              core.setOutput('real_deploy', 'true');
-              return;
-            }
-            const runId = context.payload.workflow_run?.id;
-            if (!runId || context.payload.workflow_run?.conclusion !== 'success') {
-              core.setOutput('real_deploy', 'false');
-              return;
-            }
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: runId,
-              per_page: 100,
-            });
-            const deploy = jobs.find(job => job.name === 'deploy');
-            const realDeploy = Boolean(deploy && deploy.status === 'completed' && deploy.conclusion === 'success');
-            core.info(`parent deploy job conclusion: ${deploy?.conclusion || 'missing'}`);
-            core.setOutput('real_deploy', realDeploy ? 'true' : 'false');
-
   reconcile:
-    needs: deployment-gate
-    if: ${{ needs.deployment-gate.outputs.real_deploy == 'true' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 15
@@ -61,61 +32,52 @@ jobs:
       CONTAINER: aimeton-auditor
       DATA_DIR: /opt/aimeton/auditor-stack/data/runtime-core
       RUNTIME_COMPOSE: /opt/aimeton/auditor-stack/docker-compose.runtime-secrets.yml
+      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
 
     steps:
+      - name: Require exact deployed source SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          deployed="$(tr -d '[:space:]' < app-source-sha.txt)"
+          [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
+          expected="${EXPECTED_SHA:-$deployed}"
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$deployed" == "$expected" ]]
+          echo "Persistence deployed source SHA: $expected"
+
       - name: Reconcile persistent runtime storage
         id: reconcile
         shell: bash
         run: |
           set -Eeuo pipefail
           cd "$STACK_DIR"
-
           report="$RUNNER_TEMP/runtime-persistence-reconcile.md"
           backup="$RUNTIME_COMPOSE.before-persistence.$(date -u +%Y%m%dT%H%M%SZ).bak"
           expected_volume='./data/runtime-core:/app/data'
           : > "$report"
 
-          echo "## Runtime persistence reconcile evidence" >> "$report"
-          echo >> "$report"
-          echo "- workflow run: $GITHUB_RUN_ID" >> "$report"
-          echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$report"
-          echo >> "$report"
-
           test -f docker-compose.yml
           test -f "$RUNTIME_COMPOSE"
           docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
-
-          mkdir -p "$DATA_DIR"
-          chmod 700 "$DATA_DIR"
+          install -d -m 0700 "$DATA_DIR"
           expected_source="$(readlink -f "$DATA_DIR")"
 
           compose_correct=no
-          if grep -Fq "$expected_volume" "$RUNTIME_COMPOSE"; then
-            compose_correct=yes
-          fi
-
+          grep -Fq "$expected_volume" "$RUNTIME_COMPOSE" && compose_correct=yes
           live_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}' 2>/dev/null || true)"
-          live_type=''
-          live_source=''
-          live_destination=''
-          if [[ -n "$live_mount" ]]; then
-            IFS='|' read -r live_type live_source live_destination <<< "$live_mount"
-          fi
-
+          live_type=''; live_source=''; live_destination=''
+          [[ -z "$live_mount" ]] || IFS='|' read -r live_type live_source live_destination <<< "$live_mount"
           mount_correct=no
           if [[ "$live_type" == bind && "$live_destination" == '/app/data' && "$(readlink -f "${live_source:-/nonexistent}" 2>/dev/null || true)" == "$expected_source" ]]; then
             mount_correct=yes
           fi
 
           mutation_required=no
-          mode='verify-only / no mutation required'
-          backup_state='not required'
           if [[ "$compose_correct" != yes || "$mount_correct" != yes ]]; then
             mutation_required=yes
-            mode='controlled repair'
             cp -a "$RUNTIME_COMPOSE" "$backup"
-            backup_state="created: $backup"
-
             if [[ "$compose_correct" != yes ]]; then
               if grep -Fq '/app/data' "$RUNTIME_COMPOSE"; then
                 sed -i -E 's#^([[:space:]]*)- .*:/app/data[[:space:]]*$#\1- ./data/runtime-core:/app/data#' "$RUNTIME_COMPOSE"
@@ -125,88 +87,56 @@ jobs:
             fi
           fi
 
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.runtime-secrets.yml \
-            config --quiet
-
+          docker compose -f docker-compose.yml -f docker-compose.runtime-secrets.yml config --quiet
           if [[ "$mutation_required" == yes ]]; then
-            docker compose \
-              -f docker-compose.yml \
-              -f docker-compose.runtime-secrets.yml \
-              up -d --force-recreate "$SERVICE"
+            docker compose -f docker-compose.yml -f docker-compose.runtime-secrets.yml up -d --force-recreate "$SERVICE"
           fi
 
           deadline=$((SECONDS + 180))
           while (( SECONDS < deadline )); do
             status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
-            if [[ "$status" == healthy ]]; then
-              break
-            fi
-            if [[ "$status" == unhealthy || "$status" == exited || "$status" == dead ]]; then
-              echo "Container entered terminal state: $status" >&2
-              exit 1
-            fi
+            [[ "$status" != healthy ]] || break
+            [[ "$status" != unhealthy && "$status" != exited && "$status" != dead ]] || exit 1
             sleep 5
           done
-
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
           [[ "$status" == healthy ]]
 
           mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
-          [[ -n "$mount" ]]
           IFS='|' read -r mount_type mount_source mount_destination <<< "$mount"
-          [[ "$mount_type" == bind ]]
-          [[ "$mount_destination" == '/app/data' ]]
+          [[ "$mount_type" == bind && "$mount_destination" == '/app/data' ]]
           [[ "$(readlink -f "$mount_source")" == "$expected_source" ]]
 
           health="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/health")"
           python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p.get("status")=="ok", p' "$health"
 
-          db_exists=no
-          integrity=not-created
-          tables=not-created
-          if docker exec "$CONTAINER" sh -lc 'test -f /app/data/runtime-core.sqlite3'; then
-            db_exists=yes
-            integrity="$(docker exec "$CONTAINER" python -c 'import sqlite3; c=sqlite3.connect("file:/app/data/runtime-core.sqlite3?mode=ro", uri=True); print(c.execute("PRAGMA integrity_check").fetchone()[0]); c.close()')"
-            tables="$(docker exec "$CONTAINER" python -c 'import sqlite3; c=sqlite3.connect("file:/app/data/runtime-core.sqlite3?mode=ro", uri=True); print(",".join(r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type=\"table\" AND name NOT LIKE \"sqlite_%\" ORDER BY name"))); c.close()')"
-          fi
-          [[ "$db_exists" == yes ]]
-          [[ "$integrity" == ok ]]
-          for required_table in runtime_meta runtime_records runtime_tasks; do
-            [[ ",$tables," == *",$required_table,"* ]]
-          done
+          docker exec -i "$CONTAINER" python - <<'PY'
+          import os, sqlite3
+          from pathlib import Path
+          path=Path(os.environ.get('AIMETON_RUNTIME_DB','/app/data/runtime-core.sqlite3'))
+          assert path.exists(), path
+          with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
+              assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+              tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              assert {'runtime_meta','runtime_records','runtime_tasks'} <= tables
+          PY
 
-          echo "- mode: \`$mode\`" >> "$report"
-          echo "- mutation required: \`$mutation_required\`" >> "$report"
-          echo "- compose persistence invariant before reconcile: \`$compose_correct\`" >> "$report"
-          echo "- live mount invariant before reconcile: \`$mount_correct\`" >> "$report"
-          echo "- persistent directory: ✅ present" >> "$report"
-          echo "- compose validation: ✅" >> "$report"
-          echo "- container health: \`$status\`" >> "$report"
-          echo "- /app/data mount: ✅ \`$mount\`" >> "$report"
-          echo "- API health: ✅" >> "$report"
-          echo "- runtime DB exists: \`$db_exists\`" >> "$report"
-          echo "- SQLite integrity: \`$integrity\`" >> "$report"
-          echo "- tables: \`$tables\`" >> "$report"
-          echo "- rollback compose backup: \`$backup_state\`" >> "$report"
-          echo "- marketplace actions on Stage runner: \`disabled\`" >> "$report"
-          echo >> "$report"
-          echo "### Verdict" >> "$report"
-          if [[ "$mutation_required" == yes ]]; then
-            echo "✅ Runtime persistence required controlled repair and is verified." >> "$report"
-          else
-            echo "✅ Runtime persistence was already correct; verify-only path completed with zero container recreation." >> "$report"
-          fi
-
+          {
+            echo '## Runtime persistence reconcile evidence'
+            echo
+            echo "- workflow run: $GITHUB_RUN_ID"
+            echo "- expected SHA: \`${EXPECTED_SHA:-manual-live-sha}\`"
+            echo "- mutation required: \`$mutation_required\`"
+            echo "- container health: \`$status\`"
+            echo "- persistent mount: \`$mount\`"
+            echo '- marketplace actions: `disabled`'
+            echo '- hosted runner: `disabled`'
+          } > "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
           install -d -m 0700 "$STACK_DIR/deployment-evidence"
-          durable="$STACK_DIR/deployment-evidence/runtime-persistence-reconcile-${GITHUB_RUN_ID}.md"
-          cp "$report" "$durable"
-          chmod 0600 "$durable"
-          find "$STACK_DIR/deployment-evidence" -type f -name 'runtime-persistence-reconcile-*.md' -mtime +30 -delete 2>/dev/null || true
+          cp "$report" "$STACK_DIR/deployment-evidence/runtime-persistence-reconcile-${GITHUB_RUN_ID}.md"
+          chmod 0600 "$STACK_DIR/deployment-evidence/runtime-persistence-reconcile-${GITHUB_RUN_ID}.md"
           echo "report=$report" >> "$GITHUB_OUTPUT"
-          echo "mutation_required=$mutation_required" >> "$GITHUB_OUTPUT"
 
       - name: Publish evidence to SA-03.4 without marketplace actions
         continue-on-error: true
@@ -216,20 +146,12 @@ jobs:
           REPORT_PATH: ${{ steps.reconcile.outputs.report }}
         run: |
           set -Eeuo pipefail
-          payload="$(mktemp)"
-          REPORT_PATH="$REPORT_PATH" python3 - <<'PY' > "$payload"
-          import json
-          import os
-          path = os.environ['REPORT_PATH']
-          with open(path, encoding='utf-8') as handle:
-              body = handle.read()
-          print(json.dumps({'body': body[:60000]}, ensure_ascii=False))
+          payload="$(REPORT_PATH="$REPORT_PATH" python3 - <<'PY'
+          import json, os
+          print(json.dumps({'body': open(os.environ['REPORT_PATH'], encoding='utf-8').read()[:60000]}, ensure_ascii=False))
           PY
-          curl --fail-with-body --silent --show-error \
-            --request POST \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header 'Accept: application/vnd.github+json' \
-            --header 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/159/comments" \
-            --data-binary "@$payload"
-          rm -f "$payload"
+          )"
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/159/comments" -d "$payload"
