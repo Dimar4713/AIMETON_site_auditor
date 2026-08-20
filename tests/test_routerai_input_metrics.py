@@ -33,6 +33,10 @@ def test_routerai_input_metrics_are_truthful_untruncated_and_content_free() -> N
         "official_chunks_estimated",
         "external_chunks_estimated",
         "input_truncated",
+        "projected_external_chars_total",
+        "projected_external_source_refs_total",
+        "unique_projected_external_chars",
+        "projection_duplication_ratio_x1000",
     }
     assert metrics["official_text_chars"] == len(text)
     assert metrics["external_context_chars"] == len(serialized_sources)
@@ -49,6 +53,14 @@ def test_routerai_input_metrics_are_truthful_untruncated_and_content_free() -> N
     ) // DEFAULT_EVIDENCE_CHUNK_CHARS
     assert metrics["input_truncated"] is False
     assert metrics["model"]
+    for key in (
+        "projected_external_chars_total",
+        "projected_external_source_refs_total",
+        "unique_projected_external_chars",
+        "projection_duplication_ratio_x1000",
+    ):
+        assert isinstance(metrics[key], int)
+        assert metrics[key] >= 0
 
     rendered = json.dumps(metrics, ensure_ascii=False)
     assert "Sensitive title" not in rendered
