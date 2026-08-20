@@ -37,24 +37,31 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      AUTO_SHA: ${{ github.event.workflow_run.head_sha }}
+      AUTO_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
       MANUAL_SHA: ${{ inputs.commit_sha }}
 
     steps:
-      - name: Resolve exact SHA and completed chain evidence without marketplace actions
+      - name: Resolve deployed SHA and completed chain evidence without marketplace actions
         id: gates
         shell: bash
         run: |
           set -Eeuo pipefail
-          target="${MANUAL_SHA:-$AUTO_SHA}"
-          [[ "$target" =~ ^[0-9a-f]{40}$ ]]
-          echo "sha=$target" >> "$GITHUB_OUTPUT"
-          TARGET_SHA="$target" python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          cd "$STACK_DIR"
+          deployed="$(tr -d '[:space:]' < app-source-sha.txt)"
+          [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "${MANUAL_SHA:-}" ]]; then
+            [[ "$MANUAL_SHA" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$MANUAL_SHA" == "$deployed" ]]
+          fi
+          echo "sha=$deployed" >> "$GITHUB_OUTPUT"
+          run_head_sha="${AUTO_RUN_SHA:-$GITHUB_SHA}"
+          [[ "$run_head_sha" =~ ^[0-9a-f]{40}$ ]]
+          RUN_HEAD_SHA="$run_head_sha" python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os, urllib.parse, urllib.request
 
           repo=os.environ['GITHUB_REPOSITORY']
           token=os.environ['GH_TOKEN']
-          sha=os.environ['TARGET_SHA']
+          sha=os.environ['RUN_HEAD_SHA']
           query=urllib.parse.urlencode({'head_sha': sha, 'per_page': 100})
           req=urllib.request.Request(
               f'https://api.github.com/repos/{repo}/actions/runs?{query}',
