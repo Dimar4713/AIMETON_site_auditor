@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "default_profile": "routerai-gpt4o-mini",
+  "profiles": {
+    "routerai-gpt4o-mini": {
+      "backend_id": "routerai",
+      "base_url": "https://routerai.ru/api/v1",
+      "model_id": "openai/gpt-4o-mini",
+      "lifecycle_status": "runtime_baseline",
+      "probe_enabled": true,
+      "calibration_enabled": false,
+      "calibration_blocker": "structured_score_distribution_probe_required",
+      "score_protocol": "structured-json-a-t-v1",
+      "required_capabilities": {
+        "logprobs": true,
+        "top_logprobs": true,
+        "structured_outputs": true,
+        "min_distinct_score_support": 2
+      },
+      "pricing_snapshot": {
+        "as_of": "2026-08-21",
+        "input_rub_per_million": 15.0,
+        "output_rub_per_million": 61.0,
+        "source": "https://routerai.ru/models/openai/gpt-4o-mini"
+      },
+      "evidence": {
+        "runtime_capability_run": 32413075031,
+        "golden5_run": 32416294981,
+        "golden5_score_responses_with_logprobs": 96,
+        "golden5_nondegenerate_score_events": 86
+      }
+    },
+    "routerai-qwen35-9b": {
+      "backend_id": "routerai",
+      "base_url": "https://routerai.ru/api/v1",
+      "model_id": "qwen/qwen3.5-9b",
+      "lifecycle_status": "candidate",
+      "probe_enabled": true,
+      "calibration_enabled": false,
+      "calibration_blocker": "runtime_capability_probe_required",
+      "score_protocol": "structured-json-a-t-v1",
+      "required_capabilities": {
+        "logprobs": true,
+        "top_logprobs": true,
+        "structured_outputs": true,
+        "min_distinct_score_support": 2
+      },
+      "pricing_snapshot": {
+        "as_of": "2026-08-21",
+        "input_rub_per_million": 11.0,
+        "output_rub_per_million": 16.0,
+        "source": "https://routerai.ru/models/qwen/qwen3.5-9b"
+      },
+      "evidence": {
+        "documented_capabilities_only": true
+      }
+    }
+  }
+}

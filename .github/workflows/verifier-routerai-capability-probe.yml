@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       expected_sha:
-        description: Exact commit SHA containing the admitted probe code
+        description: Exact commit SHA containing the admitted probe code and model registry
         required: true
         type: string
       allow_paid_calls:
-        description: Explicit permission to perform the single provider call
+        description: Explicit permission to perform two bounded provider calls
         required: true
         default: false
         type: boolean
@@ -27,10 +27,10 @@ on:
         required: true
         default: "783"
         type: string
-      model:
-        description: Exact RouterAI model id admitted for this P0 probe
+      profile:
+        description: Allowlisted verifier profile id from config/verifier_model_profiles.json
         required: true
-        default: "openai/gpt-4o-mini"
+        default: "routerai-gpt4o-mini"
         type: string
 
 permissions:
@@ -38,7 +38,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: verifier-routerai-capability-probe
+  group: verifier-routerai-capability-probe-${{ inputs.profile }}
   cancel-in-progress: false
 
 jobs:
@@ -49,8 +49,7 @@ jobs:
     env:
       TARGET_SHA: ${{ inputs.expected_sha }}
       ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
-      ROUTERAI_BASE_URL: https://routerai.ru/api/v1
-      VERIFIER_MODEL: ${{ inputs.model }}
+      VERIFIER_PROFILE: ${{ inputs.profile }}
       VERIFIER_MAX_BUDGET_RUB: ${{ inputs.max_budget_rub }}
       VERIFIER_RESULT_PATH: /tmp/aimeton-verifier-routerai-capability-${{ github.run_id }}.json
       VENV_DIR: /tmp/aimeton-verifier-probe-${{ github.run_id }}
@@ -66,7 +65,7 @@ jobs:
           [[ '${{ inputs.allow_paid_calls }}' == 'true' ]]
           [[ '${{ inputs.owner_spend_authorized }}' == 'true' ]]
           [[ "$EVIDENCE_ISSUE" == '783' ]]
-          [[ "$VERIFIER_MODEL" == 'openai/gpt-4o-mini' ]]
+          [[ "$VERIFIER_PROFILE" =~ ^[a-z0-9-]+$ ]]
           [[ -n "${ROUTERAI_API_KEY:-}" ]]
           python3 - <<'PY'
           import os
@@ -90,6 +89,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           test -f scripts/verifier_routerai_capability_probe.py
           test -f app/verifier_backend_capability.py
+          test -f app/verifier_model_profiles.py
+          test -f config/verifier_model_profiles.json
 
       - name: Create minimal isolated probe environment
         shell: bash
@@ -100,7 +101,7 @@ jobs:
           "$VENV_DIR/bin/python" -m pip install --upgrade pip
           "$VENV_DIR/bin/pip" install 'pydantic>=2.11,<3'
 
-      - name: Execute exactly one bounded RouterAI capability request
+      - name: Execute bounded unconstrained and structured RouterAI probes
         shell: bash
         run: |
           set +e
@@ -126,9 +127,9 @@ jobs:
               payload = json.loads(path.read_text(encoding='utf-8'))
           else:
               payload = {
-                  'schema_version': '1.0',
+                  'schema_version': '1.2',
+                  'profile_id': os.environ['VERIFIER_PROFILE'],
                   'backend_id': 'routerai',
-                  'requested_model': os.environ['VERIFIER_MODEL'],
                   'qualification_status': 'probe_execution_failure',
                   'reason_codes': ['sanitized_result_missing'],
                   'provider_calls': 0,
@@ -140,12 +141,14 @@ jobs:
 
           compact = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
           body = (
-              '## VERIFIER-P0 RouterAI runtime capability evidence\n\n'
+              '## VERIFIER-P0 RouterAI score-distribution capability evidence\n\n'
               f'- workflow run: `{os.environ["GITHUB_RUN_ID"]}`\n'
-              f'- exact SHA: `{os.environ["TARGET_SHA"]}`\n'
+              f'- exact SHA / registry revision: `{os.environ["TARGET_SHA"]}`\n'
+              f'- verifier profile: `{os.environ["VERIFIER_PROFILE"]}`\n'
+              f'- resolved model: `{payload.get("requested_model")}`\n'
               f'- owner-authorized ceiling: `{os.environ["VERIFIER_MAX_BUDGET_RUB"]} RUB`\n'
-              '- provider calls admitted: `1`\n'
-              '- raw provider response retained: `no`\n'
+              '- provider calls admitted: `2` (unconstrained + strict json_schema)\n'
+              '- raw provider responses retained: `no`\n'
               '- client release / hard-gate authority: `none`\n\n'
               '```json\n' + compact + '\n```\n'
           )
@@ -167,23 +170,28 @@ jobs:
 
           summary = os.environ.get('GITHUB_STEP_SUMMARY')
           if summary:
+              modes = payload.get('probe_modes') or {}
+              unconstrained = modes.get('unconstrained_top_logprobs') or {}
+              structured = modes.get('structured_json_schema') or {}
               with open(summary, 'a', encoding='utf-8') as handle:
-                  handle.write('## VERIFIER-P0 RouterAI capability evidence\n\n')
-                  handle.write(f'- exact SHA: `{os.environ["TARGET_SHA"]}`\n')
+                  handle.write('## VERIFIER-P0 RouterAI score-distribution capability\n\n')
+                  handle.write(f'- profile: `{payload.get("profile_id")}`\n')
+                  handle.write(f'- model: `{payload.get("requested_model")}`\n')
                   handle.write(f'- qualification: `{payload.get("qualification_status")}`\n')
-                  handle.write(f'- reason codes: `{payload.get("reason_codes")}`\n')
+                  handle.write(f'- unconstrained support: `{unconstrained.get("max_score_support")}`\n')
+                  handle.write(f'- structured support: `{structured.get("max_score_support")}`\n')
                   handle.write(f'- estimated cost RUB: `{payload.get("actual_estimated_cost_rub")}`\n')
                   handle.write('- raw response retained: `no`\n')
           PY
 
-      - name: Enforce runtime qualification gate
+      - name: Enforce structured score-distribution qualification gate
         shell: bash
         run: |
           set -Eeuo pipefail
           rc="${PROBE_RC:-99}"
           [[ "$rc" =~ ^[0-9]+$ ]]
           if [[ "$rc" != 0 ]]; then
-            echo "RouterAI route did not pass runtime qualification; see sanitized evidence in #783" >&2
+            echo "RouterAI structured score-distribution path did not qualify; see sanitized evidence in #783" >&2
             exit "$rc"
           fi
 
