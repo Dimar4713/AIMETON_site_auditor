@@ -4,6 +4,9 @@ on:
   workflow_run:
     workflows:
       - Deploy Stage
+      - Configure DaData Stage
+      - Runtime Persistence Reconcile
+      - Stage Auth Persistence Guard
     types:
       - completed
   workflow_dispatch:
@@ -32,15 +35,16 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 12
+    timeout-minutes: 3
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
+      ready: ${{ steps.resolve.outputs.ready }}
       deploy_run_id: ${{ steps.resolve.outputs.deploy_run_id }}
       dadata_run_id: ${{ steps.resolve.outputs.dadata_run_id }}
       persistence_run_id: ${{ steps.resolve.outputs.persistence_run_id }}
       auth_guard_run_id: ${{ steps.resolve.outputs.auth_guard_run_id }}
     steps:
-      - name: Materialize exact convergence resolver without marketplace actions
+      - name: Materialize convergence resolver without marketplace actions
         shell: bash
         env:
           TARGET_SHA: ${{ github.sha }}
@@ -60,7 +64,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           test -f scripts/resolve_stage_convergence_gates.py
 
-      - name: Resolve exact SHA and wait for required post-deploy gates
+      - name: Resolve exact SHA and probe required post-deploy gates
         id: resolve
         shell: bash
         env:
@@ -73,12 +77,11 @@ jobs:
             --event-path "$GITHUB_EVENT_PATH" \
             --repository "$GITHUB_REPOSITORY" \
             --manual-sha "${MANUAL_SHA:-}" \
-            --timeout-seconds 600 \
-            --poll-seconds 10 \
             --github-output "$GITHUB_OUTPUT"
 
   publish-marker:
     needs: resolve-gates
+    if: needs.resolve-gates.outputs.ready == 'true'
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
