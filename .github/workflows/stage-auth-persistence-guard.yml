@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 concurrency:
@@ -61,6 +61,7 @@ jobs:
             --allow-manual
 
       - name: Require exact deployed source identity
+        id: source
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -71,6 +72,7 @@ jobs:
           expected="${EXPECTED_SHA:-$deployed}"
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
           [[ "$deployed" == "$expected" ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
           echo "Auth guard source SHA: $expected"
 
       - name: Inspect persistent auth invariant
@@ -182,3 +184,30 @@ jobs:
           python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["role"]=="admin" and p["is_active"] is True' "$me"
           rm -f "$cookie" "$RUNNER_TEMP/stage-auth-guard-response.json"
           echo 'stage_auth_guard=passed'
+
+      - name: Dispatch exact-SHA Stage convergence outside workflow_run depth chain
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONVERGENCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          payload="$(mktemp)"
+          CONVERGENCE_SHA="$CONVERGENCE_SHA" python3 - <<'PY' > "$payload"
+          import json, os
+          print(json.dumps({
+              'ref': 'main',
+              'inputs': {'commit_sha': os.environ['CONVERGENCE_SHA']},
+          }))
+          PY
+          code="$(curl --silent --show-error --output "$RUNNER_TEMP/convergence-dispatch-response.txt" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --data-binary "@$payload" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/stage-convergence.yml/dispatches")"
+          rm -f "$payload" "$RUNNER_TEMP/convergence-dispatch-response.txt"
+          test "$code" = 204
+          echo "stage_convergence_dispatch=ok exact_sha=$CONVERGENCE_SHA"
