@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 WORKFLOW = Path(".github/workflows/accept-routerai-synthesis-stage.yml")
-ROUTER = Path(".github/workflows/aimeton-command-router.yml")
+ROUTER = Path("scripts/aimeton_command_router.py")
 
 
 def test_routerai_synthesis_acceptance_is_dispatch_only_and_cost_gated() -> None:
@@ -26,8 +26,10 @@ def test_routerai_synthesis_acceptance_is_dispatch_only_and_cost_gated() -> None
 def test_routerai_synthesis_acceptance_uses_canonical_command_router() -> None:
     router = ROUTER.read_text(encoding="utf-8")
 
-    assert "accept-routerai-synthesis-stage" in router
-    assert "workflow_id: 'accept-routerai-synthesis-stage.yml'" in router
-    assert "issue_number: 700" in router
-    assert "allow_paid_calls: 'true'" in router
-    assert "owner_spend_authorized: 'true'" in router
+    expected = (
+        '"accept-routerai-synthesis-stage": '
+        '(700, "accept-routerai-synthesis-stage.yml", '
+        '{"expected_sha": "{sha}", "allow_paid_calls": "true", '
+        '"owner_spend_authorized": "true"})'
+    )
+    assert expected in router
