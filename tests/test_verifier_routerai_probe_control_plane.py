@@ -27,6 +27,13 @@ def test_probe_requires_paid_admission_and_budget_cap() -> None:
     assert "provider calls admitted: `1`" in workflow
 
 
+def test_probe_workflow_is_dispatch_parseable_without_runner_context_in_job_env() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "runner.temp" not in workflow
+    assert "VERIFIER_RESULT_PATH: /tmp/aimeton-verifier-routerai-capability-${{ github.run_id }}.json" in workflow
+
+
 def test_probe_does_not_use_marketplace_actions_or_keep_raw_provider_response() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
