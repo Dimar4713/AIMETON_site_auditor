@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "burst-runner-parallel-acceptance.yml"
-COMMAND = ROOT / ".github" / "workflows" / "burst-runner-parallel-command.yml"
+ROUTER = ROOT / "scripts" / "aimeton_command_router.py"
 
 
 def test_burst_parallel_acceptance_requires_two_dedicated_burst_jobs():
@@ -43,12 +43,10 @@ def test_burst_parallel_acceptance_is_exact_main_pinned_and_evidence_scoped():
     assert "actions: read" in text
 
 
-def test_owner_only_command_is_exact_main_scoped_and_marketplace_free():
-    text = COMMAND.read_text(encoding="utf-8")
-    assert "github.event.issue.number == 783" in text
-    assert "github.event.comment.user.login == 'Dimar4713'" in text
-    assert "/accept-burst-parallel-stage " in text
-    assert "burst-runner-parallel-acceptance.yml/dispatches" in text
-    assert "sha != current" in text
-    assert "actions: write" in text
-    assert "uses:" not in text
+def test_owner_only_command_uses_canonical_router():
+    text = ROUTER.read_text(encoding="utf-8")
+    assert '"accept-burst-parallel-stage": (' in text
+    assert '783, "burst-runner-parallel-acceptance.yml"' in text
+    assert '{"expected_sha": "{sha}", "evidence_issue": "783"}' in text
+    assert 'actor != OWNER' in text
+    assert 're.fullmatch(r"/([a-z0-9-]+)\\s+([0-9a-f]{40})", body)' in text
