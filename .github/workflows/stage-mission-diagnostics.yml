@@ -72,11 +72,20 @@ jobs:
           )"
 
           routerai_trace="$(docker exec -i "$CONTAINER" python - <<'PY' 2>/dev/null
-          import json, os, re, sqlite3
+          import hashlib
+          import json
+          import os
+          import re
+          import sqlite3
           from pathlib import Path
+
           def safe(value, limit=128):
               text = '' if value is None else str(value)
               return re.sub(r'[^A-Za-z0-9_.:+-]', '_', text)[:limit] or 'none'
+
+          def digest(value):
+              return hashlib.sha256(str(value).encode('utf-8')).hexdigest()[:16]
+
           path = Path(os.environ.get('AIMETON_TRACE_DB', os.environ.get('AIMETON_RUNTIME_DB', '/app/data/runtime-core.sqlite3')))
           if not path.exists():
               print('present=no;reason=trace_db_missing')
@@ -85,14 +94,18 @@ jobs:
               with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
                   db.row_factory = sqlite3.Row
                   rows = db.execute("""
-                      SELECT duration_ms, metadata_json, created_at
+                      SELECT mission_id, attempt_id, duration_ms, metadata_json, created_at
                       FROM mission_trace_events
-                      WHERE component='llm_synthesis' AND operation='llm_finished' AND state='failed'
-                      ORDER BY created_at DESC LIMIT 50
+                      WHERE component = 'llm_synthesis'
+                        AND operation = 'llm_finished'
+                        AND state = 'failed'
+                      ORDER BY created_at DESC
+                      LIMIT 50
                   """).fetchall()
           except Exception as exc:
               print(f'present=no;reason=trace_read_{safe(type(exc).__name__)}')
               raise SystemExit(0)
+
           for row in rows:
               try:
                   metadata = json.loads(row['metadata_json'] or '{}')
@@ -101,11 +114,15 @@ jobs:
               if isinstance(metadata, dict) and metadata.get('failed_phase'):
                   print(';'.join([
                       'present=yes',
+                      f"mission_sha={digest(row['mission_id'])}",
+                      f"attempt_sha={digest(row['attempt_id'])}",
                       f"created_at={safe(row['created_at'],64)}",
                       f"duration_ms={safe(row['duration_ms'],32)}",
                       f"failed_phase={safe(metadata.get('failed_phase'))}",
                       f"phase_error_type={safe(metadata.get('phase_error_type'))}",
+                      f"error_type={safe(metadata.get('error_type'))}",
                       f"synthesis_mode={safe(metadata.get('synthesis_mode'))}",
+                      f"budget_seconds={safe(metadata.get('budget_seconds'),32)}",
                   ]))
                   raise SystemExit(0)
           print('present=no;reason=no_failed_phase_event')
@@ -124,8 +141,9 @@ jobs:
             echo "- health state: \`$health_state\`"
             echo "- convergence: \`${convergence_safe:-unavailable}\`"
             echo "- latest failed RouterAI phase trace: \`${routerai_trace:-unavailable}\`"
+            echo '- RouterAI trace identifiers: SHA-256 prefixes only'
+            echo '- RouterAI prompt/response/source payloads: not collected'
             echo '- provider/LLM calls performed: `no`'
-            echo '- prompt/response/source payloads collected: `no`'
             echo '- credentials/tokens collected: `no`'
           } > "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
