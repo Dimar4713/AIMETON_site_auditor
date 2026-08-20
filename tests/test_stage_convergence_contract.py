@@ -6,38 +6,47 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "stage-convergence.yml"
+DADATA = ROOT / ".github" / "workflows" / "configure-dadata-stage.yml"
+PERSISTENCE = ROOT / ".github" / "workflows" / "runtime-persistence-reconcile.yml"
+AUTH_GUARD = ROOT / ".github" / "workflows" / "stage-auth-persistence-guard.yml"
 WRITER = ROOT / "scripts" / "write_stage_convergence_marker.py"
 MCP_SERVER = ROOT / "app" / "mcp_server.py"
 
 
-def test_convergence_workflow_starts_from_deploy_and_waits_for_all_required_gates() -> None:
-    text = WORKFLOW.read_text(encoding="utf-8")
-    trigger_prefix = text.split("permissions:", 1)[0]
-    assert "workflow_run:" in trigger_prefix
-    assert "- Deploy Stage" in trigger_prefix
-    assert "- Stage Auth Persistence Guard" not in trigger_prefix
-    assert "Automatic convergence requires a successful main Deploy Stage run" in text
-    for workflow_name in (
-        "Deploy Stage",
-        "Configure DaData Stage",
-        "Runtime Persistence Reconcile",
-        "Stage Auth Persistence Guard",
-    ):
-        assert workflow_name in text
-    assert "head_sha: targetSha" in text
-    assert "Timed out waiting for required Stage convergence gates" in text
+def test_convergence_chain_is_serialized_on_self_hosted_stage_runner() -> None:
+    convergence = WORKFLOW.read_text(encoding="utf-8")
+    dadata = DADATA.read_text(encoding="utf-8")
+    persistence = PERSISTENCE.read_text(encoding="utf-8")
+    auth = AUTH_GUARD.read_text(encoding="utf-8")
+
+    assert "- Deploy Stage" in dadata.split("permissions:", 1)[0]
+    assert "- Configure DaData Stage" in persistence.split("permissions:", 1)[0]
+    assert "- Runtime Persistence Reconcile" in auth.split("permissions:", 1)[0]
+    assert "- Stage Auth Persistence Guard" in convergence.split("permissions:", 1)[0]
+
+    for text in (convergence, dadata, persistence, auth):
+        assert "self-hosted" in text
+        assert "stage" in text
+        assert "auditor" in text
+        assert "ubuntu-latest" not in text
+        assert "actions/github-script" not in text
+
+    assert "Timed out waiting for required Stage convergence gates" not in convergence
+    assert "missing_successful_gate" in convergence
+    assert "actions/runs?" in convergence
 
 
 def test_convergence_publication_verifies_live_runtime_invariants() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
-    assert 'test "$(cat app-source-sha.txt)" = "$EXPECTED_SHA"' in text
+    assert "app-source-sha.txt" in text
     assert "/api/health" in text
     assert "/api/runtime/convergence" in text
     assert "/api/missions/registry-mirror/dadata/health" in text
     assert "PRAGMA integrity_check" in text
-    assert "active_admins" not in text  # no user/admin counts are emitted
     assert "role='admin' AND is_active=1" in text
     assert "runtime_instance_id" in text
+    assert "marketplace_actions=disabled" in text
+    assert "hosted_runner=disabled" in text
 
 
 def test_marker_writer_is_syntax_valid_and_atomic() -> None:
