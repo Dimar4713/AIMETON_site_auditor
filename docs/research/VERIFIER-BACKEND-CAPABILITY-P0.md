@@ -1,96 +1,81 @@
 # VERIFIER-P0 · Backend capability qualification
 
-Status: experimental / non-production / capability code merged; measured provider qualification pending.
+Status: experimental / non-production / first runtime probe completed; score-distribution extraction refinement in progress.
 
 Related: #783, `aimeton-architecture#123`, `Dimar4713/llm-as-a-verifier#1`.
 
 ## Mission position
 
-The offline verifier scaffold and backend capability contract are already in `main`. The next critical gate is to prove that a concrete backend can expose usable token-level probability evidence before any semantic-verifier calibration is treated as measured.
+The verifier backend can return token-level logprobs, but Golden-5 showed that `logprobs present` is not equivalent to `usable A-T probability distribution present`. The critical gate is therefore narrower: a score event is probabilistic evidence only when one score position exposes at least two distinct A-T alternatives.
 
 The capability gate is separate from release authority. Passing it only admits a backend to an experiment; it does not grant client release authority and does not override hard, evidence, policy, budget or human-review gates.
 
-## Candidate 1: RouterAI
+## Candidate 1: RouterAI / `openai/gpt-4o-mini`
 
-Site Auditor already uses RouterAI through an OpenAI-compatible `/chat/completions` API. RouterAI documentation currently declares support for:
+RouterAI documentation declares support for:
 
 - `logprobs: boolean`;
 - `top_logprobs: integer` from 0 to 20 when `logprobs=true`;
-- structured output / response format on supported routes.
+- `response_format` and structured outputs on supported routes.
 
-Authoritative documentation used for the contract-level qualification:
+References:
 
 - https://routerai.ru/docs/guides/overview/parameters
 - https://routerai.ru/models/openai/gpt-4o-mini
 
-This is enough to classify RouterAI as `contract_candidate`, but not enough to classify a specific model/provider route as `runtime_qualified`.
+OpenAI documents strict JSON-schema Structured Outputs for GPT-4o-mini-class models. This does not prove RouterAI's exact route exposes constrained top-logprobs, so the behavior is measured rather than assumed.
 
-## Runtime qualification contract
+## Evidence already obtained
 
-A live probe must be tiny and bounded. It requests at most four output tokens with `logprobs=true` and `top_logprobs=20`.
+Initial live capability run `32413075031` confirmed the exact RouterAI route returns HTTP 200, token-level logprobs and top-logprobs. It was cheap and fast enough for P0 experimentation.
 
-A backend is `runtime_qualified` only when all of the following are measured in the actual response:
+The first Golden-5 run `32416294981` then exposed the more important limitation:
+
+- provider attempts: `144`;
+- provider successes: `144`;
+- score responses with logprobs: `96 / 96`;
+- score events with at least two distinct A-T alternatives: `86 / 96`;
+- estimated provider cost: `3.487929 RUB`.
+
+The ten rejected events were not provider outages. Generic top-20 alternatives sometimes contained only one A-T score token because unrelated tokens occupied the remaining top-logprob slots. Renormalizing that singleton would create a point estimate, not a measured distribution, so AIMETON correctly failed closed.
+
+## Refined runtime qualification contract
+
+A backend score path is `runtime_qualified` only when all of the following are measured:
 
 1. `choices[0].logprobs.content` exists;
 2. at least one token position contains `top_logprobs`;
-3. at least one A–T verifier score token is visible in the returned alternatives;
-4. finite logprob values are non-degenerate;
-5. the response can be normalized without inventing neutral `0.5` evidence.
+3. at least one A-T verifier score token is visible;
+4. at least **two distinct A-T alternatives occur at the same score position**;
+5. finite logprobs exist for the response;
+6. evidence can be normalized without inventing neutral `0.5` or treating singleton support as a probability distribution.
 
-Missing logprob content is `runtime_incapable`. Missing score tokens, missing top alternatives or a degenerate distribution is `runtime_degraded`. Neither state may enter calibration as a measured result.
+Equal probabilities across A-T alternatives are valid probabilistic support; they are not considered degenerate merely because the distribution is flat. A singleton A-T support is `runtime_degraded` even if many unrelated tokens carry different logprob values.
 
-## Current evidence matrix
+## Constrained-decoding experiment
 
-| Measure | RouterAI state | Evidence |
-|---|---|---|
-| Existing AIMETON integration | confirmed | `app/llm.py`, `app/routerai_strict_request.py` |
-| OpenAI-compatible chat endpoint | confirmed in source | `https://routerai.ru/api/v1/chat/completions` |
-| `logprobs` documented | confirmed | RouterAI parameters documentation |
-| `top_logprobs` documented | confirmed | RouterAI parameters documentation |
-| `openai/gpt-4o-mini` current published token price | confirmed snapshot | RouterAI model page; 15 RUB / 1M input, 61 RUB / 1M output at the 2026-08-20 check |
-| exact model/provider route returns usable top-logprobs | **not yet measured** | owner-admitted bounded live probe |
-| A–T score-token extraction on actual route | **not yet measured** | owner-admitted bounded live probe |
-| non-degenerate distribution on actual route | **not yet measured** | owner-admitted bounded live probe |
+The next probe performs two bounded requests against the same model route:
 
-## Owner spend authorization and control path
+1. **unconstrained**: direct one-letter A-T request with `top_logprobs=20`;
+2. **structured**: strict `response_format=json_schema` whose `score` field is an enum of exactly A through T, also with `top_logprobs=20`.
 
-On 2026-08-20 the owner explicitly authorized verifier P0 provider/model spend up to **100 RUB**.
+The question is empirical: does constrained decoding cause the score position's top-logprobs to expose multiple A-T alternatives instead of allowing non-score tokens to consume the top-20 list?
 
-The authorized execution slice is intentionally narrower than that ceiling:
+Overall qualification is granted only if the structured path exposes at least two distinct A-T alternatives. Both responses are sanitized; raw provider bodies and API keys are not retained.
 
-- exactly one RouterAI request per command;
-- exact model locked to `openai/gpt-4o-mini`;
-- fixed probe payload with `max_tokens=4`;
-- current published RouterAI price snapshot: 15 RUB / 1M input tokens and 61 RUB / 1M output tokens;
-- conservative preflight assumes at most 2048 input tokens plus four output tokens, which is far below the 100 RUB ceiling;
-- raw provider response and API key are not retained in evidence;
-- only sanitized capability, usage, latency and estimated-cost fields are published;
-- failed or degraded capability still produces sanitized evidence and then fails closed.
+## Spend boundary
 
-The owner-only execution route is introduced by #789:
+The owner authorized VERIFIER-P0 provider/model spend up to **100 RUB**. The structured capability experiment admits exactly two very small requests and preflights a conservative token upper bound before either is sent. Expected cost is far below the owner ceiling.
 
-```text
-/ probe command on #783
-→ central AIMETON Command Router
-→ workflow_dispatch only
-→ repository-scoped self-hosted stage runner
-→ stage environment ROUTERAI_API_KEY
-→ exactly one bounded RouterAI call
-→ sanitized evidence back to #783
-→ runtime qualification gate
-```
+No provider call occurs during ordinary PR CI. Live calls remain available only through the owner-admitted command path on #783 after exact-head CI and merge.
 
-The command is authorized only on #783 and carries machine-readable inputs `allow_paid_calls=true`, `owner_spend_authorized=true`, `max_budget_rub=100` and the exact model id.
+## Safety invariant
 
-## Safety / spend boundary
-
-No provider call is performed by ordinary CI, by the capability module, or by tests. The paid request can happen only through the owner-admitted workflow after its code is merged to `main`.
-
-The probe does not deploy production code, does not call search providers, does not mutate release state and does not automatically begin Golden-5 calibration.
+**Verifier != Truth.** A successful structured score-distribution probe would only unblock further calibration. It cannot override deterministic tests, evidence/provenance failures, OCC-49/policy restrictions, release gates or mandatory HITL.
 
 ## Next critical step
 
-After #789 is green and merged, execute one owner-admitted probe against RouterAI `openai/gpt-4o-mini`, read back the sanitized runtime evidence and classify the route:
-
-- `runtime_qualified` → proceed to bounded Golden-5 calibration;
-- `runtime_incapable` / `runtime_degraded` → retain evidence, keep calibration blocked, test the next backend candidate rather than weakening the gate.
+1. land the strengthened score-support qualification and two-mode capability probe after provider-free CI;
+2. execute one owner-admitted probe on #783;
+3. if structured A-T support qualifies, update the fork/Site Auditor integration so Golden-5 uses the constrained score path and rerun the bounded calibration;
+4. if structured support still fails, do not weaken the two-score floor — test another extraction mechanism/provider/model instead.
