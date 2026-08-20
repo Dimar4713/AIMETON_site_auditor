@@ -44,7 +44,8 @@ ROUTES: dict[str, tuple[int, str, dict[str, str]]] = {
     "validate-search-observer-second-wave-live-stage": (578, "validate-search-observer-second-wave-live-stage.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true", "max_budget_rub": "100"}),
     "validate-search-observer-heterogeneous-batch-stage": (589, "validate-search-observer-heterogeneous-batch-stage.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true", "max_batch_budget_rub": "1"}),
     "inventory-search-gap-trace-stage": (632, "search-gap-trace-inventory-stage.yml", {"expected_sha": "{sha}"}),
-    "probe-verifier-routerai-stage": (783, "verifier-routerai-capability-probe.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true", "max_budget_rub": "100", "evidence_issue": "783", "model": "openai/gpt-4o-mini"}),
+    "probe-verifier-routerai-stage": (783, "verifier-routerai-capability-probe.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true", "max_budget_rub": "100", "evidence_issue": "783", "profile": "routerai-gpt4o-mini"}),
+    "probe-verifier-qwen35-stage": (783, "verifier-routerai-capability-probe.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true", "max_budget_rub": "100", "evidence_issue": "783", "profile": "routerai-qwen35-9b"}),
     "calibrate-verifier-golden5-stage": (783, "verifier-golden5-live-calibration.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true", "max_budget_rub": "100", "evidence_issue": "783", "model": "openai/gpt-4o-mini"}),
 }
 
