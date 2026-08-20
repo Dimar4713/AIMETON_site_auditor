@@ -1,0 +1,193 @@
+name: VERIFIER-P0 RouterAI Capability Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact commit SHA containing the admitted probe code
+        required: true
+        type: string
+      allow_paid_calls:
+        description: Explicit permission to perform the single provider call
+        required: true
+        default: false
+        type: boolean
+      owner_spend_authorized:
+        description: Owner explicitly authorized bounded spend
+        required: true
+        default: false
+        type: boolean
+      max_budget_rub:
+        description: Maximum owner-authorized budget in RUB
+        required: true
+        default: "100"
+        type: string
+      evidence_issue:
+        description: Issue that receives sanitized terminal evidence
+        required: true
+        default: "783"
+        type: string
+      model:
+        description: Exact RouterAI model id admitted for this P0 probe
+        required: true
+        default: "openai/gpt-4o-mini"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: verifier-routerai-capability-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 10
+    env:
+      TARGET_SHA: ${{ inputs.expected_sha }}
+      ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
+      ROUTERAI_BASE_URL: https://routerai.ru/api/v1
+      VERIFIER_MODEL: ${{ inputs.model }}
+      VERIFIER_MAX_BUDGET_RUB: ${{ inputs.max_budget_rub }}
+      VERIFIER_RESULT_PATH: ${{ runner.temp }}/verifier-routerai-capability-${{ github.run_id }}.json
+      VENV_DIR: /tmp/aimeton-verifier-probe-${{ github.run_id }}
+      GH_TOKEN: ${{ github.token }}
+      EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
+
+    steps:
+      - name: Require exact SHA and explicit owner spend authorization
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ '${{ inputs.allow_paid_calls }}' == 'true' ]]
+          [[ '${{ inputs.owner_spend_authorized }}' == 'true' ]]
+          [[ "$EVIDENCE_ISSUE" == '783' ]]
+          [[ "$VERIFIER_MODEL" == 'openai/gpt-4o-mini' ]]
+          [[ -n "${ROUTERAI_API_KEY:-}" ]]
+          python3 - <<'PY'
+          import os
+          budget = float(os.environ['VERIFIER_MAX_BUDGET_RUB'])
+          assert 0 < budget <= 100.0, budget
+          PY
+
+      - name: Materialize exact commit without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test -f scripts/verifier_routerai_capability_probe.py
+          test -f app/verifier_backend_capability.py
+
+      - name: Create minimal isolated probe environment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf "$VENV_DIR"
+          python3 -m venv "$VENV_DIR"
+          "$VENV_DIR/bin/python" -m pip install --upgrade pip
+          "$VENV_DIR/bin/pip" install 'pydantic>=2.11,<3'
+
+      - name: Execute exactly one bounded RouterAI capability request
+        shell: bash
+        run: |
+          set +e
+          cd "$GITHUB_WORKSPACE"
+          PYTHONPATH="$GITHUB_WORKSPACE" "$VENV_DIR/bin/python" scripts/verifier_routerai_capability_probe.py
+          rc=$?
+          echo "PROBE_RC=$rc" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Publish sanitized capability evidence to issue 783
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          path = Path(os.environ['VERIFIER_RESULT_PATH'])
+          if path.exists():
+              payload = json.loads(path.read_text(encoding='utf-8'))
+          else:
+              payload = {
+                  'schema_version': '1.0',
+                  'backend_id': 'routerai',
+                  'requested_model': os.environ['VERIFIER_MODEL'],
+                  'qualification_status': 'probe_execution_failure',
+                  'reason_codes': ['sanitized_result_missing'],
+                  'provider_calls': 0,
+                  'max_budget_rub': float(os.environ['VERIFIER_MAX_BUDGET_RUB']),
+                  'raw_response_saved': False,
+                  'client_release_authority': False,
+                  'hard_gate_override': False,
+              }
+
+          compact = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
+          body = (
+              '## VERIFIER-P0 RouterAI runtime capability evidence\n\n'
+              f'- workflow run: `{os.environ["GITHUB_RUN_ID"]}`\n'
+              f'- exact SHA: `{os.environ["TARGET_SHA"]}`\n'
+              f'- owner-authorized ceiling: `{os.environ["VERIFIER_MAX_BUDGET_RUB"]} RUB`\n'
+              '- provider calls admitted: `1`\n'
+              '- raw provider response retained: `no`\n'
+              '- client release / hard-gate authority: `none`\n\n'
+              '```json\n' + compact + '\n```\n'
+          )
+          repo = os.environ['GITHUB_REPOSITORY']
+          issue = os.environ['EVIDENCE_ISSUE']
+          req = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/issues/{issue}/comments',
+              data=json.dumps({'body': body}, ensure_ascii=False).encode('utf-8'),
+              method='POST',
+              headers={
+                  'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as response:
+              assert response.status == 201, response.status
+
+          summary = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary:
+              with open(summary, 'a', encoding='utf-8') as handle:
+                  handle.write('## VERIFIER-P0 RouterAI capability evidence\n\n')
+                  handle.write(f'- exact SHA: `{os.environ["TARGET_SHA"]}`\n')
+                  handle.write(f'- qualification: `{payload.get("qualification_status")}`\n')
+                  handle.write(f'- reason codes: `{payload.get("reason_codes")}`\n')
+                  handle.write(f'- estimated cost RUB: `{payload.get("actual_estimated_cost_rub")}`\n')
+                  handle.write('- raw response retained: `no`\n')
+          PY
+
+      - name: Enforce runtime qualification gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rc="${PROBE_RC:-99}"
+          [[ "$rc" =~ ^[0-9]+$ ]]
+          if [[ "$rc" != 0 ]]; then
+            echo "RouterAI route did not pass runtime qualification; see sanitized evidence in #783" >&2
+            exit "$rc"
+          fi
+
+      - name: Cleanup isolated probe environment
+        if: always()
+        shell: bash
+        run: rm -rf "$VENV_DIR"
