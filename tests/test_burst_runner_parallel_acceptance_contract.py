@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "burst-runner-parallel-acceptance.yml"
+COMMAND = ROOT / ".github" / "workflows" / "burst-runner-parallel-command.yml"
 
 
 def test_burst_parallel_acceptance_requires_two_dedicated_burst_jobs():
@@ -40,3 +41,14 @@ def test_burst_parallel_acceptance_is_exact_main_pinned_and_evidence_scoped():
     assert 'test "$EVIDENCE_ISSUE" = "783"' in text
     assert "issues: write" in text
     assert "actions: read" in text
+
+
+def test_owner_only_command_is_exact_main_scoped_and_marketplace_free():
+    text = COMMAND.read_text(encoding="utf-8")
+    assert "github.event.issue.number == 783" in text
+    assert "github.event.comment.user.login == 'Dimar4713'" in text
+    assert "/accept-burst-parallel-stage " in text
+    assert "burst-runner-parallel-acceptance.yml/dispatches" in text
+    assert "sha != current" in text
+    assert "actions: write" in text
+    assert "uses:" not in text
