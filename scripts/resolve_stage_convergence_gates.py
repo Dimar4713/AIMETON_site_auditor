@@ -5,7 +5,6 @@ import json
 import os
 import re
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +14,12 @@ from typing import Any
 
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_TRIGGER_WORKFLOWS = {
+    "Deploy Stage",
+    "Configure DaData Stage",
+    "Runtime Persistence Reconcile",
+    "Stage Auth Persistence Guard",
+}
 _REQUIRED_WORKFLOWS = (
     "Deploy Stage",
     "Configure DaData Stage",
@@ -38,11 +43,11 @@ def resolve_target_sha(*, event_name: str, manual_sha: str, event_payload: dict[
     else:
         trigger = event_payload.get("workflow_run") or {}
         if (
-            trigger.get("name") != "Deploy Stage"
+            trigger.get("name") not in _TRIGGER_WORKFLOWS
             or trigger.get("conclusion") != "success"
             or trigger.get("head_branch") != "main"
         ):
-            raise ValueError("automatic_convergence_requires_successful_main_deploy")
+            raise ValueError("automatic_convergence_requires_successful_main_gate")
         target = str(trigger.get("head_sha") or "").strip()
     if not _SHA_RE.fullmatch(target):
         raise ValueError("invalid_exact_sha")
@@ -91,6 +96,23 @@ def resolve_ready_gates(runs: list[dict[str, Any]], target_sha: str) -> Converge
     )
 
 
+def readiness_snapshot(runs: list[dict[str, Any]]) -> dict[str, bool]:
+    deploy = _latest_successful(runs, "Deploy Stage")
+    if deploy is None:
+        return {name: False for name in _REQUIRED_WORKFLOWS}
+    deploy_created = str(deploy.get("created_at") or "")
+    result = {"Deploy Stage": True}
+    for name in _REQUIRED_WORKFLOWS[1:]:
+        result[name] = any(
+            item.get("name") == name
+            and item.get("status") == "completed"
+            and item.get("conclusion") == "success"
+            and str(item.get("created_at") or "") >= deploy_created
+            for item in runs
+        )
+    return result
+
+
 def _request_json(url: str, token: str) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
@@ -125,29 +147,15 @@ def list_runs_for_sha(repository: str, target_sha: str, token: str) -> list[dict
     return all_runs
 
 
-def wait_for_gates(*, repository: str, target_sha: str, token: str, timeout_seconds: int, poll_seconds: int) -> ConvergenceGates:
-    deadline = time.monotonic() + timeout_seconds
-    while True:
-        runs = list_runs_for_sha(repository, target_sha, token)
-        gates = resolve_ready_gates(runs, target_sha)
-        if gates is not None:
-            return gates
-        if time.monotonic() >= deadline:
-            present = {
-                name: bool(_latest_successful(runs, name))
-                for name in _REQUIRED_WORKFLOWS
-            }
-            raise TimeoutError(f"stage_convergence_gates_timeout:{json.dumps(present, sort_keys=True)}")
-        time.sleep(poll_seconds)
-
-
-def write_github_outputs(path: str, gates: ConvergenceGates) -> None:
+def write_github_outputs(path: str, target_sha: str, gates: ConvergenceGates | None) -> None:
     with open(path, "a", encoding="utf-8") as handle:
-        handle.write(f"sha={gates.sha}\n")
-        handle.write(f"deploy_run_id={gates.deploy_run_id}\n")
-        handle.write(f"dadata_run_id={gates.dadata_run_id}\n")
-        handle.write(f"persistence_run_id={gates.persistence_run_id}\n")
-        handle.write(f"auth_guard_run_id={gates.auth_guard_run_id}\n")
+        handle.write(f"sha={target_sha}\n")
+        handle.write(f"ready={'true' if gates is not None else 'false'}\n")
+        if gates is not None:
+            handle.write(f"deploy_run_id={gates.deploy_run_id}\n")
+            handle.write(f"dadata_run_id={gates.dadata_run_id}\n")
+            handle.write(f"persistence_run_id={gates.persistence_run_id}\n")
+            handle.write(f"auth_guard_run_id={gates.auth_guard_run_id}\n")
 
 
 def main() -> int:
@@ -156,8 +164,6 @@ def main() -> int:
     parser.add_argument("--event-path", required=True)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--manual-sha", default="")
-    parser.add_argument("--timeout-seconds", type=int, default=600)
-    parser.add_argument("--poll-seconds", type=int, default=10)
     parser.add_argument("--github-output", required=True)
     args = parser.parse_args()
 
@@ -172,18 +178,20 @@ def main() -> int:
             manual_sha=args.manual_sha,
             event_payload=payload,
         )
-        gates = wait_for_gates(
-            repository=args.repository,
-            target_sha=target_sha,
-            token=token,
-            timeout_seconds=max(1, args.timeout_seconds),
-            poll_seconds=max(1, args.poll_seconds),
-        )
-    except (ValueError, RuntimeError, TimeoutError) as exc:
+        runs = list_runs_for_sha(args.repository, target_sha, token)
+        gates = resolve_ready_gates(runs, target_sha)
+    except (ValueError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    write_github_outputs(args.github_output, gates)
+    write_github_outputs(args.github_output, target_sha, gates)
+    if gates is None:
+        print(
+            "convergence not ready; short event-driven probe completed: "
+            + json.dumps(readiness_snapshot(runs), sort_keys=True)
+        )
+        return 0
+
     print(
         "required gates converged: "
         f"sha={gates.sha} deploy={gates.deploy_run_id} dadata={gates.dadata_run_id} "
