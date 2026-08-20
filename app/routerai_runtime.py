@@ -12,6 +12,7 @@ import httpx
 from app.llm import MODEL, analyze_with_routerai
 from app.models import SiteAnalysis
 from app.routerai_evidence_units import DEFAULT_EVIDENCE_CHUNK_CHARS, chunk_text
+from app.routerai_projection_metrics import routerai_projection_metrics
 from app.routerai_split_synthesis import (
     SplitSynthesisPhaseError,
     SplitSynthesisPhaseTimeout,
@@ -84,7 +85,7 @@ def routerai_input_metrics(
             // DEFAULT_EVIDENCE_CHUNK_CHARS,
         )
     )
-    return {
+    metrics: dict[str, Any] = {
         "model": MODEL[:160],
         "official_text_chars": official_text_chars,
         "external_context_chars": external_context_chars,
@@ -96,6 +97,8 @@ def routerai_input_metrics(
         "external_chunks_estimated": external_chunks_estimated,
         "input_truncated": False,
     }
+    metrics.update(routerai_projection_metrics(sources))
+    return metrics
 
 
 def _trace_db_path() -> str:
