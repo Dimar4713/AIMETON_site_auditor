@@ -20,8 +20,12 @@ def _workflow_document() -> dict:
 def test_runtime_persistence_reconcile_yaml_is_parseable() -> None:
     document = _workflow_document()
     assert "jobs" in document
-    assert "deployment-gate" in document["jobs"]
     assert "reconcile" in document["jobs"]
+    assert "deployment-gate" not in document["jobs"]
+    text = _workflow_text()
+    assert "runs-on: [self-hosted, Linux, X64, stage, auditor]" in text
+    assert "require_successful_parent_job.py" in text
+    assert "stage-auth-persistence-guard.yml/dispatches" in text
 
 
 def test_runtime_persistence_reconcile_shell_is_parseable() -> None:
