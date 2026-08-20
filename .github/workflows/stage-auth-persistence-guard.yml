@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 concurrency:
@@ -18,18 +18,63 @@ concurrency:
 
 jobs:
   guard:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
     env:
       CONTAINER: aimeton-auditor
       STAGE_URL: https://stage-auditor.aimeton.ru
+      STACK_DIR: /opt/aimeton/auditor-stack
       HOST_AUTH_DB: /opt/aimeton/auditor-stack/data/runtime-core/auth.sqlite3
+      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+      PARENT_RUN_ID: ${{ github.event.workflow_run.id }}
       AIMETON_BOOTSTRAP_ADMIN_USERNAME: ${{ vars.AIMETON_BOOTSTRAP_ADMIN_USERNAME }}
       AIMETON_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.AIMETON_BOOTSTRAP_ADMIN_PASSWORD }}
 
     steps:
+      - name: Require real successful persistence reconcile without marketplace actions
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          gate_sha="${EXPECTED_SHA:-$GITHUB_SHA}"
+          git fetch --no-tags --depth=1 origin "$gate_sha"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$gate_sha"
+          git clean -ffdx
+          test -f scripts/require_successful_parent_job.py
+          python3 scripts/require_successful_parent_job.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --parent-run-id "${PARENT_RUN_ID:-}" \
+            --job-name reconcile \
+            --allow-manual
+
+      - name: Require exact deployed source identity
+        id: source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          test -f app-source-sha.txt
+          deployed="$(cat app-source-sha.txt)"
+          [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
+          expected="${EXPECTED_SHA:-$deployed}"
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$deployed" == "$expected" ]]
+          echo "sha=$expected" >> "$GITHUB_OUTPUT"
+          echo "Auth guard source SHA: $expected"
+
       - name: Inspect persistent auth invariant
         id: inspect
         shell: bash
@@ -139,3 +184,30 @@ jobs:
           python3 -c 'import json,sys; p=json.loads(sys.argv[1]); assert p["role"]=="admin" and p["is_active"] is True' "$me"
           rm -f "$cookie" "$RUNNER_TEMP/stage-auth-guard-response.json"
           echo 'stage_auth_guard=passed'
+
+      - name: Dispatch exact-SHA Stage convergence outside workflow_run depth chain
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONVERGENCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          payload="$(mktemp)"
+          CONVERGENCE_SHA="$CONVERGENCE_SHA" python3 - <<'PY' > "$payload"
+          import json, os
+          print(json.dumps({
+              'ref': 'main',
+              'inputs': {'commit_sha': os.environ['CONVERGENCE_SHA']},
+          }))
+          PY
+          code="$(curl --silent --show-error --output "$RUNNER_TEMP/convergence-dispatch-response.txt" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --data-binary "@$payload" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/stage-convergence.yml/dispatches")"
+          rm -f "$payload" "$RUNNER_TEMP/convergence-dispatch-response.txt"
+          test "$code" = 204
+          echo "stage_convergence_dispatch=ok exact_sha=$CONVERGENCE_SHA"
