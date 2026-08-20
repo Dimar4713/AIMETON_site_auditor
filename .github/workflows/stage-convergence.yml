@@ -6,6 +6,7 @@ on:
       - Deploy Stage
       - Configure DaData Stage
       - Runtime Persistence Reconcile
+      - Stage Auth Persistence Guard
     types:
       - completed
   workflow_dispatch:
