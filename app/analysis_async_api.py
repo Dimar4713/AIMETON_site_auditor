@@ -21,6 +21,10 @@ from app.mission_orchestrator import (
     record_legacy_site_turn,
 )
 from app.models import AnalyzeRequest
+from app.public_llm_status import (
+    project_public_llm_input_metrics,
+    project_public_llm_outcome,
+)
 from app.runtime_convergence import runtime_instance_id
 from app.runtime_time import runtime_time_snapshot
 from app.scraper import FetchError, fetch_site
@@ -194,6 +198,8 @@ def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
         "llm_elapsed_seconds": None,
         "llm_budget_seconds": None,
         "llm_overdue": False,
+        "llm_input_metrics": None,
+        "llm_outcome": None,
     }
     try:
         events = _trace_ledger_for(_trace_db_path()).list_attempt(mission_id, attempt_id)
@@ -260,8 +266,11 @@ def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
     llm_elapsed_seconds = None
     llm_budget_seconds = None
     llm_overdue = False
+    llm_input_metrics = None
+    llm_outcome = None
     if llm_started is not None:
         llm_provider = llm_started.provider or "routerai"
+        llm_input_metrics = project_public_llm_input_metrics(llm_started.metadata)
         budget_raw = llm_started.metadata.get("budget_seconds")
         try:
             llm_budget_seconds = max(0.0, float(budget_raw))
@@ -284,6 +293,7 @@ def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
                 if llm_terminal.operation == "llm_timeout"
                 else llm_terminal.state.value
             )
+            llm_outcome = project_public_llm_outcome(llm_terminal.metadata)
             if llm_terminal.duration_ms is not None:
                 llm_elapsed_seconds = llm_terminal.duration_ms / 1000.0
             else:
@@ -314,6 +324,8 @@ def _trace_runtime_snapshot(mission_id: str, attempt_id: str) -> dict[str, Any]:
             else None
         ),
         "llm_overdue": llm_overdue,
+        "llm_input_metrics": llm_input_metrics,
+        "llm_outcome": llm_outcome,
     }
 
 
