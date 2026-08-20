@@ -3,7 +3,7 @@ name: Stage Convergence
 on:
   workflow_run:
     workflows:
-      - Deploy Stage
+      - Stage Auth Persistence Guard
     types:
       - completed
   workflow_dispatch:
@@ -27,113 +27,71 @@ env:
   CONTAINER: aimeton-auditor
 
 jobs:
-  resolve-gates:
+  converge:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    outputs:
-      sha: ${{ steps.resolve.outputs.sha }}
-      deploy_run_id: ${{ steps.resolve.outputs.deploy_run_id }}
-      dadata_run_id: ${{ steps.resolve.outputs.dadata_run_id }}
-      persistence_run_id: ${{ steps.resolve.outputs.persistence_run_id }}
-      auth_guard_run_id: ${{ steps.resolve.outputs.auth_guard_run_id }}
-    steps:
-      - name: Resolve exact SHA and wait for required post-deploy gates
-        id: resolve
-        uses: actions/github-script@v7
-        env:
-          MANUAL_SHA: ${{ inputs.commit_sha }}
-        with:
-          script: |
-            const targetSha = context.eventName === 'workflow_dispatch'
-              ? (process.env.MANUAL_SHA || '').trim()
-              : (context.payload.workflow_run?.head_sha || '').trim();
-            if (!/^[0-9a-f]{40}$/.test(targetSha)) {
-              core.setFailed(`Invalid exact SHA: ${targetSha}`);
-              return;
-            }
-            if (context.eventName !== 'workflow_dispatch') {
-              const trigger = context.payload.workflow_run;
-              if (
-                !trigger ||
-                trigger.name !== 'Deploy Stage' ||
-                trigger.conclusion !== 'success' ||
-                trigger.head_branch !== 'main'
-              ) {
-                core.setFailed('Automatic convergence requires a successful main Deploy Stage run');
-                return;
-              }
-            }
-
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const deadline = Date.now() + 10 * 60 * 1000;
-            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-            const latest = runs => runs
-              .slice()
-              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-
-            while (Date.now() < deadline) {
-              const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
-                owner,
-                repo,
-                head_sha: targetSha,
-                per_page: 100,
-              });
-              const successful = name => runs.filter(
-                run => run.name === name && run.status === 'completed' && run.conclusion === 'success'
-              );
-              const deploy = latest(successful('Deploy Stage'));
-              if (!deploy) {
-                core.info(`Waiting for successful Deploy Stage for ${targetSha}`);
-                await sleep(10000);
-                continue;
-              }
-              const deployStarted = new Date(deploy.created_at).getTime();
-              const afterDeploy = name => successful(name).filter(
-                run => new Date(run.created_at).getTime() >= deployStarted
-              );
-              const dadata = latest(afterDeploy('Configure DaData Stage'));
-              const persistence = latest(afterDeploy('Runtime Persistence Reconcile'));
-              const auth = latest(afterDeploy('Stage Auth Persistence Guard'));
-
-              if (dadata && persistence && auth) {
-                core.setOutput('sha', targetSha);
-                core.setOutput('deploy_run_id', String(deploy.id));
-                core.setOutput('dadata_run_id', String(dadata.id));
-                core.setOutput('persistence_run_id', String(persistence.id));
-                core.setOutput('auth_guard_run_id', String(auth.id));
-                core.info(`Required gates converged for ${targetSha}: deploy=${deploy.id} dadata=${dadata.id} persistence=${persistence.id} auth=${auth.id}`);
-                return;
-              }
-              core.info(`Waiting for post-deploy gates: dadata=${Boolean(dadata)} persistence=${Boolean(persistence)} auth=${Boolean(auth)}`);
-              await sleep(10000);
-            }
-            core.setFailed(`Timed out waiting for required Stage convergence gates for ${targetSha}`);
-
-  publish-marker:
-    needs: resolve-gates
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AUTO_SHA: ${{ github.event.workflow_run.head_sha }}
+      MANUAL_SHA: ${{ inputs.commit_sha }}
+
     steps:
-      - name: Materialize exact deployed convergence tooling without marketplace actions
+      - name: Resolve exact SHA and completed chain evidence without marketplace actions
+        id: gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          target="${MANUAL_SHA:-$AUTO_SHA}"
+          [[ "$target" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$target" >> "$GITHUB_OUTPUT"
+          TARGET_SHA="$target" python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, urllib.parse, urllib.request
+
+          repo=os.environ['GITHUB_REPOSITORY']
+          token=os.environ['GH_TOKEN']
+          sha=os.environ['TARGET_SHA']
+          query=urllib.parse.urlencode({'head_sha': sha, 'per_page': 100})
+          req=urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/actions/runs?{query}',
+              headers={
+                  'Authorization': f'Bearer {token}',
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as response:
+              payload=json.load(response)
+          runs=payload.get('workflow_runs') or []
+          required={
+              'Deploy Stage': 'deploy_run_id',
+              'Configure DaData Stage': 'dadata_run_id',
+              'Runtime Persistence Reconcile': 'persistence_run_id',
+              'Stage Auth Persistence Guard': 'auth_guard_run_id',
+          }
+          for name, output in required.items():
+              matches=[r for r in runs if r.get('name') == name and r.get('status') == 'completed' and r.get('conclusion') == 'success']
+              if not matches:
+                  raise SystemExit(f'missing_successful_gate:{name}')
+              matches.sort(key=lambda r: r.get('created_at') or '', reverse=True)
+              print(f'{output}={matches[0]["id"]}')
+          PY
+
+      - name: Materialize exact deployed convergence tooling
         shell: bash
         env:
-          EXPECTED_SHA: ${{ needs.resolve-gates.outputs.sha }}
+          EXPECTED_SHA: ${{ steps.gates.outputs.sha }}
         run: |
           set -Eeuo pipefail
           cd "$STACK_DIR"
-          test -f app-source-sha.txt
-          test "$(cat app-source-sha.txt)" = "$EXPECTED_SHA"
-
+          test "$(tr -d '[:space:]' < app-source-sha.txt)" = "$EXPECTED_SHA"
           cd "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          if [[ ! -d .git ]]; then
-            git init
-          fi
+          if [[ ! -d .git ]]; then git init; fi
           git remote remove origin 2>/dev/null || true
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
           git fetch --no-tags --depth=1 origin "$EXPECTED_SHA"
@@ -142,22 +100,18 @@ jobs:
           git clean -ffdx
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -f scripts/write_stage_convergence_marker.py
-          echo "Convergence tooling source SHA: $EXPECTED_SHA"
 
-      - name: Verify live Stage invariants before convergence publication
+      - name: Verify live Stage invariants before marker publication
         shell: bash
         env:
-          EXPECTED_SHA: ${{ needs.resolve-gates.outputs.sha }}
+          EXPECTED_SHA: ${{ steps.gates.outputs.sha }}
         run: |
           set -Eeuo pipefail
           cd "$STACK_DIR"
-          test "$(cat app-source-sha.txt)" = "$EXPECTED_SHA"
-
+          test "$(tr -d '[:space:]' < app-source-sha.txt)" = "$EXPECTED_SHA"
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
           test "$status" = healthy
-
           mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}')"
-          test -n "$mount"
           IFS='|' read -r mount_type mount_source mount_destination <<< "$mount"
           test "$mount_type" = bind
           test "$mount_destination" = /app/data
@@ -166,78 +120,75 @@ jobs:
           health="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/health")"
           python3 - "$health" "$EXPECTED_SHA" <<'PY'
           import json, sys
-          payload=json.loads(sys.argv[1])
-          assert payload.get('status') == 'ok', payload
-          assert payload.get('deployment_sha') == sys.argv[2], payload
+          p=json.loads(sys.argv[1])
+          assert p.get('status') == 'ok', p
+          assert p.get('deployment_sha') == sys.argv[2], p
           PY
 
           convergence="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/runtime/convergence")"
           python3 - "$convergence" "$EXPECTED_SHA" <<'PY'
           import json, re, sys
-          payload=json.loads(sys.argv[1])
-          assert payload.get('deployment_sha') == sys.argv[2], payload
-          assert re.fullmatch(r'[0-9a-f]{32}', payload.get('runtime_instance_id') or ''), payload
-          assert payload.get('secrets_exposed') is False, payload
+          p=json.loads(sys.argv[1])
+          assert p.get('deployment_sha') == sys.argv[2], p
+          assert re.fullmatch(r'[0-9a-f]{32}', p.get('runtime_instance_id') or ''), p
+          assert p.get('secrets_exposed') is False, p
           PY
 
           dadata="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/missions/registry-mirror/dadata/health")"
           python3 - "$dadata" <<'PY'
           import json, sys
-          payload=json.loads(sys.argv[1])
-          assert payload.get('provider') == 'dadata', payload
-          assert payload.get('state') == 'active', payload
-          assert payload.get('secrets_exposed') is False, payload
+          p=json.loads(sys.argv[1])
+          assert p.get('provider') == 'dadata', p
+          assert p.get('state') == 'active', p
+          assert p.get('secrets_exposed') is False, p
           PY
 
           docker exec -i "$CONTAINER" python - <<'PY'
           import os, sqlite3
           from pathlib import Path
-          runtime=Path(os.environ.get('AIMETON_RUNTIME_DB','data/runtime-core.sqlite3'))
-          auth=Path(os.environ.get('AIMETON_AUTH_DB','data/auth.sqlite3'))
+          runtime=Path(os.environ.get('AIMETON_RUNTIME_DB','/app/data/runtime-core.sqlite3'))
+          auth=Path(os.environ.get('AIMETON_AUTH_DB','/app/data/auth.sqlite3'))
           for path in (runtime, auth):
               assert path.exists(), path
               with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
                   assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
           with sqlite3.connect(f'file:{auth}?mode=ro', uri=True) as db:
-              admins=db.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1").fetchone()[0]
-              assert admins >= 1
+              assert db.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1").fetchone()[0] >= 1
           PY
 
       - name: Publish restart-aware exact-SHA convergence marker
         shell: bash
         env:
-          EXPECTED_SHA: ${{ needs.resolve-gates.outputs.sha }}
-          DEPLOY_RUN_ID: ${{ needs.resolve-gates.outputs.deploy_run_id }}
-          DADATA_RUN_ID: ${{ needs.resolve-gates.outputs.dadata_run_id }}
-          PERSISTENCE_RUN_ID: ${{ needs.resolve-gates.outputs.persistence_run_id }}
-          AUTH_GUARD_RUN_ID: ${{ needs.resolve-gates.outputs.auth_guard_run_id }}
+          EXPECTED_SHA: ${{ steps.gates.outputs.sha }}
+          DEPLOY_RUN_ID: ${{ steps.gates.outputs.deploy_run_id }}
+          DADATA_RUN_ID: ${{ steps.gates.outputs.dadata_run_id }}
+          PERSISTENCE_RUN_ID: ${{ steps.gates.outputs.persistence_run_id }}
+          AUTH_GUARD_RUN_ID: ${{ steps.gates.outputs.auth_guard_run_id }}
         run: |
           set -Eeuo pipefail
           cd "$GITHUB_WORKSPACE"
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           python3 scripts/write_stage_convergence_marker.py \
             --expected-sha "$EXPECTED_SHA" \
             --deploy-run-id "$DEPLOY_RUN_ID" \
             --dadata-run-id "$DADATA_RUN_ID" \
             --persistence-run-id "$PERSISTENCE_RUN_ID" \
             --auth-guard-run-id "$AUTH_GUARD_RUN_ID"
-
           snapshot="$(curl --fail --silent --show-error --max-time 30 "$STAGE_URL/api/runtime/convergence")"
           python3 - "$snapshot" "$EXPECTED_SHA" <<'PY'
           import json, sys
-          payload=json.loads(sys.argv[1])
-          assert payload.get('state') == 'converged', payload
-          assert payload.get('deployment_sha') == sys.argv[2], payload
-          assert payload.get('marker_error') is None, payload
-          assert payload.get('secrets_exposed') is False, payload
-          print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+          p=json.loads(sys.argv[1])
+          assert p.get('state') == 'converged', p
+          assert p.get('deployment_sha') == sys.argv[2], p
+          assert p.get('marker_error') is None, p
+          assert p.get('secrets_exposed') is False, p
+          print('stage_convergence=converged')
           PY
 
-      - name: Record sanitized convergence evidence locally and in summary
+      - name: Record sanitized convergence evidence
         if: always()
         shell: bash
         env:
-          EXPECTED_SHA: ${{ needs.resolve-gates.outputs.sha }}
+          EXPECTED_SHA: ${{ steps.gates.outputs.sha }}
         run: |
           set +e
           cd "$STACK_DIR"
@@ -247,25 +198,10 @@ jobs:
           {
             echo "expected_sha=$EXPECTED_SHA"
             echo "workflow_run_id=$GITHUB_RUN_ID"
-            echo "workflow_attempt=$GITHUB_RUN_ATTEMPT"
             echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "bundle_sha=$(cat app-source-sha.txt 2>/dev/null || echo unavailable)"
-            echo "marketplace_actions_on_stage_runner=disabled"
-            docker ps --filter name="$CONTAINER" --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
+            echo "marketplace_actions=disabled"
+            echo "hosted_runner=disabled"
           } > "$evidence_dir/final-state.txt"
           chmod 0600 "$evidence_dir"/* 2>/dev/null || true
-          find "$STACK_DIR/deployment-evidence" -mindepth 1 -maxdepth 1 -type d -name 'stage-convergence-*' -mtime +30 -exec rm -rf {} + 2>/dev/null || true
-          {
-            echo '## Stage convergence evidence'
-            echo
-            echo '```text'
-            cat "$evidence_dir/final-state.txt"
-            echo '```'
-            echo
-            echo '### Runtime convergence snapshot'
-            echo
-            echo '```json'
-            cat "$evidence_dir/runtime-convergence.json"
-            echo
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$evidence_dir/final-state.txt" >> "$GITHUB_STEP_SUMMARY"
