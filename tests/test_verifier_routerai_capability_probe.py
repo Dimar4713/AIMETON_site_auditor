@@ -22,24 +22,20 @@ class _FakeResponse:
         return json.dumps(self._payload).encode("utf-8")
 
 
-def _qualified_body() -> dict:
+def _body(top_logprobs: list[dict], *, content: str = "A") -> dict:
     return {
         "id": "chatcmpl-test",
         "model": "openai/gpt-4o-mini",
         "provider": "test-provider",
         "choices": [
             {
-                "message": {"content": "A"},
+                "message": {"content": content},
                 "logprobs": {
                     "content": [
                         {
-                            "token": "A",
-                            "logprob": -0.05,
-                            "top_logprobs": [
-                                {"token": "A", "logprob": -0.05},
-                                {"token": "B", "logprob": -1.4},
-                                {"token": "C", "logprob": -2.2},
-                            ],
+                            "token": top_logprobs[0]["token"],
+                            "logprob": top_logprobs[0]["logprob"],
+                            "top_logprobs": top_logprobs,
                         }
                     ]
                 },
@@ -47,34 +43,66 @@ def _qualified_body() -> dict:
         ],
         "usage": {
             "prompt_tokens": 64,
-            "completion_tokens": 1,
-            "total_tokens": 65,
+            "completion_tokens": 2,
+            "total_tokens": 66,
         },
     }
 
 
-def test_live_probe_writes_only_sanitized_capability_evidence(monkeypatch, tmp_path: Path):
+def _unconstrained_singleton_body() -> dict:
+    return _body(
+        [
+            {"token": "A", "logprob": -0.05},
+            {"token": " ordinary", "logprob": -1.0},
+            {"token": " token", "logprob": -1.7},
+        ]
+    )
+
+
+def _structured_qualified_body() -> dict:
+    return _body(
+        [
+            {"token": '"A"', "logprob": -0.2},
+            {"token": '"B"', "logprob": -0.8},
+            {"token": '"C"', "logprob": -1.6},
+        ],
+        content='{"score":"A"}',
+    )
+
+
+def test_live_probe_compares_unconstrained_and_structured_paths(monkeypatch, tmp_path: Path):
     result_path = tmp_path / "probe.json"
     monkeypatch.setenv("ROUTERAI_API_KEY", "secret-value-must-not-leak")
     monkeypatch.setenv("VERIFIER_MODEL", "openai/gpt-4o-mini")
     monkeypatch.setenv("VERIFIER_MAX_BUDGET_RUB", "100")
     monkeypatch.setenv("VERIFIER_RESULT_PATH", str(result_path))
-    monkeypatch.setattr(
-        probe.urllib.request,
-        "urlopen",
-        lambda request, timeout: _FakeResponse(_qualified_body()),
-    )
+
+    def fake_urlopen(request, timeout):
+        payload = json.loads(request.data.decode("utf-8"))
+        if "response_format" in payload:
+            return _FakeResponse(_structured_qualified_body())
+        return _FakeResponse(_unconstrained_singleton_body())
+
+    monkeypatch.setattr(probe.urllib.request, "urlopen", fake_urlopen)
 
     assert probe.main() == 0
     payload = json.loads(result_path.read_text(encoding="utf-8"))
 
+    assert payload["schema_version"] == "1.1"
     assert payload["qualification_status"] == "runtime_qualified"
-    assert payload["provider_calls"] == 1
+    assert payload["provider_calls"] == 2
+    unconstrained = payload["probe_modes"]["unconstrained_top_logprobs"]
+    structured = payload["probe_modes"]["structured_json_schema"]
+    assert unconstrained["qualification_status"] == "runtime_degraded"
+    assert unconstrained["max_score_support"] == 1
+    assert structured["qualification_status"] == "runtime_qualified"
+    assert structured["max_score_support"] == 3
     assert payload["raw_response_saved"] is False
     assert payload["client_release_authority"] is False
     assert payload["hard_gate_override"] is False
     assert payload["actual_estimated_cost_rub"] < 0.01
-    assert "secret-value-must-not-leak" not in result_path.read_text(encoding="utf-8")
+    rendered = result_path.read_text(encoding="utf-8")
+    assert "secret-value-must-not-leak" not in rendered
     assert "choices" not in payload
     assert "messages" not in payload
 
