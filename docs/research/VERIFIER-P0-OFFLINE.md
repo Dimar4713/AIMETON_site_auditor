@@ -39,6 +39,12 @@ The experimental fork carries two P0 protections before Site Auditor is allowed 
 
 The fork remains an experiment, not a standardized dependency. `Verifier != Truth` remains the controlling invariant.
 
+## Control-plane validation gate
+
+PR #784 remains fail-closed on repository Baseline evidence. During its offline implementation the older mixed-event Baseline workflow failed to register an exact-SHA validation job even though Acceptance Governance ran successfully on the same repository-scoped runner. Control-plane repair #785 therefore separated automatic `push`/`pull_request` Baseline validation from the owner-only exact-SHA dispatch workflow.
+
+The verifier PR must be revalidated on a post-#785 head. A green semantic-verifier unit suite is not sufficient by itself: the repository Baseline must execute on `aimeton-site-auditor-stage`, preserve exact-SHA materialization and remain Marketplace-free. This control-plane proof does not authorize any live verifier/model/provider call.
+
 ## Next gate
 
 Offline work can proceed through fixture generation, adapter mapping, calibration bookkeeping and replay preparation.
