@@ -1,0 +1,143 @@
+name: Site Auditor Burst Parallel Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact Site Auditor main SHA containing this acceptance workflow
+        required: true
+        type: string
+      evidence_issue:
+        description: Issue receiving sanitized acceptance evidence
+        required: true
+        default: "783"
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: site-auditor-burst-parallel-acceptance
+  cancel-in-progress: false
+
+jobs:
+  parallel:
+    name: burst-slot-${{ matrix.slot }}
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        slot: [1, 2]
+    runs-on: [self-hosted, Linux, X64, stage, auditor, burst]
+    timeout-minutes: 10
+    env:
+      TARGET_SHA: ${{ inputs.expected_sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Materialize exact Site Auditor main without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          current_main="$(python3 - <<'PY'
+          import json, os, urllib.request
+          req=urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/branches/main",
+              headers={"Authorization":f"Bearer {os.environ['GH_TOKEN']}","Accept":"application/vnd.github+json"},
+          )
+          with urllib.request.urlopen(req, timeout=20) as r:
+              print(json.load(r)["commit"]["sha"])
+          PY
+          )"
+          test "$current_main" = "$TARGET_SHA"
+
+      - name: Prove dedicated burst identity and hold overlap window
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$RUNNER_NAME" =~ ^aimeton-auditor-burst-stage-0[12]$ ]]
+          printf 'slot=%s runner=%s start_epoch=%s\n' '${{ matrix.slot }}' "$RUNNER_NAME" "$(date +%s)"
+          sleep 20
+          printf 'slot=%s runner=%s end_epoch=%s\n' '${{ matrix.slot }}' "$RUNNER_NAME" "$(date +%s)"
+
+  verify:
+    name: verify-parallel-overlap
+    needs: parallel
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 10
+    env:
+      TARGET_SHA: ${{ inputs.expected_sha }}
+      GH_TOKEN: ${{ github.token }}
+      EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
+    steps:
+      - name: Verify distinct burst runners and actual time overlap
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$EVIDENCE_ISSUE" = "783"
+          python3 - <<'PY'
+          import json, os, urllib.request
+          from datetime import datetime
+
+          repo=os.environ['GITHUB_REPOSITORY']
+          run_id=os.environ['GITHUB_RUN_ID']
+          token=os.environ['GH_TOKEN']
+          req=urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100",
+              headers={"Authorization":f"Bearer {token}","Accept":"application/vnd.github+json"},
+          )
+          with urllib.request.urlopen(req, timeout=20) as r:
+              jobs=json.load(r).get('jobs') or []
+          slots=[j for j in jobs if str(j.get('name') or '').startswith('burst-slot-')]
+          if len(slots) != 2:
+              raise SystemExit(f'expected two burst-slot jobs, observed {len(slots)}')
+          if any(j.get('conclusion') != 'success' for j in slots):
+              raise SystemExit('one or more burst-slot jobs did not succeed')
+          runners=[str(j.get('runner_name') or '') for j in slots]
+          if len(set(runners)) != 2:
+              raise SystemExit(f'parallel acceptance used fewer than two distinct runners: {runners}')
+          if not all(name.startswith('aimeton-auditor-burst-stage-') for name in runners):
+              raise SystemExit(f'non-burst Site Auditor runner observed: {runners}')
+          parse=lambda value: datetime.fromisoformat(str(value).replace('Z','+00:00'))
+          starts=[parse(j['started_at']) for j in slots]
+          ends=[parse(j['completed_at']) for j in slots]
+          overlap=max(starts) < min(ends)
+          if not overlap:
+              raise SystemExit(f'burst jobs were sequential, not parallel: {[(j["started_at"],j["completed_at"]) for j in slots]}')
+
+          body=(
+              '## Site Auditor burst parallel acceptance evidence\n\n'
+              f'- workflow run: `{run_id}`\n'
+              f'- exact Site Auditor SHA: `{os.environ["TARGET_SHA"]}`\n'
+              f'- burst runners: `{runners}`\n'
+              '- distinct burst runners: `2`\n'
+              '- execution intervals overlap: `true`\n'
+              '- provider/model calls: `none`\n'
+              '- release authority: `none`\n'
+          )
+          req=urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/issues/{os.environ['EVIDENCE_ISSUE']}/comments",
+              data=json.dumps({'body':body}).encode('utf-8'),
+              method='POST',
+              headers={
+                  'Authorization':f'Bearer {token}',
+                  'Accept':'application/vnd.github+json',
+                  'Content-Type':'application/json',
+              },
+          )
+          with urllib.request.urlopen(req, timeout=20) as r:
+              assert r.status == 201
+          print(json.dumps({'runners':runners,'parallel_overlap':True}, sort_keys=True))
+          PY
