@@ -32,29 +32,33 @@ def test_post_deploy_mutators_require_real_parent_job_gate():
     assert 'Require exact deployed source identity' in auth
 
 
-def test_stage_convergence_is_event_driven_and_does_not_hold_runner_waiting():
-    text = Path('.github/workflows/stage-convergence.yml').read_text(encoding='utf-8')
-    for trigger in (
-        '- Deploy Stage',
-        '- Configure DaData Stage',
-        '- Runtime Persistence Reconcile',
-        '- Stage Auth Persistence Guard',
-    ):
-        assert trigger in text
-    assert 'timeout-minutes: 3' in text
-    assert '--timeout-seconds' not in text
-    assert '--poll-seconds' not in text
-    assert "if: needs.resolve-gates.outputs.ready == 'true'" in text
+def test_stage_lifecycle_uses_direct_dispatch_handoffs():
+    deploy = Path('.github/workflows/deploy-stage.yml').read_text(encoding='utf-8')
+    dadata = Path('.github/workflows/configure-dadata-stage.yml').read_text(encoding='utf-8')
+    persistence = Path('.github/workflows/runtime-persistence-reconcile.yml').read_text(encoding='utf-8')
+    auth = Path('.github/workflows/stage-auth-persistence-guard.yml').read_text(encoding='utf-8')
+    convergence = Path('.github/workflows/stage-convergence.yml').read_text(encoding='utf-8')
+
+    assert 'configure-dadata-stage.yml/dispatches' in deploy
+    assert 'runtime-persistence-reconcile.yml/dispatches' in dadata
+    assert 'stage-auth-persistence-guard.yml/dispatches' in persistence
+    assert 'stage-convergence.yml/dispatches' in auth
+    assert "if: needs.resolve-gates.outputs.ready == 'true'" in convergence
+    assert 'timeout-minutes: 3' in convergence
+    assert '--timeout-seconds' not in convergence
+    assert '--poll-seconds' not in convergence
 
 
 def test_stage_convergence_keeps_exact_sha_and_required_gates():
     text = Path('.github/workflows/stage-convergence.yml').read_text(encoding='utf-8')
+    auth = Path('.github/workflows/stage-auth-persistence-guard.yml').read_text(encoding='utf-8')
     for required in (
         'Deploy Stage',
         'Configure DaData Stage',
         'Runtime Persistence Reconcile',
-        'Stage Auth Persistence Guard',
         'write_stage_convergence_marker.py',
         "payload.get('state') == 'converged'",
     ):
         assert required in text
+    assert 'Stage Auth Persistence Guard' in auth
+    assert 'stage-convergence.yml/dispatches' in auth
