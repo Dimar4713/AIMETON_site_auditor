@@ -29,7 +29,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: baseline-ci-${{ github.event.pull_request.number || inputs.expected_sha || github.ref }}
+  group: baseline-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,8 +37,8 @@ jobs:
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 20
     env:
-      TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_sha || github.event.pull_request.head.sha || github.sha }}
-      EVIDENCE_ISSUE: ${{ github.event_name == 'workflow_dispatch' && inputs.evidence_issue || '' }}
+      TARGET_SHA: ${{ github.event.inputs.expected_sha || github.event.pull_request.head.sha || github.sha }}
+      EVIDENCE_ISSUE: ${{ github.event.inputs.evidence_issue || '' }}
       VENV_DIR: ${{ runner.temp }}/aimeton-baseline-${{ github.run_id }}
       GH_TOKEN: ${{ github.token }}
 
@@ -135,7 +135,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish terminal evidence for owner-dispatched validation
-        if: always() && env.EVIDENCE_ISSUE != ''
+        if: always()
         shell: bash
         env:
           JOB_STATUS: ${{ job.status }}
