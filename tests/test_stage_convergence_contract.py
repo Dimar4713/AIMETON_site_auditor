@@ -6,26 +6,30 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "stage-convergence.yml"
+AUTH_GUARD = ROOT / ".github" / "workflows" / "stage-auth-persistence-guard.yml"
 WRITER = ROOT / "scripts" / "write_stage_convergence_marker.py"
 MCP_SERVER = ROOT / "app" / "mcp_server.py"
 
 
-def test_convergence_workflow_starts_from_deploy_and_waits_for_all_required_gates() -> None:
+def test_convergence_workflow_supports_nonblocking_gate_events_and_exact_sha_dispatch() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     trigger_prefix = text.split("permissions:", 1)[0]
     assert "workflow_run:" in trigger_prefix
-    assert "- Deploy Stage" in trigger_prefix
-    assert "- Stage Auth Persistence Guard" not in trigger_prefix
-    assert "Automatic convergence requires a successful main Deploy Stage run" in text
     for workflow_name in (
         "Deploy Stage",
         "Configure DaData Stage",
         "Runtime Persistence Reconcile",
-        "Stage Auth Persistence Guard",
     ):
-        assert workflow_name in text
-    assert "head_sha: targetSha" in text
-    assert "Timed out waiting for required Stage convergence gates" in text
+        assert f"- {workflow_name}" in trigger_prefix
+    assert "workflow_dispatch:" in trigger_prefix
+    assert "commit_sha" in trigger_prefix
+    assert "timeout-minutes: 3" in text
+    assert "resolve_stage_convergence_gates.py" in text
+    assert "if: needs.resolve-gates.outputs.ready == 'true'" in text
+
+    auth = AUTH_GUARD.read_text(encoding="utf-8")
+    assert "stage-convergence.yml/dispatches" in auth
+    assert "CONVERGENCE_SHA" in auth
 
 
 def test_convergence_publication_verifies_live_runtime_invariants() -> None:
@@ -35,7 +39,7 @@ def test_convergence_publication_verifies_live_runtime_invariants() -> None:
     assert "/api/runtime/convergence" in text
     assert "/api/missions/registry-mirror/dadata/health" in text
     assert "PRAGMA integrity_check" in text
-    assert "active_admins" not in text  # no user/admin counts are emitted
+    assert "active_admins" not in text
     assert "role='admin' AND is_active=1" in text
     assert "runtime_instance_id" in text
 
