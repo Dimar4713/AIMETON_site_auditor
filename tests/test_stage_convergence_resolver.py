@@ -24,13 +24,12 @@ def test_manual_target_sha_requires_exact_sha():
     assert resolve_target_sha(event_name="workflow_dispatch", manual_sha=sha, event_payload={}) == sha
 
 
-def test_automatic_target_accepts_each_successful_main_gate_event():
+def test_automatic_target_accepts_supported_successful_main_gate_events():
     sha = "b" * 40
     for name in (
         "Deploy Stage",
         "Configure DaData Stage",
         "Runtime Persistence Reconcile",
-        "Stage Auth Persistence Guard",
     ):
         payload = {
             "workflow_run": {
@@ -41,6 +40,20 @@ def test_automatic_target_accepts_each_successful_main_gate_event():
             }
         }
         assert resolve_target_sha(event_name="workflow_run", manual_sha="", event_payload=payload) == sha
+
+
+def test_automatic_target_rejects_auth_guard_because_it_dispatches_convergence_directly():
+    sha = "b" * 40
+    payload = {
+        "workflow_run": {
+            "name": "Stage Auth Persistence Guard",
+            "conclusion": "success",
+            "head_branch": "main",
+            "head_sha": sha,
+        }
+    }
+    with pytest.raises(ValueError, match="automatic_convergence_requires_successful_main_gate"):
+        resolve_target_sha(event_name="workflow_run", manual_sha="", event_payload=payload)
 
 
 def test_automatic_target_rejects_unrelated_or_failed_event():
