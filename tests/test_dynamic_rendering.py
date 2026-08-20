@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -21,7 +22,7 @@ def local_http_server(directory: Path):
     port = sock.getsockname()[1]
     sock.close()
     proc = subprocess.Popen(
-        ["python", "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(directory)],
+        [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(directory)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
