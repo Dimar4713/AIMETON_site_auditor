@@ -24,7 +24,8 @@ def test_probe_requires_paid_admission_and_budget_cap() -> None:
     assert "inputs.owner_spend_authorized" in workflow
     assert "0 < budget <= 100.0" in workflow
     assert "openai/gpt-4o-mini" in workflow
-    assert "provider calls admitted: `1`" in workflow
+    assert "provider calls admitted: `2`" in workflow
+    assert "unconstrained + strict json_schema" in workflow
 
 
 def test_probe_workflow_is_dispatch_parseable_without_runner_context_in_job_env() -> None:
@@ -38,7 +39,7 @@ def test_probe_does_not_use_marketplace_actions_or_keep_raw_provider_response() 
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "uses:" not in workflow
-    assert "raw provider response retained: `no`" in workflow
+    assert "raw provider responses retained: `no`" in workflow
     assert "client release / hard-gate authority: `none`" in workflow
 
 
