@@ -18,7 +18,6 @@ _TRIGGER_WORKFLOWS = {
     "Deploy Stage",
     "Configure DaData Stage",
     "Runtime Persistence Reconcile",
-    "Stage Auth Persistence Guard",
 }
 _REQUIRED_WORKFLOWS = (
     "Deploy Stage",
