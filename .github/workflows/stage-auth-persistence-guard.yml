@@ -18,18 +18,61 @@ concurrency:
 
 jobs:
   guard:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: stage
     timeout-minutes: 10
     env:
       CONTAINER: aimeton-auditor
       STAGE_URL: https://stage-auditor.aimeton.ru
+      STACK_DIR: /opt/aimeton/auditor-stack
       HOST_AUTH_DB: /opt/aimeton/auditor-stack/data/runtime-core/auth.sqlite3
+      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+      PARENT_RUN_ID: ${{ github.event.workflow_run.id }}
       AIMETON_BOOTSTRAP_ADMIN_USERNAME: ${{ vars.AIMETON_BOOTSTRAP_ADMIN_USERNAME }}
       AIMETON_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.AIMETON_BOOTSTRAP_ADMIN_PASSWORD }}
 
     steps:
+      - name: Require real successful persistence reconcile without marketplace actions
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          gate_sha="${EXPECTED_SHA:-$GITHUB_SHA}"
+          git fetch --no-tags --depth=1 origin "$gate_sha"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$gate_sha"
+          git clean -ffdx
+          test -f scripts/require_successful_parent_job.py
+          python3 scripts/require_successful_parent_job.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --parent-run-id "${PARENT_RUN_ID:-}" \
+            --job-name reconcile \
+            --allow-manual
+
+      - name: Require exact deployed source identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$STACK_DIR"
+          test -f app-source-sha.txt
+          deployed="$(cat app-source-sha.txt)"
+          [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
+          expected="${EXPECTED_SHA:-$deployed}"
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$deployed" == "$expected" ]]
+          echo "Auth guard source SHA: $expected"
+
       - name: Inspect persistent auth invariant
         id: inspect
         shell: bash
