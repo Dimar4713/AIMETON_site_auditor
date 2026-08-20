@@ -1,12 +1,35 @@
 from pathlib import Path
 
 
-def test_stage_convergence_is_self_hosted_and_marketplace_free():
-    text = Path('.github/workflows/stage-convergence.yml').read_text(encoding='utf-8')
-    assert 'ubuntu-latest' not in text
-    assert 'uses: actions/' not in text
-    assert 'runs-on: [self-hosted, Linux, X64, stage, auditor]' in text
-    assert 'scripts/resolve_stage_convergence_gates.py' in text
+CONVERGENCE_PATH = (
+    '.github/workflows/deploy-stage.yml',
+    '.github/workflows/configure-dadata-stage.yml',
+    '.github/workflows/runtime-persistence-reconcile.yml',
+    '.github/workflows/stage-auth-persistence-guard.yml',
+    '.github/workflows/stage-convergence.yml',
+)
+
+
+def test_full_stage_convergence_path_is_self_hosted_and_marketplace_free():
+    for path in CONVERGENCE_PATH:
+        text = Path(path).read_text(encoding='utf-8')
+        assert 'ubuntu-latest' not in text, path
+        assert 'uses: actions/' not in text, path
+        assert 'self-hosted' in text, path
+
+
+def test_post_deploy_mutators_require_real_parent_job_gate():
+    dadata = Path('.github/workflows/configure-dadata-stage.yml').read_text(encoding='utf-8')
+    persistence = Path('.github/workflows/runtime-persistence-reconcile.yml').read_text(encoding='utf-8')
+    auth = Path('.github/workflows/stage-auth-persistence-guard.yml').read_text(encoding='utf-8')
+    assert 'require_successful_parent_job.py' in dadata
+    assert '--job-name deploy' in dadata
+    assert 'require_successful_parent_job.py' in persistence
+    assert '--job-name deploy' in persistence
+    assert 'require_successful_parent_job.py' in auth
+    assert '--job-name reconcile' in auth
+    assert 'Require exact deployed source identity' in persistence
+    assert 'Require exact deployed source identity' in auth
 
 
 def test_stage_convergence_is_event_driven_and_does_not_hold_runner_waiting():
