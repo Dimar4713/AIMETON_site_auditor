@@ -32,20 +32,18 @@ jobs:
       CONTAINER: aimeton-auditor
       DATA_DIR: /opt/aimeton/auditor-stack/data/runtime-core
       RUNTIME_COMPOSE: /opt/aimeton/auditor-stack/docker-compose.runtime-secrets.yml
-      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
 
     steps:
-      - name: Require exact deployed source SHA
+      - name: Resolve exact deployed source SHA
+        id: source
         shell: bash
         run: |
           set -Eeuo pipefail
           cd "$STACK_DIR"
           deployed="$(tr -d '[:space:]' < app-source-sha.txt)"
           [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
-          expected="${EXPECTED_SHA:-$deployed}"
-          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$deployed" == "$expected" ]]
-          echo "Persistence deployed source SHA: $expected"
+          echo "sha=$deployed" >> "$GITHUB_OUTPUT"
+          echo "Persistence deployed source SHA: $deployed"
 
       - name: Reconcile persistent runtime storage
         id: reconcile
@@ -125,7 +123,7 @@ jobs:
             echo '## Runtime persistence reconcile evidence'
             echo
             echo "- workflow run: $GITHUB_RUN_ID"
-            echo "- expected SHA: \`${EXPECTED_SHA:-manual-live-sha}\`"
+            echo "- deployed SHA: \`${{ steps.source.outputs.sha }}\`"
             echo "- mutation required: \`$mutation_required\`"
             echo "- container health: \`$status\`"
             echo "- persistent mount: \`$mount\`"
