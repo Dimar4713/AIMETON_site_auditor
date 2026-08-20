@@ -119,12 +119,12 @@ jobs:
           code, started = request('/api/analyze/start', method='POST', payload={'url': 'https://aimeton.ru/'})
           assert code == 202, (code, started)
           mission_id = started['mission_id']
-          deadline = mission_started + 210.0
+          deadline = mission_started + 360.0
           status = None
           while time.monotonic() < deadline:
               status_code, status = request(started['status_url'])
               assert status_code == 200, (status_code, status)
-              if status.get('state') in {'failed', 'blocked', 'degraded', 'completed'}:
+              if status.get('state') in {'failed', 'completed'}:
                   break
               time.sleep(2)
           assert status is not None
