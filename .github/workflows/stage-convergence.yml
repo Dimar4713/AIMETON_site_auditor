@@ -31,7 +31,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 12
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
@@ -40,78 +40,42 @@ jobs:
       persistence_run_id: ${{ steps.resolve.outputs.persistence_run_id }}
       auth_guard_run_id: ${{ steps.resolve.outputs.auth_guard_run_id }}
     steps:
+      - name: Materialize exact convergence resolver without marketplace actions
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then
+            git init
+          fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test -f scripts/resolve_stage_convergence_gates.py
+
       - name: Resolve exact SHA and wait for required post-deploy gates
         id: resolve
-        uses: actions/github-script@v7
+        shell: bash
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           MANUAL_SHA: ${{ inputs.commit_sha }}
-        with:
-          script: |
-            const targetSha = context.eventName === 'workflow_dispatch'
-              ? (process.env.MANUAL_SHA || '').trim()
-              : (context.payload.workflow_run?.head_sha || '').trim();
-            if (!/^[0-9a-f]{40}$/.test(targetSha)) {
-              core.setFailed(`Invalid exact SHA: ${targetSha}`);
-              return;
-            }
-            if (context.eventName !== 'workflow_dispatch') {
-              const trigger = context.payload.workflow_run;
-              if (
-                !trigger ||
-                trigger.name !== 'Deploy Stage' ||
-                trigger.conclusion !== 'success' ||
-                trigger.head_branch !== 'main'
-              ) {
-                core.setFailed('Automatic convergence requires a successful main Deploy Stage run');
-                return;
-              }
-            }
-
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const deadline = Date.now() + 10 * 60 * 1000;
-            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-            const latest = runs => runs
-              .slice()
-              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-
-            while (Date.now() < deadline) {
-              const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
-                owner,
-                repo,
-                head_sha: targetSha,
-                per_page: 100,
-              });
-              const successful = name => runs.filter(
-                run => run.name === name && run.status === 'completed' && run.conclusion === 'success'
-              );
-              const deploy = latest(successful('Deploy Stage'));
-              if (!deploy) {
-                core.info(`Waiting for successful Deploy Stage for ${targetSha}`);
-                await sleep(10000);
-                continue;
-              }
-              const deployStarted = new Date(deploy.created_at).getTime();
-              const afterDeploy = name => successful(name).filter(
-                run => new Date(run.created_at).getTime() >= deployStarted
-              );
-              const dadata = latest(afterDeploy('Configure DaData Stage'));
-              const persistence = latest(afterDeploy('Runtime Persistence Reconcile'));
-              const auth = latest(afterDeploy('Stage Auth Persistence Guard'));
-
-              if (dadata && persistence && auth) {
-                core.setOutput('sha', targetSha);
-                core.setOutput('deploy_run_id', String(deploy.id));
-                core.setOutput('dadata_run_id', String(dadata.id));
-                core.setOutput('persistence_run_id', String(persistence.id));
-                core.setOutput('auth_guard_run_id', String(auth.id));
-                core.info(`Required gates converged for ${targetSha}: deploy=${deploy.id} dadata=${dadata.id} persistence=${persistence.id} auth=${auth.id}`);
-                return;
-              }
-              core.info(`Waiting for post-deploy gates: dadata=${Boolean(dadata)} persistence=${Boolean(persistence)} auth=${Boolean(auth)}`);
-              await sleep(10000);
-            }
-            core.setFailed(`Timed out waiting for required Stage convergence gates for ${targetSha}`);
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/resolve_stage_convergence_gates.py \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repository "$GITHUB_REPOSITORY" \
+            --manual-sha "${MANUAL_SHA:-}" \
+            --timeout-seconds 600 \
+            --poll-seconds 10 \
+            --github-output "$GITHUB_OUTPUT"
 
   publish-marker:
     needs: resolve-gates
