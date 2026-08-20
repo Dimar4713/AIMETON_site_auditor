@@ -63,6 +63,15 @@ async def test_routerai_span_is_visible_while_llm_is_running(tmp_path, monkeypat
     assert finished["llm_provider"] == "routerai"
     assert finished["llm_elapsed_seconds"] is not None
 
+    events = routerai_runtime._trace_ledger_for(str(trace_path)).list_attempt(
+        "mission-llm-live",
+        "analysis-llm-live",
+    )
+    terminal = next(event for event in reversed(events) if event.operation == "llm_finished")
+    assert terminal.metadata["outcome"] == "succeeded"
+    assert terminal.metadata["estimated_total_input_chars"] >= len("Example text")
+    assert terminal.metadata["model"]
+
 
 @pytest.mark.asyncio
 async def test_routerai_timeout_is_terminal_in_trace_and_raises_for_local_fallback(
@@ -99,3 +108,11 @@ async def test_routerai_timeout_is_terminal_in_trace_and_raises_for_local_fallba
     assert snapshot["llm_provider"] == "routerai"
     assert snapshot["llm_elapsed_seconds"] is not None
     assert snapshot["llm_overdue"] is False
+
+    events = routerai_runtime._trace_ledger_for(str(trace_path)).list_attempt(
+        "mission-llm-timeout",
+        "analysis-llm-timeout",
+    )
+    terminal = next(event for event in reversed(events) if event.operation == "llm_timeout")
+    assert terminal.metadata["outcome"] == "timeout"
+    assert terminal.metadata["estimated_total_input_chars"] >= len("Example text")
