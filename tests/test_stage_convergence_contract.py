@@ -10,22 +10,22 @@ WRITER = ROOT / "scripts" / "write_stage_convergence_marker.py"
 MCP_SERVER = ROOT / "app" / "mcp_server.py"
 
 
-def test_convergence_workflow_starts_from_deploy_and_waits_for_all_required_gates() -> None:
+def test_convergence_workflow_reprobes_on_each_required_gate_completion() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     trigger_prefix = text.split("permissions:", 1)[0]
     assert "workflow_run:" in trigger_prefix
-    assert "- Deploy Stage" in trigger_prefix
-    assert "- Stage Auth Persistence Guard" not in trigger_prefix
-    assert "Automatic convergence requires a successful main Deploy Stage run" in text
     for workflow_name in (
         "Deploy Stage",
         "Configure DaData Stage",
         "Runtime Persistence Reconcile",
         "Stage Auth Persistence Guard",
     ):
-        assert workflow_name in text
-    assert "head_sha: targetSha" in text
-    assert "Timed out waiting for required Stage convergence gates" in text
+        assert f"- {workflow_name}" in trigger_prefix
+    assert "resolve_stage_convergence_gates.py" in text
+    assert "timeout-minutes: 3" in text
+    assert "--timeout-seconds" not in text
+    assert "--poll-seconds" not in text
+    assert "if: needs.resolve-gates.outputs.ready == 'true'" in text
 
 
 def test_convergence_publication_verifies_live_runtime_invariants() -> None:

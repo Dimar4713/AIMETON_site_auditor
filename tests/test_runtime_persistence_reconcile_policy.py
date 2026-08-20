@@ -20,8 +20,15 @@ def _workflow_document() -> dict:
 def test_runtime_persistence_reconcile_yaml_is_parseable() -> None:
     document = _workflow_document()
     assert "jobs" in document
-    assert "deployment-gate" in document["jobs"]
     assert "reconcile" in document["jobs"]
+    steps = document["jobs"]["reconcile"]["steps"]
+    parent_gate = next(
+        step
+        for step in steps
+        if step.get("name") == "Require real successful deploy without marketplace actions"
+    )
+    assert "require_successful_parent_job.py" in parent_gate["run"]
+    assert "--job-name deploy" in parent_gate["run"]
 
 
 def test_runtime_persistence_reconcile_shell_is_parseable() -> None:
