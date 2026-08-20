@@ -4,6 +4,7 @@
 
 - [Исследовательские основания развития всей поисково-разведывательной системы](research/AIMETON_Site_Auditor_full_system_search_research.md) — история рассуждений и причин архитектурных решений: выводы тестирования KIMI, переход от расширенного поиска к 12 РПТК, фрактальности, многоплоскостности, свойствам мишеней, сценариям, федеративным провайдерам, Evidence/Entity Graph и адаптивному усушению ветвей.
 - [Evidence Memory и первый RAG-контур](research/AIMETON_Evidence_Memory_OpenRAG_research.md) — отдельное исследование подсистемы памяти, причины выбора архитектуры и путь от Document RAG к операционной онтологии AIMETON.
+- [Semantic Verifier P0 — offline calibration scaffold](research/VERIFIER-P0-OFFLINE.md) — provider-neutral контракт, Golden-5 candidate fixtures, fail-closed границы semantic verifier и условия перехода к live logprob backend.
 
 ## Главный план развития
 
