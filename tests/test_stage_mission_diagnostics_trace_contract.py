@@ -14,28 +14,35 @@ def test_routerai_phase_diagnostics_are_read_only_and_sanitized() -> None:
 
     assert "AIMETON_TRACE_DB" in text
     assert "mission_trace_events" in text
-    assert "component = 'llm_synthesis'" in text
-    assert "operation = 'llm_finished'" in text
-    assert "state = 'failed'" in text
+    assert "component='llm_synthesis'" in text
+    assert "operation='llm_finished'" in text
+    assert "state='failed'" in text
     assert "mode=ro" in text
+    assert "def safe(value" in text
 
     for field in (
         "failed_phase",
         "phase_error_type",
-        "error_type",
         "synthesis_mode",
-        "budget_seconds",
         "duration_ms",
     ):
         assert field in text
 
-    assert "hashlib.sha256" in text
-    assert "mission_sha" in text
-    assert "attempt_sha" in text
-    assert "RouterAI trace identifiers: SHA-256 prefixes only" in text
-    assert "RouterAI prompt/response/source payloads: not collected" in text
+    for admission_field in (
+        "deployment_sha_match",
+        "marker_sha_match",
+        "runtime_instance_match",
+        "secrets_exposed",
+        "marker_error",
+        "checks",
+    ):
+        assert admission_field in text
 
-    # The diagnostic must not initiate a new analysis or touch provider credentials.
+    assert "provider/LLM calls performed: `no`" in text
+    assert "prompt/response/source payloads collected: `no`" in text
+    assert "credentials/tokens collected: `no`" in text
+
+    # Diagnostic remains read-only and cannot initiate analysis/provider work.
     assert "/api/analyze/start" not in text
     assert "ROUTERAI_API_KEY" not in text
     assert "routerai.com" not in text
