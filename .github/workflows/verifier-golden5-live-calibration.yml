@@ -1,0 +1,220 @@
+name: VERIFIER-P0 Golden-5 Live Calibration
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact Site Auditor commit SHA containing the admitted calibration harness
+        required: true
+        type: string
+      allow_paid_calls:
+        description: Explicit permission for bounded RouterAI calls
+        required: true
+        default: false
+        type: boolean
+      owner_spend_authorized:
+        description: Owner explicitly authorized bounded verifier spend
+        required: true
+        default: false
+        type: boolean
+      max_budget_rub:
+        description: Maximum owner-authorized budget in RUB
+        required: true
+        default: "100"
+        type: string
+      evidence_issue:
+        description: Issue receiving sanitized calibration evidence
+        required: true
+        default: "783"
+        type: string
+      model:
+        description: Exact RouterAI model id admitted for P0 calibration
+        required: true
+        default: "openai/gpt-4o-mini"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: verifier-p0-golden5-live-calibration
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    environment: stage
+    timeout-minutes: 45
+    env:
+      TARGET_SHA: ${{ inputs.expected_sha }}
+      ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
+      ROUTERAI_BASE_URL: https://routerai.ru/api/v1
+      VERIFIER_MODEL: ${{ inputs.model }}
+      VERIFIER_MAX_BUDGET_RUB: ${{ inputs.max_budget_rub }}
+      VERIFIER_RESULT_PATH: /tmp/aimeton-verifier-golden5-${{ github.run_id }}.json
+      VERIFIER_FORK_DIR: /tmp/aimeton-llm-verifier-${{ github.run_id }}
+      VENV_DIR: /tmp/aimeton-verifier-golden5-venv-${{ github.run_id }}
+      LLM_VERIFIER_SHA: 9cabf17e3644778893666b864aec924e740006ba
+      GH_TOKEN: ${{ github.token }}
+      EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
+
+    steps:
+      - name: Require exact SHA and explicit owner spend authorization
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$LLM_VERIFIER_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ '${{ inputs.allow_paid_calls }}' == 'true' ]]
+          [[ '${{ inputs.owner_spend_authorized }}' == 'true' ]]
+          [[ "$EVIDENCE_ISSUE" == '783' ]]
+          [[ "$VERIFIER_MODEL" == 'openai/gpt-4o-mini' ]]
+          [[ -n "${ROUTERAI_API_KEY:-}" ]]
+          python3 - <<'PY'
+          import os
+          budget = float(os.environ['VERIFIER_MAX_BUDGET_RUB'])
+          assert 5.0 < budget <= 100.0, budget
+          PY
+
+      - name: Materialize exact Site Auditor commit without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test -f scripts/verifier_golden5_live_calibration.py
+          test -f benchmarks/sef/benchmark-20-v0.1.json
+          test -f benchmarks/sef/golden-5-v0.1.json
+
+      - name: Materialize exact AIMETON llm-verifier fork revision
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf "$VERIFIER_FORK_DIR"
+          mkdir -p "$VERIFIER_FORK_DIR"
+          cd "$VERIFIER_FORK_DIR"
+          git init
+          git remote add origin https://github.com/Dimar4713/llm-as-a-verifier.git
+          git fetch --no-tags --depth=1 origin "$LLM_VERIFIER_SHA"
+          git checkout --detach --force FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$LLM_VERIFIER_SHA"
+          test -f llm_verifier/__init__.py
+          test -f llm_verifier/fine_grained_reward.py
+
+      - name: Create isolated calibration environment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf "$VENV_DIR"
+          python3 -m venv "$VENV_DIR"
+          "$VENV_DIR/bin/python" -m pip install --upgrade pip
+          "$VENV_DIR/bin/pip" install 'openai>=1,<2' 'pydantic>=2.11,<3' 'tqdm>=4,<5'
+
+      - name: Execute bounded Golden-5 calibration through pinned fork
+        shell: bash
+        run: |
+          set +e
+          cd "$GITHUB_WORKSPACE"
+          PYTHONPATH="$GITHUB_WORKSPACE:$VERIFIER_FORK_DIR" \
+            "$VENV_DIR/bin/python" scripts/verifier_golden5_live_calibration.py
+          rc=$?
+          echo "CALIBRATION_RC=$rc" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Publish sanitized Golden-5 calibration evidence to issue 783
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          path = Path(os.environ['VERIFIER_RESULT_PATH'])
+          if path.exists():
+              payload = json.loads(path.read_text(encoding='utf-8'))
+          else:
+              payload = {
+                  'schema_version': '1.0',
+                  'experiment': 'verifier-p0-golden5-live-calibration',
+                  'measurement_status': 'execution_failure',
+                  'backend_id': 'routerai',
+                  'requested_model': os.environ['VERIFIER_MODEL'],
+                  'verifier_revision': os.environ['LLM_VERIFIER_SHA'],
+                  'provider_usage': {'provider_attempts': 0},
+                  'max_budget_rub': float(os.environ['VERIFIER_MAX_BUDGET_RUB']),
+                  'raw_provider_response_saved': False,
+                  'candidate_payloads_persisted': False,
+                  'client_release_authority': False,
+                  'hard_gate_override': False,
+              }
+
+          compact = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
+          body = (
+              '## VERIFIER-P0 Golden-5 live calibration evidence\n\n'
+              f'- workflow run: `{os.environ["GITHUB_RUN_ID"]}`\n'
+              f'- exact Site Auditor SHA: `{os.environ["TARGET_SHA"]}`\n'
+              f'- exact verifier fork SHA: `{os.environ["LLM_VERIFIER_SHA"]}`\n'
+              f'- owner-authorized ceiling: `{os.environ["VERIFIER_MAX_BUDGET_RUB"]} RUB`\n'
+              '- raw provider responses retained: `no`\n'
+              '- candidate payloads persisted: `no`\n'
+              '- client release / hard-gate authority: `none`\n\n'
+              '```json\n' + compact + '\n```\n'
+          )
+          repo = os.environ['GITHUB_REPOSITORY']
+          issue = os.environ['EVIDENCE_ISSUE']
+          req = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/issues/{issue}/comments',
+              data=json.dumps({'body': body}, ensure_ascii=False).encode('utf-8'),
+              method='POST',
+              headers={
+                  'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as response:
+              assert response.status == 201, response.status
+
+          summary = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary:
+              aggregate = payload.get('aggregate') or {}
+              usage = payload.get('provider_usage') or {}
+              with open(summary, 'a', encoding='utf-8') as handle:
+                  handle.write('## VERIFIER-P0 Golden-5 calibration\n\n')
+                  handle.write(f'- measurement status: `{payload.get("measurement_status")}`\n')
+                  handle.write(f'- usable cases: `{aggregate.get("usable_cases")}` / `{aggregate.get("cases")}`\n')
+                  handle.write(f'- pairwise accuracy: `{aggregate.get("pairwise_accuracy")}`\n')
+                  handle.write(f'- top1 accuracy: `{aggregate.get("top1_accuracy")}`\n')
+                  handle.write(f'- estimated cost RUB: `{usage.get("estimated_cost_rub")}`\n')
+                  handle.write('- release authority: `none`\n')
+          PY
+
+      - name: Enforce complete measurement gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rc="${CALIBRATION_RC:-99}"
+          [[ "$rc" =~ ^[0-9]+$ ]]
+          if [[ "$rc" != 0 ]]; then
+            echo "Golden-5 calibration did not produce five usable measurements; see #783 evidence" >&2
+            exit "$rc"
+          fi
+
+      - name: Cleanup isolated calibration state
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$VENV_DIR" "$VERIFIER_FORK_DIR" "$VERIFIER_RESULT_PATH"
