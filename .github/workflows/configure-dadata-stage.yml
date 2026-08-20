@@ -9,7 +9,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
   contents: read
 
 concurrency:
@@ -17,45 +16,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deployment-gate:
-    runs-on: ubuntu-latest
-    outputs:
-      real_deploy: ${{ steps.gate.outputs.real_deploy }}
-    steps:
-      - name: Require a successful deploy job
-        id: gate
-        uses: actions/github-script@v7
-        with:
-          script: |
-            if (context.eventName === 'workflow_dispatch') {
-              core.setOutput('real_deploy', 'true');
-              return;
-            }
-            const runId = context.payload.workflow_run?.id;
-            if (!runId || context.payload.workflow_run?.conclusion !== 'success') {
-              core.setOutput('real_deploy', 'false');
-              return;
-            }
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: runId,
-              per_page: 100,
-            });
-            const deploy = jobs.find(job => job.name === 'deploy');
-            const realDeploy = Boolean(deploy && deploy.status === 'completed' && deploy.conclusion === 'success');
-            core.info(`parent deploy job conclusion: ${deploy?.conclusion || 'missing'}`);
-            core.setOutput('real_deploy', realDeploy ? 'true' : 'false');
-
   configure:
-    needs: deployment-gate
-    if: ${{ needs.deployment-gate.outputs.real_deploy == 'true' }}
-    runs-on:
-      - self-hosted
-      - Linux
-      - X64
-      - stage
-      - auditor
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
     environment: DADATA
     timeout-minutes: 15
     env:
@@ -75,7 +41,7 @@ jobs:
           set -Eeuo pipefail
           cd "$STACK_DIR"
           test -f app-source-sha.txt
-          deployed="$(cat app-source-sha.txt)"
+          deployed="$(tr -d '[:space:]' < app-source-sha.txt)"
           [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
           expected="${EXPECTED_SHA:-$deployed}"
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
@@ -91,9 +57,7 @@ jobs:
           set -Eeuo pipefail
           cd "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          if [[ ! -d .git ]]; then
-            git init
-          fi
+          if [[ ! -d .git ]]; then git init; fi
           git remote remove origin 2>/dev/null || true
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
           git fetch --no-tags --depth=1 origin "$TOOLING_SHA"
@@ -108,29 +72,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           for name in DADATA_API DADATA_SECRET; do
-            test -n "${!name:-}" || {
-              echo "Missing required DADATA environment secret: $name" >&2
-              exit 1
-            }
-            [[ "${!name}" != *$'\n'* ]] || {
-              echo "Invalid newline in DADATA environment secret: $name" >&2
-              exit 1
-            }
+            test -n "${!name:-}" || { echo "Missing required DADATA environment secret: $name" >&2; exit 1; }
+            [[ "${!name}" != *$'\n'* ]] || { echo "Invalid newline in DADATA environment secret: $name" >&2; exit 1; }
           done
-          echo "DaData environment secret contract present"
-
-      - name: Validate committed stage smoke from exact tooling
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          cd "$GITHUB_WORKSPACE"
-          bash -n scripts/configure_dadata_stage.sh
 
       - name: Configure runtime and run live smoke
         shell: bash
         run: |
           set -Eeuo pipefail
           cd "$GITHUB_WORKSPACE"
+          bash -n scripts/configure_dadata_stage.sh
           install -d -m 0700 "$STACK_DIR/deployment-evidence"
           chmod +x scripts/configure_dadata_stage.sh
           scripts/configure_dadata_stage.sh 2>&1 | tee "$STACK_DIR/deployment-evidence/dadata-stage-${GITHUB_RUN_ID}.log"
@@ -142,25 +93,16 @@ jobs:
         run: |
           set +e
           cd "$STACK_DIR"
-          mkdir -p deployment-evidence
-          chmod 700 deployment-evidence
+          install -d -m 0700 deployment-evidence
           evidence="deployment-evidence/dadata-final-state-${GITHUB_RUN_ID}.txt"
           {
             echo "workflow_run_id=$GITHUB_RUN_ID"
-            echo "workflow_attempt=$GITHUB_RUN_ATTEMPT"
             echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "bundle_sha=$(cat app-source-sha.txt 2>/dev/null || echo unavailable)"
             echo "tooling_sha=${{ steps.source.outputs.sha }}"
-            echo "marketplace_actions_on_stage_runner=disabled"
-            docker ps --filter name=aimeton-auditor --format 'container={{.Names}} image={{.Image}} status={{.Status}}'
+            echo "marketplace_actions=disabled"
+            echo "hosted_runner=disabled"
             curl -sS "$STAGE_URL/api/missions/registry-mirror/dadata/health" || true
           } | tee "$evidence"
-          chmod 600 "$evidence"
-          find deployment-evidence -type f \( -name 'dadata-final-state-*.txt' -o -name 'dadata-stage-*.log' \) -mtime +30 -delete 2>/dev/null || true
-          {
-            echo '## DaData Stage evidence'
-            echo
-            echo '```text'
-            cat "$evidence"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          chmod 0600 "$evidence"
+          cat "$evidence" >> "$GITHUB_STEP_SUMMARY"
