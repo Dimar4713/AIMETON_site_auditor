@@ -52,7 +52,7 @@ jobs:
       ROUTERAI_BASE_URL: https://routerai.ru/api/v1
       VERIFIER_MODEL: ${{ inputs.model }}
       VERIFIER_MAX_BUDGET_RUB: ${{ inputs.max_budget_rub }}
-      VERIFIER_RESULT_PATH: ${{ runner.temp }}/verifier-routerai-capability-${{ github.run_id }}.json
+      VERIFIER_RESULT_PATH: /tmp/aimeton-verifier-routerai-capability-${{ github.run_id }}.json
       VENV_DIR: /tmp/aimeton-verifier-probe-${{ github.run_id }}
       GH_TOKEN: ${{ github.token }}
       EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
@@ -190,4 +190,6 @@ jobs:
       - name: Cleanup isolated probe environment
         if: always()
         shell: bash
-        run: rm -rf "$VENV_DIR"
+        run: |
+          rm -rf "$VENV_DIR"
+          rm -f "$VERIFIER_RESULT_PATH"
