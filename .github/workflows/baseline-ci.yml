@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 20
     env:
       TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      VENV_DIR: ${{ runner.temp }}/aimeton-baseline-${{ github.run_id }}
+      VENV_DIR: /tmp/aimeton-baseline-${{ github.run_id }}
 
     steps:
       - name: Materialize exact commit without marketplace actions
