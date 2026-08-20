@@ -27,190 +27,123 @@ jobs:
       STAGE_URL: https://stage-auditor.aimeton.ru
 
     steps:
-      - name: Verify exact deployed SHA
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          expected='${{ inputs.expected_sha }}'
-          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
-          deployed="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt")"
-          [[ "$deployed" == "$expected" ]]
-
-      - name: Collect sanitized diagnostics
+      - name: Collect sanitized Stage admission diagnostics
         id: diagnostics
         shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
           set +e
           report="$RUNNER_TEMP/stage-mission-diagnostics.md"
-          cd "$STACK_DIR" || true
+          expected="$EXPECTED_SHA"
+          expected_valid=no
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]] && expected_valid=yes
 
-          deployed_sha="$(cat app-source-sha.txt 2>/dev/null || echo unavailable)"
+          deployed_sha="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt" 2>/dev/null || echo unavailable)"
           container_state="$(docker inspect --format '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo unavailable)"
           health_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}not-configured{{end}}' "$CONTAINER" 2>/dev/null || echo unavailable)"
-          data_mount="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}}|{{.Source}}|{{.Destination}}{{end}}{{end}}' 2>/dev/null || true)"
-          auth_db="$(docker exec "$CONTAINER" sh -lc 'printf %s "${AIMETON_AUTH_DB:-/app/data/auth.sqlite3}"' 2>/dev/null || echo unavailable)"
-          mission_db="$(docker exec "$CONTAINER" sh -lc 'printf %s "${AIMETON_MISSION_DB:-/app/data/missions.sqlite3}"' 2>/dev/null || echo unavailable)"
+          exact_sha_match=no
+          [[ "$expected_valid" == yes && "$deployed_sha" == "$expected" ]] && exact_sha_match=yes
 
-          import_result="$(docker exec -i "$CONTAINER" python - <<'PY' 2>&1
-          checks = {}
-          for name, statement in {
-              "mission_sqlite": "from app.mission_sqlite import SQLiteMissionRepository",
-              "mission_recovery": "from app.mission_recovery import recovery_decision",
-              "mission_api": "from app.mission_api import get_mission_repository",
-              "auth_runtime": "from app.session_resolution import TypedLocalAuthProvider",
-          }.items():
-              try:
-                  exec(statement, {})
-                  checks[name] = "ok"
-              except Exception as exc:
-                  checks[name] = f"failed:{type(exc).__name__}"
-          print(";".join(f"{key}={value}" for key, value in checks.items()))
-          PY
-          )"
-
-          health_code="$(curl -sS -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$STAGE_URL/api/health" 2>/dev/null || echo curl_failed)"
-          anonymous_user_missions="$(curl -sS -o "$RUNNER_TEMP/user-missions.json" -w '%{http_code}' "$STAGE_URL/api/user/missions" 2>/dev/null || echo curl_failed)"
-          anonymous_admin_missions="$(curl -sS -o "$RUNNER_TEMP/admin-missions.json" -w '%{http_code}' "$STAGE_URL/api/admin/missions" 2>/dev/null || echo curl_failed)"
-
-          mission_db_exists="$(docker exec "$CONTAINER" sh -lc 'test -f "${AIMETON_MISSION_DB:-/app/data/missions.sqlite3}" && echo yes || echo no' 2>/dev/null || echo unavailable)"
-          integrity="$(docker exec -i "$CONTAINER" python - <<'PY' 2>/dev/null
-          import os, sqlite3
-          from pathlib import Path
-          path = Path(os.environ.get("AIMETON_MISSION_DB", "/app/data/missions.sqlite3"))
-          if not path.exists():
-              print("not-created")
-          else:
-              with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
-                  print(db.execute("PRAGMA integrity_check").fetchone()[0])
+          convergence_raw="$(curl --silent --show-error --max-time 30 "$STAGE_URL/api/runtime/convergence" 2>/dev/null || true)"
+          convergence_safe="$(python3 - "$convergence_raw" "$expected" <<'PY'
+          import json, re, sys
+          raw, expected = sys.argv[1], sys.argv[2]
+          try:
+              payload = json.loads(raw)
+          except Exception:
+              print('readable=no;state=unavailable;deployment_sha_match=no;marker_sha_match=no;runtime_instance_match=no;secrets_exposed=unknown;marker_error=unknown;checks=0')
+              raise SystemExit(0)
+          runtime_id = str(payload.get('runtime_instance_id') or '')
+          marker_runtime_id = str(payload.get('marker_runtime_instance_id') or '')
+          checks = payload.get('checks')
+          fields = {
+              'readable': 'yes',
+              'state': re.sub(r'[^A-Za-z0-9_.:+-]', '_', str(payload.get('state') or 'none'))[:64],
+              'deployment_sha_match': 'yes' if payload.get('deployment_sha') == expected else 'no',
+              'marker_sha_match': 'yes' if payload.get('marker_deployment_sha') == expected else 'no',
+              'runtime_instance_match': 'yes' if runtime_id and runtime_id == marker_runtime_id else 'no',
+              'secrets_exposed': str(payload.get('secrets_exposed')).lower(),
+              'marker_error': 'none' if payload.get('marker_error') is None else 'present',
+              'checks': str(len(checks) if isinstance(checks, list) else 0),
+          }
+          print(';'.join(f'{k}={v}' for k, v in fields.items()))
           PY
           )"
 
           routerai_trace="$(docker exec -i "$CONTAINER" python - <<'PY' 2>/dev/null
-          import hashlib
-          import json
-          import os
-          import re
-          import sqlite3
+          import json, os, re, sqlite3
           from pathlib import Path
-
           def safe(value, limit=128):
-              text = "" if value is None else str(value)
-              text = re.sub(r"[^A-Za-z0-9_.:+-]", "_", text)
-              return text[:limit] or "none"
-
-          def digest(value):
-              return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
-
-          path = Path(
-              os.environ.get(
-                  "AIMETON_TRACE_DB",
-                  os.environ.get("AIMETON_RUNTIME_DB", "/app/data/runtime-core.sqlite3"),
-              )
-          )
+              text = '' if value is None else str(value)
+              return re.sub(r'[^A-Za-z0-9_.:+-]', '_', text)[:limit] or 'none'
+          path = Path(os.environ.get('AIMETON_TRACE_DB', os.environ.get('AIMETON_RUNTIME_DB', '/app/data/runtime-core.sqlite3')))
           if not path.exists():
-              print("present=no;reason=trace_db_missing")
+              print('present=no;reason=trace_db_missing')
               raise SystemExit(0)
-
           try:
-              with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+              with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as db:
                   db.row_factory = sqlite3.Row
-                  rows = db.execute(
-                      """
-                      SELECT mission_id, attempt_id, duration_ms, metadata_json, created_at
+                  rows = db.execute("""
+                      SELECT duration_ms, metadata_json, created_at
                       FROM mission_trace_events
-                      WHERE component = 'llm_synthesis'
-                        AND operation = 'llm_finished'
-                        AND state = 'failed'
-                      ORDER BY created_at DESC
-                      LIMIT 50
-                      """
-                  ).fetchall()
+                      WHERE component='llm_synthesis' AND operation='llm_finished' AND state='failed'
+                      ORDER BY created_at DESC LIMIT 50
+                  """).fetchall()
           except Exception as exc:
-              print(f"present=no;reason=trace_read_{safe(type(exc).__name__)}")
+              print(f'present=no;reason=trace_read_{safe(type(exc).__name__)}')
               raise SystemExit(0)
-
-          selected = None
-          selected_metadata = None
           for row in rows:
               try:
-                  metadata = json.loads(row["metadata_json"] or "{}")
+                  metadata = json.loads(row['metadata_json'] or '{}')
               except Exception:
                   continue
-              if isinstance(metadata, dict) and metadata.get("failed_phase"):
-                  selected = row
-                  selected_metadata = metadata
-                  break
-
-          if selected is None or selected_metadata is None:
-              print("present=no;reason=no_failed_phase_event")
-              raise SystemExit(0)
-
-          fields = {
-              "present": "yes",
-              "mission_sha": digest(selected["mission_id"]),
-              "attempt_sha": digest(selected["attempt_id"]),
-              "created_at": safe(selected["created_at"], 64),
-              "duration_ms": safe(selected["duration_ms"], 32),
-              "failed_phase": safe(selected_metadata.get("failed_phase")),
-              "phase_error_type": safe(selected_metadata.get("phase_error_type")),
-              "error_type": safe(selected_metadata.get("error_type")),
-              "synthesis_mode": safe(selected_metadata.get("synthesis_mode")),
-              "budget_seconds": safe(selected_metadata.get("budget_seconds"), 32),
-          }
-          print(";".join(f"{key}={value}" for key, value in fields.items()))
+              if isinstance(metadata, dict) and metadata.get('failed_phase'):
+                  print(';'.join([
+                      'present=yes',
+                      f"created_at={safe(row['created_at'],64)}",
+                      f"duration_ms={safe(row['duration_ms'],32)}",
+                      f"failed_phase={safe(metadata.get('failed_phase'))}",
+                      f"phase_error_type={safe(metadata.get('phase_error_type'))}",
+                      f"synthesis_mode={safe(metadata.get('synthesis_mode'))}",
+                  ]))
+                  raise SystemExit(0)
+          print('present=no;reason=no_failed_phase_event')
           PY
           )"
 
           {
-            echo "## Stage mission diagnostics"
+            echo '## Stage mission diagnostics'
             echo
             echo "- workflow run: $GITHUB_RUN_ID"
-            echo "- timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- expected SHA valid: \`$expected_valid\`"
+            echo "- expected SHA: \`$expected\`"
             echo "- deployed source SHA: \`$deployed_sha\`"
+            echo "- exact SHA match: \`$exact_sha_match\`"
             echo "- container state: \`$container_state\`"
             echo "- health state: \`$health_state\`"
-            echo "- /app/data mount present: $([[ -n "$data_mount" ]] && echo yes || echo no)"
-            echo "- auth DB path: \`$auth_db\`"
-            echo "- mission DB path: \`$mission_db\`"
-            echo "- mission DB exists: \`$mission_db_exists\`"
-            echo "- mission DB integrity: \`${integrity:-unavailable}\`"
-            echo "- runtime imports: \`${import_result:-unavailable}\`"
-            echo "- /api/health HTTP: \`$health_code\`"
-            echo "- anonymous /api/user/missions HTTP: \`$anonymous_user_missions\`"
-            echo "- anonymous /api/admin/missions HTTP: \`$anonymous_admin_missions\`"
+            echo "- convergence: \`${convergence_safe:-unavailable}\`"
             echo "- latest failed RouterAI phase trace: \`${routerai_trace:-unavailable}\`"
-            echo "- RouterAI trace identifiers: SHA-256 prefixes only"
-            echo "- RouterAI prompt/response/source payloads: not collected"
-            echo "- credentials/tokens/internal payloads: not collected"
+            echo '- provider/LLM calls performed: `no`'
+            echo '- prompt/response/source payloads collected: `no`'
+            echo '- credentials/tokens collected: `no`'
           } > "$report"
-
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
           echo "report=$report" >> "$GITHUB_OUTPUT"
 
-      - name: Upload diagnostics
+      - name: Publish sanitized diagnostics to issue 177 without Marketplace actions
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stage-mission-diagnostics-${{ github.run_id }}
-          path: ${{ steps.diagnostics.outputs.report }}
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Publish diagnostics to SA-MVP-01C
-        if: always()
-        continue-on-error: true
-        uses: actions/github-script@v7
+        shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           REPORT_PATH: ${{ steps.diagnostics.outputs.report }}
-        with:
-          github-token: ${{ github.token }}
-          retries: 3
-          script: |
-            const fs = require('fs');
-            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 177,
-              body: report.slice(0, 60000),
-            });
+        run: |
+          set -Eeuo pipefail
+          test -f "$REPORT_PATH"
+          payload="$(python3 -c 'import json,sys; print(json.dumps({"body": open(sys.argv[1], encoding="utf-8").read()}))' "$REPORT_PATH")"
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/177/comments" \
+            -d "$payload"
