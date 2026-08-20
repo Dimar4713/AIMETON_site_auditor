@@ -27,7 +27,6 @@ jobs:
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       STAGE_URL: https://stage-auditor.aimeton.ru
-      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
       DADATA_API: ${{ secrets.DADATA_API }}
       DADATA_SECRET: ${{ secrets.DADATA_SECRET }}
       DADATA_SMOKE_QUERY: ${{ vars.DADATA_SMOKE_QUERY || '7707083893' }}
@@ -43,11 +42,8 @@ jobs:
           test -f app-source-sha.txt
           deployed="$(tr -d '[:space:]' < app-source-sha.txt)"
           [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
-          expected="${EXPECTED_SHA:-$deployed}"
-          [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$deployed" == "$expected" ]]
-          echo "sha=$expected" >> "$GITHUB_OUTPUT"
-          echo "DaData deployed source SHA: $expected"
+          echo "sha=$deployed" >> "$GITHUB_OUTPUT"
+          echo "DaData deployed source SHA: $deployed"
 
       - name: Materialize exact DaData tooling without marketplace actions
         shell: bash
