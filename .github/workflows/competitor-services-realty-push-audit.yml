@@ -37,8 +37,7 @@ jobs:
           )
           try:
               with urlopen(req, timeout=420) as r:
-                  raw = r.read().decode('utf-8')
-                  payload = json.loads(raw)
+                  payload = json.loads(r.read().decode('utf-8'))
                   print(json.dumps({'http_status': r.status, 'payload': payload}, ensure_ascii=False))
           except HTTPError as exc:
               raw = exc.read().decode('utf-8', errors='replace')
@@ -49,7 +48,7 @@ jobs:
               print(json.dumps({'http_status': exc.code, 'payload': detail}, ensure_ascii=False))
           PY
 
-      - name: Publish bounded evidence
+      - name: Publish structured bounded evidence
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,22 +59,54 @@ jobs:
           from pathlib import Path
 
           data = json.loads(Path(os.environ['RUNNER_TEMP'] + '/competitor-audit.json').read_text(encoding='utf-8'))
-          payload = data.get('payload') or {}
+          p = data.get('payload') or {}
+          if not isinstance(p, dict):
+              p = {}
+          readiness = p.get('readiness') or {}
+          opportunity = p.get('commercial_opportunity') or {}
+          action = p.get('action_package') or {}
           safe = {
               'http_status': data.get('http_status'),
-              'top_level_keys': sorted(payload.keys()) if isinstance(payload, dict) else [],
-              'status': payload.get('status') if isinstance(payload, dict) else None,
-              'analysis_id': payload.get('analysis_id') if isinstance(payload, dict) else None,
-              'mission_id': payload.get('mission_id') if isinstance(payload, dict) else None,
-              'title': payload.get('title') if isinstance(payload, dict) else None,
-              'summary': payload.get('summary') if isinstance(payload, dict) else None,
-              'business_model': payload.get('business_model') if isinstance(payload, dict) else None,
-              'commercial_score': payload.get('commercial_score') if isinstance(payload, dict) else None,
-              'recommendation': payload.get('recommendation') if isinstance(payload, dict) else None,
-              'completeness': payload.get('completeness') if isinstance(payload, dict) else None,
-              'errors': payload.get('errors') if isinstance(payload, dict) else None,
+              'mission_id': p.get('mission_id'),
+              'analysis_id': p.get('analysis_id'),
+              'url': p.get('url'),
+              'company_name': p.get('company_name'),
+              'business_summary': p.get('business_summary'),
+              'commercial_opportunity': {
+                  'opportunity_type': opportunity.get('opportunity_type'),
+                  'problem_hypothesis': opportunity.get('problem_hypothesis'),
+                  'recommended_solution': opportunity.get('recommended_solution'),
+                  'expected_value': opportunity.get('expected_value'),
+                  'score': opportunity.get('score'),
+                  'qualification': opportunity.get('qualification'),
+              },
+              'economic_signals': (p.get('economic_signals') or [])[:12],
+              'agents': (p.get('agents') or [])[:10],
+              'action_package': {
+                  'decision_maker_hypothesis': action.get('decision_maker_hypothesis'),
+                  'contact_reason': action.get('contact_reason'),
+                  'demo_scenario': (action.get('demo_scenario') or [])[:8],
+                  'first_message': action.get('first_message'),
+                  'next_action': action.get('next_action'),
+              },
+              'risks_and_assumptions': (p.get('risks_and_assumptions') or [])[:20],
+              'readiness': {
+                  'analysis_state': readiness.get('analysis_state'),
+                  'sufficiency_level': readiness.get('sufficiency_level'),
+                  'identity_state': readiness.get('identity_state'),
+                  'profile_completeness': readiness.get('profile_completeness'),
+                  'evidence_quality': readiness.get('evidence_quality'),
+                  'commercial_priority': readiness.get('commercial_priority'),
+                  'required_verticals': readiness.get('required_verticals'),
+                  'provider_states': readiness.get('provider_states'),
+                  'budget_state': readiness.get('budget_state'),
+                  'release_blockers': readiness.get('release_blockers'),
+              },
+              'source_count': len(p.get('sources') or []),
+              'company_fact_count': len(p.get('company_facts') or []),
+              'evidence_item_count': len(p.get('evidence') or []),
           }
-          body = '## Competitor live audit — services-realty.ru\n\n```json\n' + json.dumps(safe, ensure_ascii=False, indent=2)[:50000] + '\n```\n'
+          body = '## Competitor live audit v2 — services-realty.ru\n\n```json\n' + json.dumps(safe, ensure_ascii=False, indent=2)[:55000] + '\n```\n'
           req = urllib.request.Request(
               f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['EVIDENCE_ISSUE']}/comments",
               data=json.dumps({'body': body}, ensure_ascii=False).encode('utf-8'),
