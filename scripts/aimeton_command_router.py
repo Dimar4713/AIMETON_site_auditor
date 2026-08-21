@@ -47,6 +47,7 @@ ROUTES: dict[str, tuple[int, str, dict[str, str]]] = {
     "probe-verifier-routerai-stage": (783, "verifier-routerai-capability-probe.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true", "max_budget_rub": "100", "evidence_issue": "783", "profile": "routerai-gpt4o-mini"}),
     "probe-verifier-qwen35-stage": (783, "verifier-routerai-capability-probe.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true", "max_budget_rub": "100", "evidence_issue": "783", "profile": "routerai-qwen35-9b"}),
     "calibrate-verifier-golden5-stage": (783, "verifier-golden5-live-calibration.yml", {"expected_sha": "{sha}", "allow_paid_calls": "true", "owner_spend_authorized": "true", "max_budget_rub": "100", "evidence_issue": "783", "model": "openai/gpt-4o-mini"}),
+    "accept-burst-parallel-stage": (783, "burst-runner-parallel-acceptance.yml", {"expected_sha": "{sha}", "evidence_issue": "783"}),
 }
 
 
