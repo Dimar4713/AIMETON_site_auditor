@@ -1,0 +1,92 @@
+name: Competitor Services Realty Push Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/competitor-services-realty-push-audit.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 15
+    env:
+      CONTAINER: aimeton-auditor
+      TARGET: https://services-realty.ru/checksubject
+      EVIDENCE_ISSUE: '293'
+    steps:
+      - name: Run current deployed auditor against competitor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"
+          docker exec -i "$CONTAINER" python - <<'PY' > "$RUNNER_TEMP/competitor-audit.json"
+          import json
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+
+          req = Request(
+              'http://127.0.0.1:5000/api/analyze',
+              data=json.dumps({'url':'https://services-realty.ru/checksubject'}).encode('utf-8'),
+              method='POST',
+              headers={'Content-Type':'application/json'},
+          )
+          try:
+              with urlopen(req, timeout=420) as r:
+                  raw = r.read().decode('utf-8')
+                  payload = json.loads(raw)
+                  print(json.dumps({'http_status': r.status, 'payload': payload}, ensure_ascii=False))
+          except HTTPError as exc:
+              raw = exc.read().decode('utf-8', errors='replace')
+              try:
+                  detail = json.loads(raw)
+              except Exception:
+                  detail = {'detail':'non_json_error'}
+              print(json.dumps({'http_status': exc.code, 'payload': detail}, ensure_ascii=False))
+          PY
+
+      - name: Publish bounded evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+
+          data = json.loads(Path(os.environ['RUNNER_TEMP'] + '/competitor-audit.json').read_text(encoding='utf-8'))
+          payload = data.get('payload') or {}
+          safe = {
+              'http_status': data.get('http_status'),
+              'top_level_keys': sorted(payload.keys()) if isinstance(payload, dict) else [],
+              'status': payload.get('status') if isinstance(payload, dict) else None,
+              'analysis_id': payload.get('analysis_id') if isinstance(payload, dict) else None,
+              'mission_id': payload.get('mission_id') if isinstance(payload, dict) else None,
+              'title': payload.get('title') if isinstance(payload, dict) else None,
+              'summary': payload.get('summary') if isinstance(payload, dict) else None,
+              'business_model': payload.get('business_model') if isinstance(payload, dict) else None,
+              'commercial_score': payload.get('commercial_score') if isinstance(payload, dict) else None,
+              'recommendation': payload.get('recommendation') if isinstance(payload, dict) else None,
+              'completeness': payload.get('completeness') if isinstance(payload, dict) else None,
+              'errors': payload.get('errors') if isinstance(payload, dict) else None,
+          }
+          body = '## Competitor live audit — services-realty.ru\n\n```json\n' + json.dumps(safe, ensure_ascii=False, indent=2)[:50000] + '\n```\n'
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['EVIDENCE_ISSUE']}/comments",
+              data=json.dumps({'body': body}, ensure_ascii=False).encode('utf-8'),
+              method='POST',
+              headers={
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as r:
+              assert r.status == 201
+          print(json.dumps(safe, ensure_ascii=False, indent=2))
+          PY
