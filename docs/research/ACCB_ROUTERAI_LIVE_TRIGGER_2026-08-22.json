@@ -1,15 +1,15 @@
 {
-  "schema_version": "1.4",
+  "schema_version": "1.5",
   "status": "owner_authorized",
-  "date": "2026-08-22",
+  "date": "2026-08-23",
   "architecture_issue": "Dimar4713/aimeton-architecture#132",
   "execution_evidence_issue": "Dimar4713/AIMETON_site_auditor#798",
   "pr_governance_relation": "Part of #798",
   "approved_routerai_balance_rub": 10000,
   "micro_gate_ceiling_rub": 100,
-  "retry_sequence": 5,
+  "retry_sequence": 6,
   "execution_mode": "retry-failed-three",
-  "transport_adapter_version": "routerai-chat-responses-v2-safe-final-text",
+  "transport_adapter_version": "routerai-chat-responses-v3-account-before-parse",
   "prior_attempts": [
     {
       "workflow_run": 32579887862,
@@ -34,9 +34,16 @@
       "estimated_spend_rub": 16.908256,
       "result": "first real low-context calibration: 2 scored, 3 integration-envelope failures",
       "reason": "Qwen3.7 Plus and GLM 5.2 produced valid scored traces; DeepSeek and Kimi returned no visible final content under provider-default reasoning/output budget; GPT-5.6 Sol returned a Responses wrapper not covered by v1 normalization"
+    },
+    {
+      "workflow_run": 32586356270,
+      "estimated_spend_rub": null,
+      "result": "retry reached provider envelopes but harness rejected visible text before recording usage/cost",
+      "reason": "DeepSeek/Kimi returned chat envelopes with usage but no visible final text at the probe/parse boundary; GPT-5.6 Sol returned a sanitized Responses error envelope. Harness-level accounting made this run's spend unreconciled, so it is UNKNOWN rather than zero."
     }
   ],
-  "cumulative_observed_experiment_spend_rub": 16.908256,
+  "confirmed_observed_experiment_spend_rub": 16.908256,
+  "unreconciled_runs": [32586356270],
   "models": [
     "z-ai/glm-5.2",
     "deepseek/deepseek-v4-pro-0813",
@@ -66,10 +73,23 @@
   "retry_generation_policy": {
     "reasoning_effort": "low",
     "include_reasoning": false,
-    "max_output_tokens": 4096,
+    "max_output_tokens": 8192,
     "json_mode_when_supported": true,
     "raw_provider_reasoning_saved": false,
     "reasoning_fields_must_never_be_used_as_candidate_trace": true
+  },
+  "probe_policy": {
+    "purpose": "tokenizer/task-payload usage measurement only",
+    "max_output_tokens": 4,
+    "reasoning_controls": "disabled",
+    "json_mode": false,
+    "visible_final_text_required": false,
+    "usage_required": true
+  },
+  "accounting_policy": {
+    "successful_envelope": "record usage and estimated cost before visible-final-text parsing",
+    "api_error_without_usage": "retain sanitized type/code/param/status only; do not retain provider message or reasoning",
+    "unreconciled_prior_run": "32586356270 remains UNKNOWN until independently reconciled from RouterAI request ledger"
   },
   "model_replacements": {
     "moonshotai/kimi-k2.6": {
@@ -77,15 +97,19 @@
       "reason": "Runtime endpoint truth on run 32581019920 overrode the stale/conflicting public catalog admission signal for K2.6. K3 preserves the owner-approved Kimi/Chinese slot and exposes a 1M public context specification."
     }
   },
-  "free_slow_models": [
-    "stealth/ox-alpha"
-  ],
-  "scope": "reuse the valid GLM/Qwen observations from run 32584584044 without repeating paid calls; atomically admit and retry only DeepSeek/Kimi/GPT-5.6 Sol with controlled low reasoning, visible-final-answer-only parsing, 4096 output headroom and <=100 RUB retry ceiling; run stealth/ox-alpha independently afterward as a free non-gating slow lane",
+  "free_slow_models": ["stealth/ox-alpha"],
+  "free_slow_evidence": {
+    "source_run": 32586356270,
+    "job": 97063965060,
+    "status": "success",
+    "gating": false
+  },
+  "scope": "reuse valid GLM/Qwen observations without repeating paid calls; atomically admit and retry only DeepSeek/Kimi/GPT-5.6 Sol; tokenizer probe must not require visible text or reasoning; live envelopes must be cost-accounted before parsing; use 8192 output headroom under the existing <=100 RUB retry ceiling",
   "architecture_sha": "db18fcbc0a50d96af4e747db0ec2df10ca79f64c",
   "architecture_snapshot_policy": "vendored files must match canonical aimeton-architecture Git blob SHAs from the pinned architecture commit before any RouterAI call",
-  "provider_policy": "pin selected endpoint tag where RouterAI routing permits; allow_fallbacks=false; record actual provider metadata returned by RouterAI",
+  "provider_policy": "pin selected endpoint tag; allow_fallbacks=false; record actual provider metadata returned by RouterAI",
   "transport_policy": "select transport from live endpoint supported_apis; chat or responses envelopes may be normalized only through visible final-answer fields; provider reasoning/thinking fields are never accepted as benchmark output",
   "admission_policy": "all retry models must expose a healthy chat or responses endpoint >=128K, parseable positive pricing and a conservative retry upper bound <=100 RUB before the first retry request; already-scored GLM/Qwen are not repeated",
-  "free_lane_policy": "stealth/ox-alpha is admitted only if runtime endpoint census confirms zero prompt and completion pricing; slow/timeout outcome is recorded separately and does not gate paid-model evidence",
+  "free_lane_policy": "stealth/ox-alpha remains separate, free and non-gating; its successful run 32586356270 is reused rather than repeated",
   "scientific_boundary": "calibration/integration evidence only; no universal ECC/AMCE threshold inference"
 }
