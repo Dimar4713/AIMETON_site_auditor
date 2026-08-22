@@ -5,6 +5,7 @@ on:
     paths:
       - 'scripts/accb_routerai_live_pilot.py'
       - 'scripts/accb_routerai_live_entrypoint.py'
+      - 'scripts/accb_routerai_retry_entrypoint.py'
       - 'scripts/accb_routerai_free_slow_entrypoint.py'
       - 'scripts/accb_publish_evidence.py'
       - '.github/workflows/accb-routerai-live-pilot.yml'
@@ -53,6 +54,7 @@ jobs:
           python3 -m py_compile \
             scripts/accb_routerai_live_pilot.py \
             scripts/accb_routerai_live_entrypoint.py \
+            scripts/accb_routerai_retry_entrypoint.py \
             scripts/accb_routerai_free_slow_entrypoint.py \
             scripts/accb_publish_evidence.py
 
@@ -91,7 +93,7 @@ jobs:
         run: rm -rf /tmp/aimeton-accb-site-validate-${{ github.run_id }}
 
   live:
-    name: Execute bounded 5-model RouterAI ACCB low-context gate
+    name: Execute bounded RouterAI ACCB gate
     if: github.event_name == 'push'
     needs: validate
     runs-on: [self-hosted, Linux, X64, stage, auditor]
@@ -133,7 +135,11 @@ jobs:
           unset AUTH_HEADER
           git checkout --detach --force FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python3 -m py_compile scripts/accb_routerai_live_pilot.py scripts/accb_routerai_live_entrypoint.py scripts/accb_publish_evidence.py
+          python3 -m py_compile \
+            scripts/accb_routerai_live_pilot.py \
+            scripts/accb_routerai_live_entrypoint.py \
+            scripts/accb_routerai_retry_entrypoint.py \
+            scripts/accb_publish_evidence.py
 
       - name: Verify canonical ACCB snapshot before paid calls
         shell: bash
@@ -158,12 +164,39 @@ jobs:
           print('canonical ACCB snapshot verified')
           PY
 
-      - name: Execute bounded RouterAI live gate
+      - name: Execute bounded RouterAI live gate selected by trigger manifest
         shell: bash
         run: |
           set +e
           cd "$ACCB_SITE_ROOT"
-          python3 scripts/accb_routerai_live_entrypoint.py
+          mode="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('docs/research/ACCB_ROUTERAI_LIVE_TRIGGER_2026-08-22.json')
+          print(json.loads(p.read_text(encoding='utf-8')).get('execution_mode', 'full-five'))
+          PY
+          )"
+          case "$mode" in
+            retry-failed-three)
+              script='scripts/accb_routerai_retry_entrypoint.py'
+              expected='3'
+              label='ACCB RouterAI retry — DeepSeek/Kimi/GPT-5.6 Sol'
+              ;;
+            full-five)
+              script='scripts/accb_routerai_live_entrypoint.py'
+              expected='5'
+              label='ACCB RouterAI 5-model paid micro-gate'
+              ;;
+            *)
+              echo "unsupported ACCB execution_mode=$mode" >&2
+              echo "ACCB_LIVE_RC=98" >> "$GITHUB_ENV"
+              exit 0
+              ;;
+          esac
+          echo "ACCB_EXECUTION_MODE=$mode" >> "$GITHUB_ENV"
+          echo "ACCB_EXPECTED_MODELS=$expected" >> "$GITHUB_ENV"
+          echo "ACCB_EVIDENCE_LABEL=$label" >> "$GITHUB_ENV"
+          python3 "$script"
           rc=$?
           echo "ACCB_LIVE_RC=$rc" >> "$GITHUB_ENV"
           exit 0
@@ -176,8 +209,8 @@ jobs:
           cd "$ACCB_SITE_ROOT"
           python3 scripts/accb_publish_evidence.py \
             --result "$ACCB_RESULT_PATH" \
-            --label 'ACCB RouterAI 5-model paid micro-gate' \
-            --expected-models 5 \
+            --label "${ACCB_EVIDENCE_LABEL:-ACCB RouterAI bounded gate}" \
+            --expected-models "${ACCB_EXPECTED_MODELS:-0}" \
             --issue "$EVIDENCE_ISSUE"
 
       - name: Enforce main integration gate
@@ -198,7 +231,7 @@ jobs:
 
   free_slow:
     name: Execute non-gating free slow stealth/ox-alpha lane
-    if: github.event_name == 'push'
+    if: ${{ always() && github.event_name == 'push' && needs.validate.result == 'success' }}
     needs: [validate, live]
     continue-on-error: true
     runs-on: [self-hosted, Linux, X64, stage, auditor]

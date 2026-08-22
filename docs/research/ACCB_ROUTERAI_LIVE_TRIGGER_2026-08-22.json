@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.3",
+  "schema_version": "1.4",
   "status": "owner_authorized",
   "date": "2026-08-22",
   "architecture_issue": "Dimar4713/aimeton-architecture#132",
@@ -7,8 +7,9 @@
   "pr_governance_relation": "Part of #798",
   "approved_routerai_balance_rub": 10000,
   "micro_gate_ceiling_rub": 100,
-  "retry_sequence": 4,
-  "transport_adapter_version": "routerai-chat-responses-v1",
+  "retry_sequence": 5,
+  "execution_mode": "retry-failed-three",
+  "transport_adapter_version": "routerai-chat-responses-v2-safe-final-text",
   "prior_attempts": [
     {
       "workflow_run": 32579887862,
@@ -27,8 +28,15 @@
       "estimated_spend_rub": 0,
       "result": "atomic transport admission failure",
       "reason": "openai/gpt-5.6-sol exposed healthy 1.05M OpenAI endpoints through the Responses API only while the harness admitted chat transport only"
+    },
+    {
+      "workflow_run": 32584584044,
+      "estimated_spend_rub": 16.908256,
+      "result": "first real low-context calibration: 2 scored, 3 integration-envelope failures",
+      "reason": "Qwen3.7 Plus and GLM 5.2 produced valid scored traces; DeepSeek and Kimi returned no visible final content under provider-default reasoning/output budget; GPT-5.6 Sol returned a Responses wrapper not covered by v1 normalization"
     }
   ],
+  "cumulative_observed_experiment_spend_rub": 16.908256,
   "models": [
     "z-ai/glm-5.2",
     "deepseek/deepseek-v4-pro-0813",
@@ -36,6 +44,33 @@
     "moonshotai/kimi-k3",
     "openai/gpt-5.6-sol"
   ],
+  "prior_successful_models_reused_not_repeated": {
+    "z-ai/glm-5.2": {
+      "source_run": 32584584044,
+      "ACI": 0.916667,
+      "ACI_min": 0.5,
+      "critical_failure_count": 1
+    },
+    "qwen/qwen3.7-plus": {
+      "source_run": 32584584044,
+      "ACI": 1.0,
+      "ACI_min": 1.0,
+      "critical_failure_count": 0
+    }
+  },
+  "retry_models": [
+    "deepseek/deepseek-v4-pro-0813",
+    "moonshotai/kimi-k3",
+    "openai/gpt-5.6-sol"
+  ],
+  "retry_generation_policy": {
+    "reasoning_effort": "low",
+    "include_reasoning": false,
+    "max_output_tokens": 4096,
+    "json_mode_when_supported": true,
+    "raw_provider_reasoning_saved": false,
+    "reasoning_fields_must_never_be_used_as_candidate_trace": true
+  },
   "model_replacements": {
     "moonshotai/kimi-k2.6": {
       "replacement": "moonshotai/kimi-k3",
@@ -45,12 +80,12 @@
   "free_slow_models": [
     "stealth/ox-alpha"
   ],
-  "scope": "atomic whole-matrix endpoint/transport/price/budget admission before any paid token; then tokenizer/task-payload probe + one low-context ACCB-DEV-001 scored call per admitted main model; stealth/ox-alpha runs afterward in a separate non-gating free/slow lane",
+  "scope": "reuse the valid GLM/Qwen observations from run 32584584044 without repeating paid calls; atomically admit and retry only DeepSeek/Kimi/GPT-5.6 Sol with controlled low reasoning, visible-final-answer-only parsing, 4096 output headroom and <=100 RUB retry ceiling; run stealth/ox-alpha independently afterward as a free non-gating slow lane",
   "architecture_sha": "db18fcbc0a50d96af4e747db0ec2df10ca79f64c",
   "architecture_snapshot_policy": "vendored files must match canonical aimeton-architecture Git blob SHAs from the pinned architecture commit before any RouterAI call",
   "provider_policy": "pin selected endpoint tag where RouterAI routing permits; allow_fallbacks=false; record actual provider metadata returned by RouterAI",
-  "transport_policy": "select transport from live endpoint supported_apis; prefer chat for continuity, otherwise use responses; normalize only the API envelope while preserving the same ACCB task, candidate trace contract and deterministic scorer",
-  "admission_policy": "all five main models must expose a healthy chat or responses endpoint >=128K, parseable positive pricing and a whole-matrix conservative cost upper bound <=100 RUB before the first paid request; any admission failure writes a machine-readable zero-spend receipt",
-  "free_lane_policy": "stealth/ox-alpha is admitted only if runtime endpoint census confirms zero prompt and completion pricing; slow/timeout outcome is recorded separately and does not gate the five-model main result",
+  "transport_policy": "select transport from live endpoint supported_apis; chat or responses envelopes may be normalized only through visible final-answer fields; provider reasoning/thinking fields are never accepted as benchmark output",
+  "admission_policy": "all retry models must expose a healthy chat or responses endpoint >=128K, parseable positive pricing and a conservative retry upper bound <=100 RUB before the first retry request; already-scored GLM/Qwen are not repeated",
+  "free_lane_policy": "stealth/ox-alpha is admitted only if runtime endpoint census confirms zero prompt and completion pricing; slow/timeout outcome is recorded separately and does not gate paid-model evidence",
   "scientific_boundary": "calibration/integration evidence only; no universal ECC/AMCE threshold inference"
 }
