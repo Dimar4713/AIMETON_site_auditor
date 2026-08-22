@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "status": "owner_authorized",
+  "date": "2026-08-22",
+  "architecture_issue": "Dimar4713/aimeton-architecture#132",
+  "execution_evidence_issue": "Dimar4713/AIMETON_site_auditor#798",
+  "pr_governance_relation": "Part of #798",
+  "approved_routerai_balance_rub": 10000,
+  "micro_gate_ceiling_rub": 100,
+  "models": [
+    "z-ai/glm-5.2",
+    "deepseek/deepseek-v4-pro-0813",
+    "qwen/qwen3.7-plus",
+    "moonshotai/kimi-k2.6",
+    "openai/gpt-5.6-sol"
+  ],
+  "scope": "endpoint census + tokenizer/task-payload probe + one low-context ACCB-DEV-001 scored call per model",
+  "architecture_sha": "db18fcbc0a50d96af4e747db0ec2df10ca79f64c",
+  "provider_policy": "pin selected endpoint tag where RouterAI routing permits; allow_fallbacks=false",
+  "scientific_boundary": "calibration/integration evidence only; no universal ECC/AMCE threshold inference"
+}
