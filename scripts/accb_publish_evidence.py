@@ -14,10 +14,12 @@ def compact(payload: dict) -> dict:
         score = row.get("score") or {}
         endpoint = row.get("endpoint") or {}
         usage = row.get("usage") or {}
-        cost_latency = ((row.get("manifest") or {}).get("cost_latency") or {})
+        manifest = row.get("manifest") or {}
+        cost_latency = manifest.get("cost_latency") or {}
         rows.append({
             "model": row.get("model_identifier"),
             "status": row.get("status"),
+            "api_transport": endpoint.get("api_transport"),
             "endpoint_tag": endpoint.get("tag"),
             "provider_name": endpoint.get("provider_name"),
             "context_length": endpoint.get("context_length"),
@@ -33,9 +35,11 @@ def compact(payload: dict) -> dict:
         })
     return {
         "experiment_id": payload.get("experiment_id"),
+        "phase": payload.get("phase"),
         "architecture_sha": payload.get("architecture_sha"),
         "site_auditor_sha": payload.get("site_auditor_sha"),
         "budget_ceiling_rub": payload.get("budget_ceiling_rub"),
+        "admission_upper_bound_rub": payload.get("admission_upper_bound_rub"),
         "estimated_spend_rub": payload.get("estimated_spend_rub"),
         "models_scored": payload.get("models_scored"),
         "integration_errors": payload.get("integration_errors"),
