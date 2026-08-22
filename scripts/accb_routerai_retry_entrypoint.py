@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -32,7 +33,7 @@ TRIGGER_PATH = Path("docs/research/ACCB_ROUTERAI_LIVE_TRIGGER_2026-08-22.json")
 SOL_MODEL = "openai/gpt-5.6-sol"
 SOL_RETRY_MODELS = [SOL_MODEL]
 SOL_SOURCE_RUN = 32595531554
-SOL_PREVIOUS_USAGELESS_RUN = 32602626623
+SOL_PREVIOUS_USAGELESS_RUN = 32605102169
 SOL_MAX_OUTPUT_TOKENS = RETRY_MAX_OUTPUT_TOKENS
 SOL_EVIDENCE_LABEL = "ACCB RouterAI Sol-only completion gate"
 
@@ -65,8 +66,10 @@ FOUR_MODEL_EVIDENCE = {
 
 _ORIGINAL_USAGE = pilot.usage
 _SOL_LIVE_RECEIPT: dict[str, Any] | None = None
+_SOL_ERROR_RECEIPT: dict[str, Any] | None = None
 _SOL_USAGE_PATHS: dict[str, str | None] = {"probe": None, "live": None}
 _SOL_MISSING_USAGE_DIAGNOSTIC: dict[str, Any] | None = None
+_SOL_SAFE_ERROR_DIAGNOSTIC: dict[str, Any] | None = None
 
 _TOKEN_KEYS = {
     "input_tokens",
@@ -81,6 +84,31 @@ _TOKEN_KEYS = {
     "cost",
 }
 _ID_KEYS = {"id", "request_id", "response_id", "generation_id"}
+_SAFE_ERROR_MARKERS = (
+    "invalid_request",
+    "bad_request",
+    "unsupported_parameter",
+    "unsupported",
+    "input",
+    "instructions",
+    "max_tokens",
+    "max_output_tokens",
+    "response_format",
+    "structured_outputs",
+    "provider",
+    "model",
+    "authentication",
+    "unauthorized",
+    "forbidden",
+    "rate_limit",
+    "capacity",
+    "timeout",
+    "reasoning",
+    "include_reasoning",
+    "temperature",
+    "tool_choice",
+    "tools",
+)
 
 
 def _trigger_retry_models(path: Path = TRIGGER_PATH) -> list[str]:
@@ -139,12 +167,7 @@ def _walk_objects(value: Any, path: str = "$"):
 
 
 def _recursive_usage(body: dict[str, Any]) -> tuple[int | None, int | None, int | None, str | None]:
-    """Find Responses usage without assuming RouterAI's wrapper depth.
-
-    Only numeric token counters are read. Raw text/reasoning is never retained.
-    Prefer dictionaries explicitly named `usage`, then any nested object carrying
-    a complete input/output token pair.
-    """
+    """Find Responses usage without assuming RouterAI's wrapper depth."""
     candidates = list(_walk_objects(body))
     candidates.sort(key=lambda item: (0 if item[0].endswith(".usage") else 1, item[0].count("."), item[0]))
     for path, mapping in candidates:
@@ -160,7 +183,10 @@ def _safe_usage_diagnostic(body: dict[str, Any]) -> dict[str, Any]:
     ids: list[dict[str, str]] = []
     for path, mapping in _walk_objects(body):
         keys = sorted(str(key) for key in mapping.keys())
-        interesting = sorted(key for key in keys if key in _TOKEN_KEYS or key in _ID_KEYS or key in {"usage", "meta", "billing"})
+        interesting = sorted(
+            key for key in keys
+            if key in _TOKEN_KEYS or key in _ID_KEYS or key in {"usage", "meta", "billing"}
+        )
         if interesting:
             objects.append({"path": path, "keys": keys[:80], "interesting_keys": interesting})
         for key in _ID_KEYS:
@@ -172,6 +198,50 @@ def _safe_usage_diagnostic(body: dict[str, Any]) -> dict[str, Any]:
         "usage_related_objects": objects[:24],
         "request_ids": ids,
     }
+
+
+def _classify_error_text(text: str) -> dict[str, Any]:
+    """Fingerprint provider error text without retaining the text itself."""
+    lowered = text.lower()
+    return {
+        "error_text_length": len(text),
+        "error_text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "safe_markers": [marker for marker in _SAFE_ERROR_MARKERS if marker in lowered],
+    }
+
+
+def _safe_error_descriptor(body: dict[str, Any], *, http_status: int) -> dict[str, Any] | None:
+    """Sanitize both object and scalar RouterAI `error` envelopes.
+
+    Never retains an arbitrary provider message. Object errors expose only the
+    existing allowlisted type/code/param/status fields plus a message fingerprint;
+    scalar strings expose only length/hash and known integration markers.
+    """
+    if "error" not in body:
+        return None
+    error = body.get("error")
+    descriptor: dict[str, Any] = {
+        "http_status": http_status,
+        "error_value_type": type(error).__name__,
+    }
+    if isinstance(error, dict):
+        base = _impl._safe_error_summary(body) or {}
+        descriptor.update(base)
+        message = error.get("message")
+        if isinstance(message, str):
+            descriptor.update(_classify_error_text(message))
+        return descriptor
+    if isinstance(error, str):
+        descriptor.update(_classify_error_text(error))
+        return descriptor
+    if isinstance(error, list):
+        descriptor["error_list_length"] = len(error)
+        descriptor["error_item_types"] = sorted({type(item).__name__ for item in error})[:16]
+        return descriptor
+    if isinstance(error, (int, float, bool)) or error is None:
+        return descriptor
+    descriptor["error_repr_sha256"] = hashlib.sha256(repr(error).encode("utf-8")).hexdigest()
+    return descriptor
 
 
 def _metadata_from_raw(body: dict[str, Any]) -> dict[str, Any]:
@@ -188,17 +258,10 @@ def _metadata_from_raw(body: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_sol_responses(raw: dict[str, Any], *, live_call: bool) -> dict[str, Any]:
     global _SOL_MISSING_USAGE_DIAGNOSTIC
-    safe_error = _impl._safe_error_summary(raw)
     prompt, completion, total, usage_path = _recursive_usage(raw)
     diagnostic = _safe_usage_diagnostic(raw)
     phase = "live" if live_call else "probe"
     _SOL_USAGE_PATHS[phase] = usage_path
-
-    if safe_error is not None and prompt is None and completion is None:
-        raise pilot.IntegrationError(
-            "RouterAI Responses API error before usable token accounting; safe_error="
-            + json.dumps(safe_error, sort_keys=True, separators=(",", ":"))
-        )
 
     text = _impl._visible_text(raw) or ""
     normalized: dict[str, Any] = {
@@ -214,8 +277,6 @@ def _normalize_sol_responses(raw: dict[str, Any], *, live_call: bool) -> dict[st
         "_retry_visible_text_present": bool(text),
     }
     normalized.update(_metadata_from_raw(raw))
-    if safe_error is not None:
-        normalized["_safe_routerai_error"] = safe_error
     if prompt is None or completion is None:
         normalized["_sol_usage_missing"] = True
         normalized["_sol_usage_missing_phase"] = phase
@@ -233,8 +294,8 @@ def _sol_chat(
     temperature: float = 0.0,
     timeout: int = 240,
 ) -> tuple[dict[str, Any], float]:
-    """Responses transport with recursive usage discovery and pre-live fail-closed probe."""
-    global _SOL_LIVE_RECEIPT
+    """Responses transport with safe error classification and pre-live accounting gate."""
+    global _SOL_ERROR_RECEIPT, _SOL_LIVE_RECEIPT, _SOL_SAFE_ERROR_DIAGNOSTIC
 
     if str(endpoint.get("api_transport") or "") != "responses":
         return _impl.retry_chat(
@@ -251,6 +312,7 @@ def _sol_chat(
     if not provider_tag:
         raise pilot.IntegrationError(f"Sol Responses transport has no provider tag for {model_id}")
     live_call = max_tokens > 16
+    phase = "live" if live_call else "probe"
     instructions, input_messages = live._responses_input(messages)
     payload: dict[str, Any] = {
         "model": model_id,
@@ -265,12 +327,37 @@ def _sol_chat(
     if "temperature" in supported:
         payload["temperature"] = temperature
 
-    _, raw, elapsed = pilot.http_json(
+    http_status, raw, elapsed = pilot.http_json(
         f"{pilot.BASE_URL}/responses",
         payload=payload,
         api_key=api_key,
         timeout=timeout,
     )
+    prompt, completion, total, usage_path = _recursive_usage(raw)
+    safe_error = _safe_error_descriptor(raw, http_status=http_status)
+    if safe_error is not None:
+        structure = _safe_usage_diagnostic(raw)
+        _SOL_USAGE_PATHS[phase] = usage_path
+        _SOL_SAFE_ERROR_DIAGNOSTIC = {
+            "phase": phase,
+            "safe_error": safe_error,
+            "usage_path": usage_path,
+            "structure": structure,
+        }
+        if isinstance(prompt, int) and isinstance(completion, int):
+            if not isinstance(total, int):
+                total = prompt + completion
+            _SOL_ERROR_RECEIPT = {
+                "usage": {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total},
+                "usage_path": usage_path,
+                "estimated_cost_rub": round(pilot.estimated_cost(endpoint, prompt, completion), 6),
+                "elapsed_seconds": round(elapsed, 6),
+            }
+        compact = json.dumps(safe_error, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        raise pilot.IntegrationError(
+            f"RouterAI Responses returned sanitized API error envelope; safe_error={compact[:760]}"
+        )
+
     body = _normalize_sol_responses(raw, live_call=live_call)
     summary = _impl._usage_summary(body)
     prompt = summary.get("prompt_tokens")
@@ -321,7 +408,7 @@ def _finalize_sol_metadata(result_path: Path) -> None:
     if not result_path.exists():
         return
     payload = json.loads(result_path.read_text(encoding="utf-8"))
-    payload["schema_version"] = "0.7-sol-recursive-usage"
+    payload["schema_version"] = "0.8-sol-safe-error-envelope"
     payload["retry_scope"] = "sol-only"
     payload["retry_of_run"] = SOL_PREVIOUS_USAGELESS_RUN
     payload["source_calibration_runs"] = [32584584044, SOL_SOURCE_RUN]
@@ -333,19 +420,32 @@ def _finalize_sol_metadata(result_path: Path) -> None:
         "live_usage_path": _SOL_USAGE_PATHS.get("live"),
         "raw_text_or_reasoning_retained": False,
     }
+    payload["error_envelope_policy"] = {
+        "arbitrary_error_text_retained": False,
+        "retained": "HTTP status, error value type, allowlisted type/code/param/status, hash/length and allowlisted markers",
+        "full_benchmark_after_error": False,
+    }
     payload["probe_policy"] = {
         "purpose": "tiny transport/accounting capability gate before the full Sol benchmark request",
         "visible_final_text_required": False,
         "usage_required_before_live_call": True,
-        "failure_behavior": "stop before the 80K-class benchmark call and retain only key structure/request identifiers",
+        "failure_behavior": "stop before the 80K-class benchmark call on API error or missing exact usage",
     }
     payload["accounting_policy"] = (
-        "No synthetic token counts are accepted. The full Sol benchmark call is made only if the tiny Responses probe "
-        "exposes discoverable token usage. A live envelope must also expose exact usage before candidate parsing."
+        "No synthetic token counts are accepted. An error-only envelope stops the run before the full Sol request. "
+        "If an error envelope contains exact usage, that usage is cost-accounted even though the benchmark remains blocked."
     )
 
-    if _SOL_MISSING_USAGE_DIAGNOSTIC is not None:
-        payload["current_run_spend_status"] = "UNKNOWN/unreconciled: successful Responses envelope omitted discoverable token usage"
+    if _SOL_SAFE_ERROR_DIAGNOSTIC is not None:
+        payload["safe_error_diagnostic"] = _SOL_SAFE_ERROR_DIAGNOSTIC
+        if _SOL_ERROR_RECEIPT is None:
+            payload["current_run_spend_status"] = "UNKNOWN/unreconciled: RouterAI error envelope exposed no token usage"
+            payload["estimated_spend_rub"] = None
+        else:
+            payload["current_run_spend_status"] = "CONFIRMED/accounted from error-envelope usage"
+            payload["estimated_spend_rub"] = _SOL_ERROR_RECEIPT["estimated_cost_rub"]
+    elif _SOL_MISSING_USAGE_DIAGNOSTIC is not None:
+        payload["current_run_spend_status"] = "UNKNOWN/unreconciled: non-error Responses envelope omitted discoverable token usage"
         payload["estimated_spend_rub"] = None
         payload["safe_usage_diagnostic"] = _SOL_MISSING_USAGE_DIAGNOSTIC
 
@@ -353,7 +453,16 @@ def _finalize_sol_metadata(result_path: Path) -> None:
         if not isinstance(row, dict) or row.get("model_identifier") != SOL_MODEL:
             continue
         endpoint = row.get("endpoint") if isinstance(row.get("endpoint"), dict) else {}
-        if _SOL_MISSING_USAGE_DIAGNOSTIC is not None:
+        if _SOL_SAFE_ERROR_DIAGNOSTIC is not None:
+            row["safe_error_diagnostic"] = _SOL_SAFE_ERROR_DIAGNOSTIC
+            if _SOL_ERROR_RECEIPT is None:
+                row["usage_accounting_status"] = "UNKNOWN/unreconciled"
+            else:
+                row["usage"] = dict(_SOL_ERROR_RECEIPT["usage"])
+                row["estimated_cost_rub"] = _SOL_ERROR_RECEIPT["estimated_cost_rub"]
+                row["usage_accounting_status"] = "CONFIRMED/accounted"
+                row["usage_path"] = _SOL_ERROR_RECEIPT.get("usage_path")
+        elif _SOL_MISSING_USAGE_DIAGNOSTIC is not None:
             row["usage_accounting_status"] = "UNKNOWN/unreconciled"
             row["safe_usage_diagnostic"] = _SOL_MISSING_USAGE_DIAGNOSTIC
 
@@ -375,6 +484,8 @@ def _finalize_sol_metadata(result_path: Path) -> None:
             manifest["api_transport"] = endpoint.get("api_transport")
 
     known = _known_cost_from_payload(payload)
+    if _SOL_ERROR_RECEIPT is not None and not known:
+        known = float(_SOL_ERROR_RECEIPT["estimated_cost_rub"])
     payload["confirmed_accounted_spend_rub"] = round(known, 6) if known else 0.0
     payload["scientific_claim_boundary"] = (
         "Fifth-model low-context calibration/integration evidence only; no universal ECC/AMCE threshold inference."
@@ -383,9 +494,11 @@ def _finalize_sol_metadata(result_path: Path) -> None:
 
 
 def sol_main() -> int:
-    global _SOL_LIVE_RECEIPT, _SOL_MISSING_USAGE_DIAGNOSTIC
+    global _SOL_ERROR_RECEIPT, _SOL_LIVE_RECEIPT, _SOL_MISSING_USAGE_DIAGNOSTIC, _SOL_SAFE_ERROR_DIAGNOSTIC
     _SOL_LIVE_RECEIPT = None
+    _SOL_ERROR_RECEIPT = None
     _SOL_MISSING_USAGE_DIAGNOSTIC = None
+    _SOL_SAFE_ERROR_DIAGNOSTIC = None
     _SOL_USAGE_PATHS["probe"] = None
     _SOL_USAGE_PATHS["live"] = None
     _write_workflow_evidence_override()
