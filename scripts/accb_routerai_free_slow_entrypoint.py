@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import math
+import os
+from pathlib import Path
 from typing import Any
 
 import accb_routerai_live_pilot as pilot
 
 FREE_MODEL = "stealth/ox-alpha"
+FREE_EXPERIMENT_ID = "ACCB-ROUTERAI-CAL-2026-08-22-FREE-SLOW-001"
 
 
 def _number(raw: Any, *, label: str) -> float:
@@ -64,7 +68,7 @@ def free_endpoint_census(model_id: str) -> dict[str, Any]:
 
 
 def slow_chat(api_key: str, model_id: str, endpoint: dict[str, Any], messages: list[dict[str, str]], *, max_tokens: int, temperature: float = 0.0, timeout: int = 240):
-    # ox-alpha is intentionally isolated because preview/free capacity can be slow.
+    # Preview/free capacity is intentionally allowed to be slow. Latency is evidence, not cognition score.
     return _original_chat(
         api_key,
         model_id,
@@ -76,6 +80,24 @@ def slow_chat(api_key: str, model_id: str, endpoint: dict[str, Any], messages: l
     )
 
 
+def rewrite_experiment_id() -> None:
+    path = Path(os.environ["ACCB_RESULT_PATH"])
+    if not path.exists():
+        return
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["experiment_id"] = FREE_EXPERIMENT_ID
+    payload["pilot_scope"] = "non-gating free/slow ox-alpha low-context calibration lane"
+    for row in payload.get("rows") or []:
+        manifest = row.get("manifest")
+        if isinstance(manifest, dict):
+            manifest["experiment_id"] = FREE_EXPERIMENT_ID
+            cost_latency = manifest.get("cost_latency")
+            if isinstance(cost_latency, dict):
+                cost_latency["provider_cost"] = 0.0
+                cost_latency["currency"] = "RUB"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 pilot.MODELS = [FREE_MODEL]
 pilot.rub_per_token = free_rub_per_token
 pilot.endpoint_census = free_endpoint_census
@@ -83,4 +105,6 @@ pilot.chat = slow_chat
 
 
 if __name__ == "__main__":
-    raise SystemExit(pilot.main())
+    rc = pilot.main()
+    rewrite_experiment_id()
+    raise SystemExit(rc)
