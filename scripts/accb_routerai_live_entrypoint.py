@@ -25,6 +25,7 @@ REPLACEMENTS = {
 MIN_CONTEXT = 128_000
 ADMISSION_LIVE_PROMPT_UPPER = 80_000
 ADMISSION_PROBE_PROMPT_UPPER = 8_000
+SUPPORTED_TRANSPORTS = ("chat", "responses")
 
 
 def _positive_number(raw: Any, *, label: str) -> float:
@@ -70,8 +71,8 @@ def safe_rub_per_token(endpoint: dict[str, Any], key: str, prompt_tokens: int) -
         threshold = _threshold(row.get("threshold"), label=f"variable[{index}].threshold")
         if prompt_tokens <= threshold:
             continue
-        # RouterAI documents prompt-threshold rows that can override only the prompt
-        # price. A missing completion override means the base completion price remains.
+        # RouterAI prompt-threshold rows may override only prompt pricing. Missing
+        # completion override means that the base completion price stays active.
         if key in row:
             result = _positive_number(row.get(key), label=f"variable[{index}].{key}")
         elif key == "prompt":
@@ -95,6 +96,15 @@ def _endpoint_observation(endpoint: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _transport_for_apis(apis: list[Any]) -> str | None:
+    # Prefer Chat for continuity with the first four models. Fall back to the
+    # Responses transport only when the runtime endpoint itself advertises it.
+    for transport in SUPPORTED_TRANSPORTS:
+        if transport in apis:
+            return transport
+    return None
+
+
 def detailed_endpoint_census(model_id: str) -> dict[str, Any]:
     author, slug = model_id.split("/", 1)
     _, body, elapsed = pilot.http_json(f"{pilot.BASE_URL}/models/{author}/{slug}/endpoints", timeout=60)
@@ -106,28 +116,31 @@ def detailed_endpoint_census(model_id: str) -> dict[str, Any]:
         raise pilot.IntegrationError(f"endpoint census empty for {model_id}")
 
     observed = [_endpoint_observation(x) for x in endpoints if isinstance(x, dict)]
-    candidates: list[dict[str, Any]] = []
+    candidates: list[tuple[dict[str, Any], str]] = []
     for endpoint in endpoints:
         if not isinstance(endpoint, dict):
             continue
         apis = endpoint.get("supported_apis") or []
+        if not isinstance(apis, list):
+            continue
+        transport = _transport_for_apis(apis)
         context_length = endpoint.get("context_length")
         status = endpoint.get("status")
-        if "chat" not in apis:
+        if transport is None:
             continue
         if not isinstance(context_length, int) or context_length < MIN_CONTEXT:
             continue
         if isinstance(status, int) and status < 0:
             continue
-        candidates.append(endpoint)
+        candidates.append((endpoint, transport))
 
     if not candidates:
         compact = json.dumps(observed[:12], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         raise pilot.IntegrationError(
-            f"no healthy chat endpoint >={MIN_CONTEXT} for {model_id}; observed_endpoints={compact}"
+            f"no healthy chat/responses endpoint >={MIN_CONTEXT} for {model_id}; observed_endpoints={compact}"
         )
 
-    chosen = candidates[0]
+    chosen, transport = candidates[0]
     pricing = chosen.get("pricing") if isinstance(chosen.get("pricing"), dict) else {}
     variable = chosen.get("variable_pricings") if isinstance(chosen.get("variable_pricings"), list) else []
     return {
@@ -144,6 +157,7 @@ def detailed_endpoint_census(model_id: str) -> dict[str, Any]:
         "variable_pricings": variable,
         "supported_parameters": chosen.get("supported_parameters") or [],
         "supported_apis": chosen.get("supported_apis") or [],
+        "api_transport": transport,
         "census_elapsed_seconds": round(elapsed, 6),
         "eligible_endpoint_count": len(candidates),
         "observed_endpoint_count": len(observed),
@@ -158,12 +172,147 @@ def safe_endpoint_census(model_id: str) -> dict[str, Any]:
     context_length = endpoint.get("context_length")
     if not isinstance(context_length, int) or context_length < MIN_CONTEXT:
         raise pilot.IntegrationError(f"invalid context_length for {model_id}: {context_length!r}")
+    transport = endpoint.get("api_transport")
+    if transport not in SUPPORTED_TRANSPORTS:
+        raise pilot.IntegrationError(f"unsupported admitted transport for {model_id}: {transport!r}")
 
     safe_rub_per_token(endpoint, "prompt", 0)
     safe_rub_per_token(endpoint, "completion", 0)
     safe_rub_per_token(endpoint, "prompt", context_length)
     safe_rub_per_token(endpoint, "completion", context_length)
     return endpoint
+
+
+def _responses_output_text(body: dict[str, Any]) -> str:
+    top = body.get("output_text")
+    if isinstance(top, str) and top.strip():
+        return top
+
+    output = body.get("output")
+    if not isinstance(output, list):
+        raise pilot.IntegrationError("RouterAI Responses result has no output list")
+    chunks: list[str] = []
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") not in {"output_text", "text"}:
+                continue
+            text = part.get("text")
+            if isinstance(text, str) and text:
+                chunks.append(text)
+    text = "".join(chunks).strip()
+    if not text:
+        raise pilot.IntegrationError("RouterAI Responses result contains no output text")
+    return text
+
+
+def _responses_usage(body: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
+    value = body.get("usage")
+    if not isinstance(value, dict):
+        return None, None, None
+
+    def integer(*names: str) -> int | None:
+        for name in names:
+            raw = value.get(name)
+            if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+                return raw
+        return None
+
+    prompt = integer("input_tokens", "prompt_tokens")
+    completion = integer("output_tokens", "completion_tokens")
+    total = integer("total_tokens")
+    if total is None and prompt is not None and completion is not None:
+        total = prompt + completion
+    return prompt, completion, total
+
+
+def _normalize_responses_body(body: dict[str, Any]) -> dict[str, Any]:
+    text = _responses_output_text(body)
+    prompt, completion, total = _responses_usage(body)
+    normalized: dict[str, Any] = {
+        "choices": [{"message": {"role": "assistant", "content": text}}],
+        "usage": {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": total,
+        },
+        "_routerai_transport": "responses",
+    }
+    for key in ("model", "provider", "system_fingerprint", "id"):
+        value = body.get(key)
+        if isinstance(value, (str, int, float)):
+            normalized[key] = value
+    return normalized
+
+
+def _responses_input(messages: list[dict[str, str]]) -> tuple[str | None, list[dict[str, str]]]:
+    instructions: list[str] = []
+    inputs: list[dict[str, str]] = []
+    for message in messages:
+        role = str(message.get("role") or "")
+        content = str(message.get("content") or "")
+        if role in {"system", "developer"}:
+            instructions.append(content)
+        else:
+            inputs.append({"role": role or "user", "content": content})
+    return ("\n\n".join(x for x in instructions if x).strip() or None), inputs
+
+
+def adaptive_chat(
+    api_key: str,
+    model_id: str,
+    endpoint: dict[str, Any],
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int,
+    temperature: float = 0.0,
+    timeout: int = 240,
+) -> tuple[dict[str, Any], float]:
+    transport = str(endpoint.get("api_transport") or "chat")
+    if transport == "chat":
+        return _original_chat(
+            api_key,
+            model_id,
+            endpoint,
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=timeout,
+        )
+    if transport != "responses":
+        raise pilot.IntegrationError(f"unsupported RouterAI transport: {transport!r}")
+
+    provider_tag = str(endpoint.get("tag") or "").strip()
+    if not provider_tag:
+        raise pilot.IntegrationError(f"Responses transport has no provider tag for {model_id}")
+    instructions, input_messages = _responses_input(messages)
+    payload: dict[str, Any] = {
+        "model": model_id,
+        "input": input_messages,
+        "max_tokens": max_tokens,
+        "provider": {"only": [provider_tag], "allow_fallbacks": False},
+    }
+    if instructions:
+        payload["instructions"] = instructions
+    # Do not inject temperature into a Responses-only endpoint unless runtime
+    # metadata says the provider supports it. GPT-5.6 Sol currently does not.
+    supported_parameters = endpoint.get("supported_parameters") or []
+    if "temperature" in supported_parameters:
+        payload["temperature"] = temperature
+
+    _, body, elapsed = pilot.http_json(
+        f"{pilot.BASE_URL}/responses",
+        payload=payload,
+        api_key=api_key,
+        timeout=timeout,
+    )
+    return _normalize_responses_body(body), elapsed
 
 
 def write_admission_failure(
@@ -176,7 +325,7 @@ def write_admission_failure(
     upper_bound_rub: float,
 ) -> None:
     payload = {
-        "schema_version": "0.2",
+        "schema_version": "0.3",
         "experiment_id": "ACCB-ROUTERAI-CAL-2026-08-22-LOW-001",
         "phase": "model_admission",
         "architecture_sha": architecture_sha,
@@ -189,6 +338,7 @@ def write_admission_failure(
         "integration_errors": errors,
         "rows": rows,
         "model_replacements": REPLACEMENTS,
+        "supported_transports": list(SUPPORTED_TRANSPORTS),
         "raw_provider_reasoning_saved": False,
         "scientific_claim_boundary": "Admission/calibration evidence only; no universal ECC/AMCE threshold inference.",
     }
@@ -247,6 +397,7 @@ def admission_preflight() -> tuple[dict[str, dict[str, Any]], int]:
         "models": MAIN_MODELS,
         "whole_matrix_upper_bound_rub": round(total_upper, 6),
         "budget_ceiling_rub": max_budget_rub,
+        "api_transports": {model: cache[model].get("api_transport") for model in MAIN_MODELS},
         "model_replacements": REPLACEMENTS,
     }, ensure_ascii=False, sort_keys=True))
     return cache, 0
@@ -254,6 +405,8 @@ def admission_preflight() -> tuple[dict[str, dict[str, Any]], int]:
 
 pilot.MODELS = MAIN_MODELS
 pilot.rub_per_token = safe_rub_per_token
+_original_chat = pilot.chat
+pilot.chat = adaptive_chat
 
 
 if __name__ == "__main__":
