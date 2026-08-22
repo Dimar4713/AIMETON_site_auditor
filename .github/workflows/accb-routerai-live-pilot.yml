@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'scripts/accb_routerai_live_pilot.py'
+      - 'scripts/accb_routerai_live_entrypoint.py'
       - '.github/workflows/accb-routerai-live-pilot.yml'
       - 'docs/research/ACCB_ROUTERAI_LIVE_TRIGGER_2026-08-22.json'
   push:
@@ -43,7 +44,7 @@ jobs:
           unset AUTH_HEADER
           git checkout --detach --force FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python3 -m py_compile scripts/accb_routerai_live_pilot.py
+          python3 -m py_compile scripts/accb_routerai_live_pilot.py scripts/accb_routerai_live_entrypoint.py
 
       - name: Cleanup validation workspace
         if: always()
@@ -94,7 +95,7 @@ jobs:
           unset AUTH_HEADER
           git checkout --detach --force FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python3 -m py_compile scripts/accb_routerai_live_pilot.py
+          python3 -m py_compile scripts/accb_routerai_live_pilot.py scripts/accb_routerai_live_entrypoint.py
 
       - name: Materialize exact ACCB architecture revision
         shell: bash
@@ -117,7 +118,7 @@ jobs:
         run: |
           set +e
           cd "$ACCB_SITE_ROOT"
-          python3 scripts/accb_routerai_live_pilot.py
+          python3 scripts/accb_routerai_live_entrypoint.py
           rc=$?
           echo "ACCB_LIVE_RC=$rc" >> "$GITHUB_ENV"
           exit 0
@@ -180,6 +181,7 @@ jobs:
               f'- owner-authorized micro-ceiling: `{os.environ["ACCB_MAX_BUDGET_RUB"]} RUB`\n'
               f'- architecture SHA: `{os.environ["ACCB_ARCHITECTURE_SHA"]}`\n'
               '- raw provider reasoning retained: `no`\n'
+              '- pricing policy: `fail closed on missing/unparseable/non-positive endpoint prices`\n'
               '- scientific scope: integration/calibration gate, not threshold evidence\n\n'
               '```json\n' + json.dumps(evidence, ensure_ascii=False, sort_keys=True, indent=2) + '\n```\n'
           )
