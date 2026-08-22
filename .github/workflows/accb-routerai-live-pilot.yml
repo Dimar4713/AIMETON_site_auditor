@@ -65,7 +65,7 @@ jobs:
       ACCB_SITE_ROOT: /tmp/aimeton-accb-site-live-${{ github.run_id }}
       ACCB_ARCHITECTURE_ROOT: /tmp/aimeton-accb-architecture-${{ github.run_id }}
       ACCB_RESULT_PATH: /tmp/aimeton-accb-live-result-${{ github.run_id }}.json
-      EVIDENCE_ISSUE: '805'
+      EVIDENCE_ISSUE: '798'
 
     steps:
       - name: Require owner-authorized bounded execution inputs
