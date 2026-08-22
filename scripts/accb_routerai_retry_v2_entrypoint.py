@@ -3,18 +3,134 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import accb_routerai_live_entrypoint as live
 import accb_routerai_live_pilot as pilot
-import accb_routerai_retry_entrypoint as v1
 
-RETRY_MODELS = list(v1.RETRY_MODELS)
-PRIOR_SUCCESSFUL_MODELS = dict(v1.PRIOR_SUCCESSFUL_MODELS)
+RETRY_MODELS = [
+    "deepseek/deepseek-v4-pro-0813",
+    "moonshotai/kimi-k3",
+    "openai/gpt-5.6-sol",
+]
+PRIOR_SUCCESSFUL_MODELS = {
+    "z-ai/glm-5.2": {
+        "source_run": 32584584044,
+        "ACI": 0.916667,
+        "ACI_min": 0.5,
+        "critical_failure_count": 1,
+    },
+    "qwen/qwen3.7-plus": {
+        "source_run": 32584584044,
+        "ACI": 1.0,
+        "ACI_min": 1.0,
+        "critical_failure_count": 0,
+    },
+}
 SOURCE_CALIBRATION_RUN = 32584584044
 RETRY_OF_RUN = 32586356270
 REASONING_EFFORT = "low"
 RETRY_MAX_OUTPUT_TOKENS = 8192
+SAFE_WRAPPER_KEYS = ("data", "response", "result")
+
+
+def _safe_shape(value: Any, depth: int = 0) -> Any:
+    if depth >= 3:
+        if isinstance(value, dict):
+            return {"keys": sorted(str(k) for k in value.keys())}
+        if isinstance(value, list):
+            return {"type": "list", "length": len(value)}
+        return type(value).__name__
+    if isinstance(value, dict):
+        out: dict[str, Any] = {"keys": sorted(str(k) for k in value.keys())}
+        for key in ("data", "response", "result", "choices", "usage", "output"):
+            if key in value:
+                out[key] = _safe_shape(value[key], depth + 1)
+        return out
+    if isinstance(value, list):
+        return {
+            "type": "list",
+            "length": len(value),
+            "items": [_safe_shape(item, depth + 1) for item in value[:2]],
+        }
+    return type(value).__name__
+
+
+def _candidate_containers(body: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    yield body
+    for key in SAFE_WRAPPER_KEYS:
+        value = body.get(key)
+        if isinstance(value, dict):
+            yield value
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    yield item
+
+
+def _final_text_from_container(container: dict[str, Any]) -> str | None:
+    top = container.get("output_text")
+    if isinstance(top, str) and top.strip():
+        return top.strip()
+
+    choices = container.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict):
+            message = first.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+                if isinstance(content, list):
+                    chunks: list[str] = []
+                    for part in content:
+                        if not isinstance(part, dict) or part.get("type") not in {"text", "output_text"}:
+                            continue
+                        text = part.get("text")
+                        if isinstance(text, str) and text:
+                            chunks.append(text)
+                    if chunks:
+                        return "".join(chunks).strip()
+
+    output = container.get("output")
+    if isinstance(output, list):
+        chunks: list[str] = []
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if not isinstance(part, dict) or part.get("type") not in {"text", "output_text"}:
+                    continue
+                text = part.get("text")
+                if isinstance(text, str) and text:
+                    chunks.append(text)
+        if chunks:
+            return "".join(chunks).strip()
+    return None
+
+
+def _usage_from_container(container: dict[str, Any]) -> tuple[int | None, int | None, int | None] | None:
+    usage = container.get("usage")
+    if not isinstance(usage, dict):
+        return None
+
+    def integer(*names: str) -> int | None:
+        for name in names:
+            raw = usage.get(name)
+            if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+                return raw
+        return None
+
+    prompt = integer("input_tokens", "prompt_tokens")
+    completion = integer("output_tokens", "completion_tokens")
+    total = integer("total_tokens")
+    if total is None and prompt is not None and completion is not None:
+        total = prompt + completion
+    return prompt, completion, total
 
 
 def _safe_error_summary(body: dict[str, Any]) -> dict[str, Any] | None:
@@ -31,8 +147,8 @@ def _safe_error_summary(body: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _usage_summary(body: dict[str, Any]) -> dict[str, int | None]:
-    for container in v1._candidate_containers(body):
-        usage = v1._usage_from_container(container)
+    for container in _candidate_containers(body):
+        usage = _usage_from_container(container)
         if usage is None:
             continue
         prompt, completion, total = usage
@@ -45,8 +161,8 @@ def _usage_summary(body: dict[str, Any]) -> dict[str, int | None]:
 
 
 def _visible_text(body: dict[str, Any]) -> str | None:
-    for container in v1._candidate_containers(body):
-        text = v1._final_text_from_container(container)
+    for container in _candidate_containers(body):
+        text = _final_text_from_container(container)
         if text:
             return text
     return None
@@ -63,8 +179,8 @@ def _normalize_responses_body(body: dict[str, Any]) -> dict[str, Any]:
 
     text = _visible_text(body) or ""
     metadata_source: dict[str, Any] = body
-    for container in v1._candidate_containers(body):
-        if _visible_text(container):
+    for container in _candidate_containers(body):
+        if _final_text_from_container(container):
             metadata_source = container
             break
 
@@ -72,7 +188,7 @@ def _normalize_responses_body(body: dict[str, Any]) -> dict[str, Any]:
         "choices": [{"message": {"role": "assistant", "content": text}}],
         "usage": usage,
         "_routerai_transport": "responses",
-        "_safe_response_shape": v1._safe_shape(body),
+        "_safe_response_shape": _safe_shape(body),
         "_retry_visible_text_present": bool(text),
     }
     if safe_error is not None:
@@ -141,12 +257,10 @@ def retry_chat(
                 "RouterAI chat API error before billable usage; safe_error="
                 + json.dumps(safe_error, sort_keys=True, separators=(",", ":"))
             )
-        body["_safe_response_shape"] = v1._safe_shape(body)
+        body["_safe_response_shape"] = _safe_shape(body)
         body["_retry_visible_text_present"] = bool(_visible_text(body))
         if safe_error is not None:
             body["_safe_routerai_error"] = safe_error
-        # Probe calls intentionally do not require visible final text. Their purpose is
-        # tokenizer/usage measurement. Live calls are parsed only after usage/cost is recorded.
         return body, elapsed
 
     if transport != "responses":
@@ -177,7 +291,7 @@ def retry_response_text(body: dict[str, Any]) -> str:
     text = _visible_text(body)
     if text:
         return text
-    shape = json.dumps(v1._safe_shape(body), sort_keys=True, separators=(",", ":"))
+    shape = json.dumps(_safe_shape(body), sort_keys=True, separators=(",", ":"))
     usage = json.dumps(_usage_summary(body), sort_keys=True, separators=(",", ":"))
     safe_error = body.get("_safe_routerai_error")
     error_suffix = ""
@@ -214,8 +328,8 @@ def _finalize_retry_metadata(result_path: Path) -> None:
     payload["prior_successful_models_reused_not_repeated"] = PRIOR_SUCCESSFUL_MODELS
     payload["retry_models"] = RETRY_MODELS
     payload["accounting_policy"] = (
-        "For HTTP/API errors without usage, record a sanitized error summary and treat as non-billable per RouterAI policy; "
-        "for successful envelopes with usage, account prompt/completion cost before attempting visible-final-text parsing."
+        "For API errors without usage, retain only sanitized error metadata; for successful envelopes with usage, "
+        "account prompt/completion cost before attempting visible-final-text parsing."
     )
     for row in payload.get("rows") or []:
         if not isinstance(row, dict):
