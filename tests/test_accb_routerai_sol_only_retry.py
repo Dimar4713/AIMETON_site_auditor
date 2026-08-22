@@ -69,6 +69,75 @@ def test_safe_usage_diagnostic_never_retains_text_or_reasoning_values() -> None:
     assert "$.meta.usage" in encoded
 
 
+def test_safe_scalar_error_descriptor_hashes_text_and_keeps_only_allowlisted_markers() -> None:
+    raw_text = "invalid_request: unsupported max_tokens; use max_output_tokens; secret-detail-123"
+    descriptor = retry._safe_error_descriptor({"error": raw_text}, http_status=200)
+    assert descriptor is not None
+    encoded = json.dumps(descriptor, ensure_ascii=False)
+    assert raw_text not in encoded
+    assert "secret-detail-123" not in encoded
+    assert descriptor["http_status"] == 200
+    assert descriptor["error_value_type"] == "str"
+    assert descriptor["error_text_length"] == len(raw_text)
+    assert len(descriptor["error_text_sha256"]) == 64
+    assert set(descriptor["safe_markers"]) >= {
+        "invalid_request",
+        "unsupported",
+        "max_tokens",
+        "max_output_tokens",
+    }
+
+
+def test_safe_object_error_descriptor_uses_existing_allowlisted_fields_without_message() -> None:
+    raw = {
+        "error": {
+            "type": "invalid_request_error",
+            "code": "unsupported_parameter",
+            "param": "max_tokens",
+            "status": 400,
+            "message": "sensitive provider text about max_tokens",
+        }
+    }
+    descriptor = retry._safe_error_descriptor(raw, http_status=200)
+    assert descriptor is not None
+    encoded = json.dumps(descriptor, ensure_ascii=False)
+    assert "sensitive provider text" not in encoded
+    assert descriptor["type"] == "invalid_request_error"
+    assert descriptor["code"] == "unsupported_parameter"
+    assert descriptor["param"] == "max_tokens"
+    assert descriptor["status"] == 400
+    assert descriptor["http_status"] == 200
+
+
+def test_probe_error_only_envelope_fails_before_usage_path_and_never_becomes_missing_usage(monkeypatch) -> None:
+    retry._SOL_SAFE_ERROR_DIAGNOSTIC = None
+    retry._SOL_MISSING_USAGE_DIAGNOSTIC = None
+    retry._SOL_ERROR_RECEIPT = None
+    calls: list[dict] = []
+
+    def fake_http_json(*args, **kwargs):
+        calls.append(kwargs.get("payload") or {})
+        return 200, {"error": "invalid_request unsupported max_tokens; use max_output_tokens"}, 0.1
+
+    monkeypatch.setattr(pilot, "http_json", fake_http_json)
+    with pytest.raises(pilot.IntegrationError, match="sanitized API error envelope") as excinfo:
+        retry._sol_chat(
+            "secret",
+            retry.SOL_MODEL,
+            {"api_transport": "responses", "tag": "openai", "supported_parameters": []},
+            [{"role": "user", "content": "probe"}],
+            max_tokens=4,
+            timeout=30,
+        )
+    assert len(calls) == 1
+    assert "max_output_tokens" not in calls[0]
+    assert retry._SOL_MISSING_USAGE_DIAGNOSTIC is None
+    assert retry._SOL_SAFE_ERROR_DIAGNOSTIC is not None
+    safe = retry._SOL_SAFE_ERROR_DIAGNOSTIC["safe_error"]
+    assert set(safe["safe_markers"]) >= {"invalid_request", "unsupported", "max_tokens", "max_output_tokens"}
+    assert "invalid_request unsupported max_tokens; use max_output_tokens" not in str(excinfo.value)
+
+
 def test_probe_without_recursive_usage_fails_closed_before_live() -> None:
     retry._SOL_MISSING_USAGE_DIAGNOSTIC = None
     body = retry._normalize_sol_responses(
@@ -98,6 +167,7 @@ def test_nested_probe_usage_is_normalized_without_visible_text_requirement() -> 
 
 def test_sol_chat_captures_nested_live_usage_before_visible_parse(monkeypatch) -> None:
     retry._SOL_LIVE_RECEIPT = None
+    retry._SOL_SAFE_ERROR_DIAGNOSTIC = None
 
     raw = {
         "id": "resp_live",
@@ -157,6 +227,8 @@ def test_finalize_marks_missing_usage_spend_unknown_not_zero(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
+    retry._SOL_SAFE_ERROR_DIAGNOSTIC = None
+    retry._SOL_ERROR_RECEIPT = None
     retry._SOL_MISSING_USAGE_DIAGNOSTIC = {
         "phase": "probe",
         "top_level_keys": ["id", "output"],
@@ -175,6 +247,48 @@ def test_finalize_marks_missing_usage_spend_unknown_not_zero(tmp_path: Path) -> 
     assert row["usage_accounting_status"] == "UNKNOWN/unreconciled"
     assert final["confirmed_accounted_spend_rub"] == 0.0
     assert final["safe_usage_diagnostic"]["request_ids"][0]["value"] == "resp_missing"
+
+
+def test_finalize_marks_error_only_probe_unknown_without_inventing_cost(tmp_path: Path) -> None:
+    result = tmp_path / "result.json"
+    result.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "estimated_spend_rub": 0.0,
+                "rows": [
+                    {
+                        "model_identifier": retry.SOL_MODEL,
+                        "endpoint": {"api_transport": "responses", "tag": "openai"},
+                        "status": "integration_error",
+                        "error": "IntegrationError: sanitized API error envelope",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    retry._SOL_MISSING_USAGE_DIAGNOSTIC = None
+    retry._SOL_LIVE_RECEIPT = None
+    retry._SOL_ERROR_RECEIPT = None
+    retry._SOL_SAFE_ERROR_DIAGNOSTIC = {
+        "phase": "probe",
+        "safe_error": {
+            "http_status": 200,
+            "error_value_type": "str",
+            "error_text_length": 42,
+            "error_text_sha256": "a" * 64,
+            "safe_markers": ["max_tokens"],
+        },
+        "usage_path": None,
+        "structure": {"top_level_keys": ["error"]},
+    }
+    retry._finalize_sol_metadata(result)
+    final = json.loads(result.read_text(encoding="utf-8"))
+    assert final["estimated_spend_rub"] is None
+    assert final["confirmed_accounted_spend_rub"] == 0.0
+    assert final["safe_error_diagnostic"]["safe_error"]["safe_markers"] == ["max_tokens"]
+    assert final["rows"][0]["usage_accounting_status"] == "UNKNOWN/unreconciled"
 
 
 def test_finalize_restores_live_accounting_after_visible_parse_failure(tmp_path: Path) -> None:
@@ -197,6 +311,8 @@ def test_finalize_restores_live_accounting_after_visible_parse_failure(tmp_path:
         ),
         encoding="utf-8",
     )
+    retry._SOL_SAFE_ERROR_DIAGNOSTIC = None
+    retry._SOL_ERROR_RECEIPT = None
     retry._SOL_MISSING_USAGE_DIAGNOSTIC = None
     retry._SOL_LIVE_RECEIPT = {
         "usage": {"prompt_tokens": 40000, "completion_tokens": 3000, "total_tokens": 43000},
