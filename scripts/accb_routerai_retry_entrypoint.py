@@ -10,8 +10,8 @@ import accb_routerai_live_entrypoint as live
 import accb_routerai_live_pilot as pilot
 import accb_routerai_retry_v2_entrypoint as _impl
 
-# Backward-compatible exports used by the existing retry tests and by historical
-# three-model receipts. The implementation remains frozen in retry_v2.
+# Historical three-model retry exports remain compatible. The v2 implementation
+# is frozen; Sol-specific transport hardening is isolated below.
 RETRY_MODELS = _impl.RETRY_MODELS
 PRIOR_SUCCESSFUL_MODELS = _impl.PRIOR_SUCCESSFUL_MODELS
 SOURCE_CALIBRATION_RUN = _impl.SOURCE_CALIBRATION_RUN
@@ -32,8 +32,7 @@ TRIGGER_PATH = Path("docs/research/ACCB_ROUTERAI_LIVE_TRIGGER_2026-08-22.json")
 SOL_MODEL = "openai/gpt-5.6-sol"
 SOL_RETRY_MODELS = [SOL_MODEL]
 SOL_SOURCE_RUN = 32595531554
-SOL_PROBE_PROMPT_RESERVE = 8_000
-SOL_PROBE_COMPLETION_RESERVE = 4
+SOL_PREVIOUS_USAGELESS_RUN = 32602626623
 SOL_MAX_OUTPUT_TOKENS = RETRY_MAX_OUTPUT_TOKENS
 SOL_EVIDENCE_LABEL = "ACCB RouterAI Sol-only completion gate"
 
@@ -65,8 +64,23 @@ FOUR_MODEL_EVIDENCE = {
 }
 
 _ORIGINAL_USAGE = pilot.usage
-_SOL_PROBE_USAGE_FALLBACK_USED = False
 _SOL_LIVE_RECEIPT: dict[str, Any] | None = None
+_SOL_USAGE_PATHS: dict[str, str | None] = {"probe": None, "live": None}
+_SOL_MISSING_USAGE_DIAGNOSTIC: dict[str, Any] | None = None
+
+_TOKEN_KEYS = {
+    "input_tokens",
+    "prompt_tokens",
+    "output_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_token_count",
+    "output_token_count",
+    "prompt_token_count",
+    "completion_token_count",
+    "cost",
+}
+_ID_KEYS = {"id", "request_id", "response_id", "generation_id"}
 
 
 def _trigger_retry_models(path: Path = TRIGGER_PATH) -> list[str]:
@@ -81,19 +95,132 @@ def _trigger_retry_models(path: Path = TRIGGER_PATH) -> list[str]:
 
 
 def _write_workflow_evidence_override() -> None:
-    """Override the historical retry-failed-three shell defaults for later steps.
-
-    The workflow intentionally keeps the already-governed execution_mode so the
-    merge trigger is not widened. GitHub applies GITHUB_ENV updates to following
-    steps, therefore evidence publishing sees one expected model and the Sol-only
-    label even though the dispatch shell entered the historical retry branch.
-    """
     env_path = os.getenv("GITHUB_ENV", "").strip()
     if not env_path:
         return
     with open(env_path, "a", encoding="utf-8") as handle:
         handle.write("ACCB_EXPECTED_MODELS=1\n")
         handle.write(f"ACCB_EVIDENCE_LABEL={SOL_EVIDENCE_LABEL}\n")
+
+
+def _integer(mapping: dict[str, Any], *names: str) -> int | None:
+    for name in names:
+        raw = mapping.get(name)
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+            return raw
+    return None
+
+
+def _usage_tuple(mapping: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
+    prompt = _integer(mapping, "input_tokens", "prompt_tokens", "input_token_count", "prompt_token_count")
+    completion = _integer(
+        mapping,
+        "output_tokens",
+        "completion_tokens",
+        "output_token_count",
+        "completion_token_count",
+    )
+    total = _integer(mapping, "total_tokens")
+    if total is None and prompt is not None and completion is not None:
+        total = prompt + completion
+    return prompt, completion, total
+
+
+def _walk_objects(value: Any, path: str = "$"):
+    if isinstance(value, dict):
+        yield path, value
+        for key, child in value.items():
+            if isinstance(child, (dict, list)):
+                yield from _walk_objects(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            if isinstance(child, (dict, list)):
+                yield from _walk_objects(child, f"{path}[{index}]")
+
+
+def _recursive_usage(body: dict[str, Any]) -> tuple[int | None, int | None, int | None, str | None]:
+    """Find Responses usage without assuming RouterAI's wrapper depth.
+
+    Only numeric token counters are read. Raw text/reasoning is never retained.
+    Prefer dictionaries explicitly named `usage`, then any nested object carrying
+    a complete input/output token pair.
+    """
+    candidates = list(_walk_objects(body))
+    candidates.sort(key=lambda item: (0 if item[0].endswith(".usage") else 1, item[0].count("."), item[0]))
+    for path, mapping in candidates:
+        prompt, completion, total = _usage_tuple(mapping)
+        if prompt is not None and completion is not None:
+            return prompt, completion, total, path
+    return None, None, None, None
+
+
+def _safe_usage_diagnostic(body: dict[str, Any]) -> dict[str, Any]:
+    """Retain structure needed to repair accounting, never prompt/output text."""
+    objects: list[dict[str, Any]] = []
+    ids: list[dict[str, str]] = []
+    for path, mapping in _walk_objects(body):
+        keys = sorted(str(key) for key in mapping.keys())
+        interesting = sorted(key for key in keys if key in _TOKEN_KEYS or key in _ID_KEYS or key in {"usage", "meta", "billing"})
+        if interesting:
+            objects.append({"path": path, "keys": keys[:80], "interesting_keys": interesting})
+        for key in _ID_KEYS:
+            value = mapping.get(key)
+            if isinstance(value, str) and value and len(ids) < 8:
+                ids.append({"path": f"{path}.{key}", "value": value[:200]})
+    return {
+        "top_level_keys": sorted(str(key) for key in body.keys())[:100],
+        "usage_related_objects": objects[:24],
+        "request_ids": ids,
+    }
+
+
+def _metadata_from_raw(body: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for _, mapping in _walk_objects(body):
+        for key in ("model", "provider", "system_fingerprint", "id"):
+            value = mapping.get(key)
+            if key not in result and isinstance(value, (str, int, float)):
+                result[key] = value
+        if len(result) >= 4:
+            break
+    return result
+
+
+def _normalize_sol_responses(raw: dict[str, Any], *, live_call: bool) -> dict[str, Any]:
+    global _SOL_MISSING_USAGE_DIAGNOSTIC
+    safe_error = _impl._safe_error_summary(raw)
+    prompt, completion, total, usage_path = _recursive_usage(raw)
+    diagnostic = _safe_usage_diagnostic(raw)
+    phase = "live" if live_call else "probe"
+    _SOL_USAGE_PATHS[phase] = usage_path
+
+    if safe_error is not None and prompt is None and completion is None:
+        raise pilot.IntegrationError(
+            "RouterAI Responses API error before usable token accounting; safe_error="
+            + json.dumps(safe_error, sort_keys=True, separators=(",", ":"))
+        )
+
+    text = _impl._visible_text(raw) or ""
+    normalized: dict[str, Any] = {
+        "choices": [{"message": {"role": "assistant", "content": text}}],
+        "usage": {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": total,
+        },
+        "_routerai_transport": "responses",
+        "_sol_usage_path": usage_path,
+        "_sol_usage_diagnostic": diagnostic,
+        "_retry_visible_text_present": bool(text),
+    }
+    normalized.update(_metadata_from_raw(raw))
+    if safe_error is not None:
+        normalized["_safe_routerai_error"] = safe_error
+    if prompt is None or completion is None:
+        normalized["_sol_usage_missing"] = True
+        normalized["_sol_usage_missing_phase"] = phase
+        _SOL_MISSING_USAGE_DIAGNOSTIC = {"phase": phase, **diagnostic}
+    return normalized
 
 
 def _sol_chat(
@@ -106,43 +233,55 @@ def _sol_chat(
     temperature: float = 0.0,
     timeout: int = 240,
 ) -> tuple[dict[str, Any], float]:
-    """Use the v3 transport but tolerate only the known Sol probe anomaly.
+    """Responses transport with recursive usage discovery and pre-live fail-closed probe."""
+    global _SOL_LIVE_RECEIPT
 
-    A successful Responses envelope with no usage on the <=16-token auxiliary
-    tokenizer probe is marked for conservative reservation. API errors still
-    fail in retry_chat before reaching this function. The real benchmark call
-    never receives this exemption: its usage remains mandatory in pilot.main().
-    """
-    global _SOL_PROBE_USAGE_FALLBACK_USED, _SOL_LIVE_RECEIPT
+    if str(endpoint.get("api_transport") or "") != "responses":
+        return _impl.retry_chat(
+            api_key,
+            model_id,
+            endpoint,
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=timeout,
+        )
 
-    body, elapsed = _impl.retry_chat(
-        api_key,
-        model_id,
-        endpoint,
-        messages,
-        max_tokens=max_tokens,
-        temperature=temperature,
+    provider_tag = str(endpoint.get("tag") or "").strip()
+    if not provider_tag:
+        raise pilot.IntegrationError(f"Sol Responses transport has no provider tag for {model_id}")
+    live_call = max_tokens > 16
+    instructions, input_messages = live._responses_input(messages)
+    payload: dict[str, Any] = {
+        "model": model_id,
+        "input": input_messages,
+        "max_tokens": max_tokens,
+        "provider": {"only": [provider_tag], "allow_fallbacks": False},
+        **_impl._common_generation_controls(endpoint, live_call=live_call),
+    }
+    if instructions:
+        payload["instructions"] = instructions
+    supported = endpoint.get("supported_parameters") or []
+    if "temperature" in supported:
+        payload["temperature"] = temperature
+
+    _, raw, elapsed = pilot.http_json(
+        f"{pilot.BASE_URL}/responses",
+        payload=payload,
+        api_key=api_key,
         timeout=timeout,
     )
+    body = _normalize_sol_responses(raw, live_call=live_call)
     summary = _impl._usage_summary(body)
     prompt = summary.get("prompt_tokens")
     completion = summary.get("completion_tokens")
-
-    if max_tokens <= 16 and prompt is None and completion is None:
-        body["_sol_probe_usage_missing"] = True
-        _SOL_PROBE_USAGE_FALLBACK_USED = True
-        return body, elapsed
-
-    if max_tokens > 16 and isinstance(prompt, int) and isinstance(completion, int):
+    if live_call and isinstance(prompt, int) and isinstance(completion, int):
         total = summary.get("total_tokens")
         if not isinstance(total, int):
             total = prompt + completion
         _SOL_LIVE_RECEIPT = {
-            "usage": {
-                "prompt_tokens": prompt,
-                "completion_tokens": completion,
-                "total_tokens": total,
-            },
+            "usage": {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total},
+            "usage_path": body.get("_sol_usage_path"),
             "estimated_cost_rub": round(pilot.estimated_cost(endpoint, prompt, completion), 6),
             "elapsed_seconds": round(elapsed, 6),
             "provider_metadata": pilot.safe_provider_metadata(body),
@@ -152,17 +291,12 @@ def _sol_chat(
 
 def _sol_usage(body: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
     prompt, completion, total = _ORIGINAL_USAGE(body)
-    if (
-        body.get("_sol_probe_usage_missing") is True
-        and prompt is None
-        and completion is None
-    ):
-        # These numbers are a budget reservation only. They are deliberately
-        # removed from the persisted scientific receipt in _finalize_sol_metadata.
-        return (
-            SOL_PROBE_PROMPT_RESERVE,
-            SOL_PROBE_COMPLETION_RESERVE,
-            SOL_PROBE_PROMPT_RESERVE + SOL_PROBE_COMPLETION_RESERVE,
+    if body.get("_sol_usage_missing") is True and (prompt is None or completion is None):
+        phase = str(body.get("_sol_usage_missing_phase") or "unknown")
+        diagnostic = body.get("_sol_usage_diagnostic")
+        compact = json.dumps(diagnostic, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        raise pilot.IntegrationError(
+            f"Sol Responses {phase} returned no discoverable token usage; safe_usage_structure={compact[:760]}"
         )
     return prompt, completion, total
 
@@ -176,13 +310,10 @@ def _known_cost_from_payload(payload: dict[str, Any]) -> float:
         if isinstance(live_cost, (int, float)) and not isinstance(live_cost, bool):
             known += float(live_cost)
         probe = row.get("task_probe")
-        if not isinstance(probe, dict):
-            continue
-        if probe.get("usage_status") == "missing_reserved_upper_bound":
-            continue
-        probe_cost = probe.get("estimated_cost_rub")
-        if isinstance(probe_cost, (int, float)) and not isinstance(probe_cost, bool):
-            known += float(probe_cost)
+        if isinstance(probe, dict):
+            probe_cost = probe.get("estimated_cost_rub")
+            if isinstance(probe_cost, (int, float)) and not isinstance(probe_cost, bool):
+                known += float(probe_cost)
     return known
 
 
@@ -190,49 +321,42 @@ def _finalize_sol_metadata(result_path: Path) -> None:
     if not result_path.exists():
         return
     payload = json.loads(result_path.read_text(encoding="utf-8"))
-    payload["schema_version"] = "0.6-sol-only"
+    payload["schema_version"] = "0.7-sol-recursive-usage"
     payload["retry_scope"] = "sol-only"
-    payload["retry_of_run"] = SOL_SOURCE_RUN
+    payload["retry_of_run"] = SOL_PREVIOUS_USAGELESS_RUN
     payload["source_calibration_runs"] = [32584584044, SOL_SOURCE_RUN]
     payload["prior_successful_models_reused_not_repeated"] = FOUR_MODEL_EVIDENCE
     payload["retry_models"] = list(SOL_RETRY_MODELS)
+    payload["responses_usage_discovery"] = {
+        "strategy": "recursive numeric token-counter search across the RouterAI Responses envelope",
+        "probe_usage_path": _SOL_USAGE_PATHS.get("probe"),
+        "live_usage_path": _SOL_USAGE_PATHS.get("live"),
+        "raw_text_or_reasoning_retained": False,
+    }
     payload["probe_policy"] = {
-        "purpose": "auxiliary task-payload tokenizer measurement",
+        "purpose": "tiny transport/accounting capability gate before the full Sol benchmark request",
         "visible_final_text_required": False,
-        "usage_preferred": True,
-        "missing_usage_behavior": (
-            "Sol Responses probe may continue only after reserving the conservative 8000-input/4-output upper bound; "
-            "persisted L_task_payload remains UNKNOWN rather than synthetic"
-        ),
-        "live_response_usage_required": True,
+        "usage_required_before_live_call": True,
+        "failure_behavior": "stop before the 80K-class benchmark call and retain only key structure/request identifiers",
     }
     payload["accounting_policy"] = (
-        "The Sol live envelope must expose usage before candidate parsing. If the auxiliary Responses probe omits usage, "
-        "the budget guard reserves its full 8000-input/4-output upper bound; synthetic reserve tokens are never retained "
-        "as scientific measurements."
+        "No synthetic token counts are accepted. The full Sol benchmark call is made only if the tiny Responses probe "
+        "exposes discoverable token usage. A live envelope must also expose exact usage before candidate parsing."
     )
+
+    if _SOL_MISSING_USAGE_DIAGNOSTIC is not None:
+        payload["current_run_spend_status"] = "UNKNOWN/unreconciled: successful Responses envelope omitted discoverable token usage"
+        payload["estimated_spend_rub"] = None
+        payload["safe_usage_diagnostic"] = _SOL_MISSING_USAGE_DIAGNOSTIC
 
     for row in payload.get("rows") or []:
         if not isinstance(row, dict) or row.get("model_identifier") != SOL_MODEL:
             continue
         endpoint = row.get("endpoint") if isinstance(row.get("endpoint"), dict) else {}
-        probe = row.get("task_probe")
-        if _SOL_PROBE_USAGE_FALLBACK_USED and isinstance(probe, dict):
-            reserved = pilot.estimated_cost(
-                endpoint,
-                SOL_PROBE_PROMPT_RESERVE,
-                SOL_PROBE_COMPLETION_RESERVE,
-            )
-            probe["prompt_tokens"] = None
-            probe["completion_tokens"] = None
-            probe.pop("total_tokens", None)
-            probe["estimated_cost_rub"] = None
-            probe["usage_status"] = "missing_reserved_upper_bound"
-            probe["budget_reserved_upper_bound_rub"] = round(reserved, 6)
+        if _SOL_MISSING_USAGE_DIAGNOSTIC is not None:
+            row["usage_accounting_status"] = "UNKNOWN/unreconciled"
+            row["safe_usage_diagnostic"] = _SOL_MISSING_USAGE_DIAGNOSTIC
 
-        # If visible-answer parsing fails after a billable Sol envelope, pilot.main
-        # catches the exception before row.update(). Restore sanitized usage/cost
-        # from the already captured envelope so accounting is never lost again.
         if _SOL_LIVE_RECEIPT is not None:
             if not isinstance(row.get("usage"), dict):
                 row["usage"] = dict(_SOL_LIVE_RECEIPT["usage"])
@@ -241,22 +365,17 @@ def _finalize_sol_metadata(result_path: Path) -> None:
             row.setdefault("elapsed_seconds", _SOL_LIVE_RECEIPT["elapsed_seconds"])
             row.setdefault("provider_metadata", _SOL_LIVE_RECEIPT["provider_metadata"])
             row["usage_accounted_before_candidate_parse"] = True
+            row["usage_path"] = _SOL_LIVE_RECEIPT.get("usage_path")
 
         manifest = row.get("manifest")
         if isinstance(manifest, dict):
-            lengths = manifest.get("lengths")
-            if _SOL_PROBE_USAGE_FALLBACK_USED and isinstance(lengths, dict):
-                lengths["L_task_payload"] = None
-                lengths["L_visible_shell"] = None
-                lengths["L_task_payload_status"] = "UNKNOWN: RouterAI Responses probe returned no usage"
             manifest["reasoning_mode"] = REASONING_EFFORT
             manifest["max_output_tokens"] = SOL_MAX_OUTPUT_TOKENS
-            manifest["retry_of_run"] = SOL_SOURCE_RUN
+            manifest["retry_of_run"] = SOL_PREVIOUS_USAGELESS_RUN
             manifest["api_transport"] = endpoint.get("api_transport")
 
-    payload["confirmed_accounted_spend_rub"] = round(_known_cost_from_payload(payload), 6)
-    payload["budget_accounted_spend_rub"] = payload.get("estimated_spend_rub")
-    payload["probe_usage_fallback_used"] = _SOL_PROBE_USAGE_FALLBACK_USED
+    known = _known_cost_from_payload(payload)
+    payload["confirmed_accounted_spend_rub"] = round(known, 6) if known else 0.0
     payload["scientific_claim_boundary"] = (
         "Fifth-model low-context calibration/integration evidence only; no universal ECC/AMCE threshold inference."
     )
@@ -264,9 +383,11 @@ def _finalize_sol_metadata(result_path: Path) -> None:
 
 
 def sol_main() -> int:
-    global _SOL_PROBE_USAGE_FALLBACK_USED, _SOL_LIVE_RECEIPT
-    _SOL_PROBE_USAGE_FALLBACK_USED = False
+    global _SOL_LIVE_RECEIPT, _SOL_MISSING_USAGE_DIAGNOSTIC
     _SOL_LIVE_RECEIPT = None
+    _SOL_MISSING_USAGE_DIAGNOSTIC = None
+    _SOL_USAGE_PATHS["probe"] = None
+    _SOL_USAGE_PATHS["live"] = None
     _write_workflow_evidence_override()
 
     live.MAIN_MODELS = list(SOL_RETRY_MODELS)
