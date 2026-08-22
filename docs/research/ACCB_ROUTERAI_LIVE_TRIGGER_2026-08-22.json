@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "status": "owner_authorized",
   "date": "2026-08-22",
   "architecture_issue": "Dimar4713/aimeton-architecture#132",
@@ -7,22 +7,42 @@
   "pr_governance_relation": "Part of #798",
   "approved_routerai_balance_rub": 10000,
   "micro_gate_ceiling_rub": 100,
-  "retry_sequence": 2,
-  "retry_reason": "First live attempt spent 0 RUB and stopped before RouterAI because the repository-scoped Site Auditor GITHUB_TOKEN could not clone aimeton-architecture. Retry uses an immutable canonical ACCB snapshot verified by source blob SHA.",
+  "retry_sequence": 3,
+  "prior_attempts": [
+    {
+      "workflow_run": 32579887862,
+      "estimated_spend_rub": 0,
+      "result": "pre-provider infrastructure admission failure",
+      "reason": "repository-scoped Site Auditor GITHUB_TOKEN could not clone aimeton-architecture"
+    },
+    {
+      "workflow_run": 32581019920,
+      "estimated_spend_rub": 0,
+      "result": "pre-provider model admission failure",
+      "reason": "RouterAI runtime endpoint census exposed no healthy chat endpoint >=128K for moonshotai/kimi-k2.6"
+    }
+  ],
   "models": [
     "z-ai/glm-5.2",
     "deepseek/deepseek-v4-pro-0813",
     "qwen/qwen3.7-plus",
-    "moonshotai/kimi-k2.6",
+    "moonshotai/kimi-k3",
     "openai/gpt-5.6-sol"
   ],
+  "model_replacements": {
+    "moonshotai/kimi-k2.6": {
+      "replacement": "moonshotai/kimi-k3",
+      "reason": "Runtime endpoint truth on run 32581019920 overrode the stale/conflicting public catalog admission signal for K2.6. K3 preserves the owner-approved Kimi/Chinese slot and exposes a 1M public context specification."
+    }
+  },
   "free_slow_models": [
     "stealth/ox-alpha"
   ],
-  "scope": "endpoint census + tokenizer/task-payload probe + one low-context ACCB-DEV-001 scored call per paid/main model; stealth/ox-alpha runs afterward in a separate non-gating free/slow lane",
+  "scope": "atomic whole-matrix endpoint/price/budget admission before any paid token; then tokenizer/task-payload probe + one low-context ACCB-DEV-001 scored call per admitted main model; stealth/ox-alpha runs afterward in a separate non-gating free/slow lane",
   "architecture_sha": "db18fcbc0a50d96af4e747db0ec2df10ca79f64c",
   "architecture_snapshot_policy": "vendored files must match canonical aimeton-architecture Git blob SHAs from the pinned architecture commit before any RouterAI call",
-  "provider_policy": "pin selected endpoint tag where RouterAI routing permits; allow_fallbacks=false",
+  "provider_policy": "pin selected endpoint tag; allow_fallbacks=false",
+  "admission_policy": "all five main models must expose a healthy chat endpoint >=128K, parseable positive pricing and a whole-matrix conservative cost upper bound <=100 RUB before the first paid request; any admission failure writes a machine-readable zero-spend receipt",
   "free_lane_policy": "stealth/ox-alpha is admitted only if runtime endpoint census confirms zero prompt and completion pricing; slow/timeout outcome is recorded separately and does not gate the five-model main result",
   "scientific_boundary": "calibration/integration evidence only; no universal ECC/AMCE threshold inference"
 }
