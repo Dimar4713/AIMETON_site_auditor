@@ -8,6 +8,7 @@
   "approved_routerai_balance_rub": 10000,
   "micro_gate_ceiling_rub": 100,
   "retry_sequence": 4,
+  "transport_adapter_version": "routerai-chat-responses-v1",
   "prior_attempts": [
     {
       "workflow_run": 32579887862,
