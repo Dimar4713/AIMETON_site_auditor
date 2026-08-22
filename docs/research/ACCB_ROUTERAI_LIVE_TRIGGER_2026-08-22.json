@@ -4,6 +4,7 @@
   "date": "2026-08-22",
   "architecture_issue": "Dimar4713/aimeton-architecture#132",
   "execution_evidence_issue": "Dimar4713/AIMETON_site_auditor#798",
+  "pr_governance_relation": "Part of #798",
   "approved_routerai_balance_rub": 10000,
   "micro_gate_ceiling_rub": 100,
   "models": [
