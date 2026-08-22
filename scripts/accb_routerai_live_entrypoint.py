@@ -71,8 +71,6 @@ def safe_rub_per_token(endpoint: dict[str, Any], key: str, prompt_tokens: int) -
         threshold = _threshold(row.get("threshold"), label=f"variable[{index}].threshold")
         if prompt_tokens <= threshold:
             continue
-        # RouterAI prompt-threshold rows may override only prompt pricing. Missing
-        # completion override means that the base completion price stays active.
         if key in row:
             result = _positive_number(row.get(key), label=f"variable[{index}].{key}")
         elif key == "prompt":
@@ -97,8 +95,6 @@ def _endpoint_observation(endpoint: dict[str, Any]) -> dict[str, Any]:
 
 
 def _transport_for_apis(apis: list[Any]) -> str | None:
-    # Prefer Chat for continuity with the first four models. Fall back to the
-    # Responses transport only when the runtime endpoint itself advertises it.
     for transport in SUPPORTED_TRANSPORTS:
         if transport in apis:
             return transport
@@ -187,7 +183,6 @@ def _responses_output_text(body: dict[str, Any]) -> str:
     top = body.get("output_text")
     if isinstance(top, str) and top.strip():
         return top
-
     output = body.get("output")
     if not isinstance(output, list):
         raise pilot.IntegrationError("RouterAI Responses result has no output list")
@@ -199,9 +194,7 @@ def _responses_output_text(body: dict[str, Any]) -> str:
         if not isinstance(content, list):
             continue
         for part in content:
-            if not isinstance(part, dict):
-                continue
-            if part.get("type") not in {"output_text", "text"}:
+            if not isinstance(part, dict) or part.get("type") not in {"output_text", "text"}:
                 continue
             text = part.get("text")
             if isinstance(text, str) and text:
@@ -237,11 +230,7 @@ def _normalize_responses_body(body: dict[str, Any]) -> dict[str, Any]:
     prompt, completion, total = _responses_usage(body)
     normalized: dict[str, Any] = {
         "choices": [{"message": {"role": "assistant", "content": text}}],
-        "usage": {
-            "prompt_tokens": prompt,
-            "completion_tokens": completion,
-            "total_tokens": total,
-        },
+        "usage": {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total},
         "_routerai_transport": "responses",
     }
     for key in ("model", "provider", "system_fingerprint", "id"):
@@ -277,13 +266,8 @@ def adaptive_chat(
     transport = str(endpoint.get("api_transport") or "chat")
     if transport == "chat":
         return _original_chat(
-            api_key,
-            model_id,
-            endpoint,
-            messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            timeout=timeout,
+            api_key, model_id, endpoint, messages,
+            max_tokens=max_tokens, temperature=temperature, timeout=timeout,
         )
     if transport != "responses":
         raise pilot.IntegrationError(f"unsupported RouterAI transport: {transport!r}")
@@ -300,17 +284,12 @@ def adaptive_chat(
     }
     if instructions:
         payload["instructions"] = instructions
-    # Do not inject temperature into a Responses-only endpoint unless runtime
-    # metadata says the provider supports it. GPT-5.6 Sol currently does not.
     supported_parameters = endpoint.get("supported_parameters") or []
     if "temperature" in supported_parameters:
         payload["temperature"] = temperature
 
     _, body, elapsed = pilot.http_json(
-        f"{pilot.BASE_URL}/responses",
-        payload=payload,
-        api_key=api_key,
-        timeout=timeout,
+        f"{pilot.BASE_URL}/responses", payload=payload, api_key=api_key, timeout=timeout,
     )
     return _normalize_responses_body(body), elapsed
 
@@ -350,7 +329,6 @@ def admission_preflight() -> tuple[dict[str, dict[str, Any]], int]:
     result_path = Path(pilot.required_env("ACCB_RESULT_PATH"))
     max_budget_rub = float(pilot.required_env("ACCB_MAX_BUDGET_RUB"))
     architecture_sha = pilot.required_env("ACCB_ARCHITECTURE_SHA")
-
     cache: dict[str, dict[str, Any]] = {}
     rows: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -380,7 +358,6 @@ def admission_preflight() -> tuple[dict[str, dict[str, Any]], int]:
         errors.append(
             f"whole-matrix worst-case admission cost {total_upper:.6f} RUB exceeds ceiling {max_budget_rub:.6f} RUB"
         )
-
     if errors:
         write_admission_failure(
             result_path,
@@ -403,6 +380,31 @@ def admission_preflight() -> tuple[dict[str, dict[str, Any]], int]:
     return cache, 0
 
 
+def finalize_result_transport_metadata(result_path: Path) -> None:
+    if not result_path.exists():
+        return
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    changed = False
+    for row in payload.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        endpoint = row.get("endpoint") or {}
+        manifest = row.get("manifest")
+        if not isinstance(endpoint, dict) or not isinstance(manifest, dict):
+            continue
+        transport = endpoint.get("api_transport")
+        if transport not in SUPPORTED_TRANSPORTS:
+            continue
+        manifest["api_transport"] = transport
+        manifest["surface"] = "routerai/chat-completions" if transport == "chat" else "routerai/responses"
+        supported_parameters = endpoint.get("supported_parameters") or []
+        manifest["temperature"] = 0.0 if transport == "chat" or "temperature" in supported_parameters else None
+        changed = True
+    if changed:
+        payload["transport_normalization"] = "API envelope normalized only; ACCB task, trace contract and deterministic scorer unchanged."
+        result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 pilot.MODELS = MAIN_MODELS
 pilot.rub_per_token = safe_rub_per_token
 _original_chat = pilot.chat
@@ -421,4 +423,6 @@ if __name__ == "__main__":
             raise pilot.IntegrationError(f"model was not admitted in preflight: {model_id}") from exc
 
     pilot.endpoint_census = cached_endpoint_census
-    raise SystemExit(pilot.main())
+    result_rc = pilot.main()
+    finalize_result_transport_metadata(Path(pilot.required_env("ACCB_RESULT_PATH")))
+    raise SystemExit(result_rc)
