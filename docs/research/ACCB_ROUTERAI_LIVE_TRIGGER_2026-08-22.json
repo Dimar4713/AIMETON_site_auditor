@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.5",
+  "schema_version": "1.6",
   "status": "owner_authorized",
   "date": "2026-08-23",
   "architecture_issue": "Dimar4713/aimeton-architecture#132",
@@ -7,9 +7,11 @@
   "pr_governance_relation": "Part of #798",
   "approved_routerai_balance_rub": 10000,
   "micro_gate_ceiling_rub": 100,
-  "retry_sequence": 6,
+  "retry_sequence": 7,
   "execution_mode": "retry-failed-three",
-  "transport_adapter_version": "routerai-chat-responses-v3-account-before-parse",
+  "retry_scope": "sol-only",
+  "workflow_compatibility_note": "The governed workflow keeps the historical retry-failed-three dispatch branch; the retry entrypoint narrows execution from this manifest to one Sol model and overrides downstream evidence metadata to expected_models=1.",
+  "transport_adapter_version": "routerai-chat-responses-v4-sol-probe-reserve",
   "prior_attempts": [
     {
       "workflow_run": 32579887862,
@@ -32,17 +34,23 @@
     {
       "workflow_run": 32584584044,
       "estimated_spend_rub": 16.908256,
-      "result": "first real low-context calibration: 2 scored, 3 integration-envelope failures",
-      "reason": "Qwen3.7 Plus and GLM 5.2 produced valid scored traces; DeepSeek and Kimi returned no visible final content under provider-default reasoning/output budget; GPT-5.6 Sol returned a Responses wrapper not covered by v1 normalization"
+      "result": "first real low-context calibration: Qwen and GLM scored",
+      "reason": "Qwen3.7 Plus and GLM 5.2 produced valid scored traces; DeepSeek/Kimi/Sol remained integration-envelope failures"
     },
     {
       "workflow_run": 32586356270,
       "estimated_spend_rub": null,
       "result": "retry reached provider envelopes but harness rejected visible text before recording usage/cost",
-      "reason": "DeepSeek/Kimi returned chat envelopes with usage but no visible final text at the probe/parse boundary; GPT-5.6 Sol returned a sanitized Responses error envelope. Harness-level accounting made this run's spend unreconciled, so it is UNKNOWN rather than zero."
+      "reason": "Harness-level accounting made this run's spend unreconciled, so it remains UNKNOWN rather than zero"
+    },
+    {
+      "workflow_run": 32595531554,
+      "estimated_spend_rub": 27.180471,
+      "result": "DeepSeek and Kimi K3 scored; Sol stopped at auxiliary Responses probe",
+      "reason": "Accounting-before-parse fix succeeded. DeepSeek scored ACI=0.716667 and Kimi K3 scored ACI=0.833333. GPT-5.6 Sol returned a successful probe envelope without token usage, so the old probe usage requirement blocked the real benchmark call before any Sol cognition score was produced."
     }
   ],
-  "confirmed_observed_experiment_spend_rub": 16.908256,
+  "confirmed_observed_experiment_spend_rub": 44.088727,
   "unreconciled_runs": [32586356270],
   "models": [
     "z-ai/glm-5.2",
@@ -52,22 +60,32 @@
     "openai/gpt-5.6-sol"
   ],
   "prior_successful_models_reused_not_repeated": {
+    "qwen/qwen3.7-plus": {
+      "source_run": 32584584044,
+      "ACI": 1.0,
+      "ACI_min": 1.0,
+      "critical_failure_count": 0
+    },
     "z-ai/glm-5.2": {
       "source_run": 32584584044,
       "ACI": 0.916667,
       "ACI_min": 0.5,
       "critical_failure_count": 1
     },
-    "qwen/qwen3.7-plus": {
-      "source_run": 32584584044,
-      "ACI": 1.0,
-      "ACI_min": 1.0,
-      "critical_failure_count": 0
+    "moonshotai/kimi-k3": {
+      "source_run": 32595531554,
+      "ACI": 0.833333,
+      "ACI_min": 0.5,
+      "critical_failure_count": 2
+    },
+    "deepseek/deepseek-v4-pro-0813": {
+      "source_run": 32595531554,
+      "ACI": 0.716667,
+      "ACI_min": 0.0,
+      "critical_failure_count": 2
     }
   },
   "retry_models": [
-    "deepseek/deepseek-v4-pro-0813",
-    "moonshotai/kimi-k3",
     "openai/gpt-5.6-sol"
   ],
   "retry_generation_policy": {
@@ -79,22 +97,25 @@
     "reasoning_fields_must_never_be_used_as_candidate_trace": true
   },
   "probe_policy": {
-    "purpose": "tokenizer/task-payload usage measurement only",
+    "purpose": "auxiliary tokenizer/task-payload measurement only",
     "max_output_tokens": 4,
     "reasoning_controls": "disabled",
     "json_mode": false,
     "visible_final_text_required": false,
-    "usage_required": true
+    "usage_preferred": true,
+    "sol_missing_usage_behavior": "do not invent measured tokens; reserve conservative 8000-input/4-output budget upper bound, persist L_task_payload as UNKNOWN, and continue to the real Sol call",
+    "live_response_usage_required": true
   },
   "accounting_policy": {
-    "successful_envelope": "record usage and estimated cost before visible-final-text parsing",
-    "api_error_without_usage": "retain sanitized type/code/param/status only; do not retain provider message or reasoning",
+    "successful_live_envelope": "record exact usage and estimated cost before visible-final-text parsing",
+    "sol_probe_without_usage": "reserve the full probe upper bound for admission/budget accounting but never persist the reserve tokens as scientific measurements",
+    "api_error_without_usage": "retain sanitized type/code/param/status only and fail; do not retain provider message or reasoning",
     "unreconciled_prior_run": "32586356270 remains UNKNOWN until independently reconciled from RouterAI request ledger"
   },
   "model_replacements": {
     "moonshotai/kimi-k2.6": {
       "replacement": "moonshotai/kimi-k3",
-      "reason": "Runtime endpoint truth on run 32581019920 overrode the stale/conflicting public catalog admission signal for K2.6. K3 preserves the owner-approved Kimi/Chinese slot and exposes a 1M public context specification."
+      "reason": "Runtime endpoint truth on run 32581019920 overrode the stale/conflicting public catalog assumption for K2.6. K3 preserves the owner-approved Kimi/Chinese slot."
     }
   },
   "free_slow_models": ["stealth/ox-alpha"],
@@ -102,14 +123,14 @@
     "source_run": 32586356270,
     "job": 97063965060,
     "status": "success",
-    "gating": false
+    "gating": false,
+    "reuse_policy": "do not repeat for scientific need; a workflow-level free rerun, if any, remains non-gating and zero-price checked"
   },
-  "scope": "reuse valid GLM/Qwen observations without repeating paid calls; atomically admit and retry only DeepSeek/Kimi/GPT-5.6 Sol; tokenizer probe must not require visible text or reasoning; live envelopes must be cost-accounted before parsing; use 8192 output headroom under the existing <=100 RUB retry ceiling",
+  "scope": "freeze and reuse all four existing scored low-context observations; perform exactly one bounded GPT-5.6 Sol completion attempt; no paid calls to Qwen, GLM, DeepSeek or Kimi",
   "architecture_sha": "db18fcbc0a50d96af4e747db0ec2df10ca79f64c",
-  "architecture_snapshot_policy": "vendored files must match canonical aimeton-architecture Git blob SHAs from the pinned architecture commit before any RouterAI call",
-  "provider_policy": "pin selected endpoint tag; allow_fallbacks=false; record actual provider metadata returned by RouterAI",
-  "transport_policy": "select transport from live endpoint supported_apis; chat or responses envelopes may be normalized only through visible final-answer fields; provider reasoning/thinking fields are never accepted as benchmark output",
-  "admission_policy": "all retry models must expose a healthy chat or responses endpoint >=128K, parseable positive pricing and a conservative retry upper bound <=100 RUB before the first retry request; already-scored GLM/Qwen are not repeated",
-  "free_lane_policy": "stealth/ox-alpha remains separate, free and non-gating; its successful run 32586356270 is reused rather than repeated",
-  "scientific_boundary": "calibration/integration evidence only; no universal ECC/AMCE threshold inference"
+  "architecture_snapshot_policy": "retain the same canonical ACCB-DEV-001 snapshot used by the first four model scores so the fifth score is directly comparable; Layer B/A-B-C-D expansion is a later preregistered tranche",
+  "provider_policy": "pin the OpenAI endpoint tag; allow_fallbacks=false; record actual provider metadata returned by RouterAI",
+  "transport_policy": "GPT-5.6 Sol uses the live endpoint-declared Responses transport; only visible final-answer fields may become candidate output; provider reasoning/thinking fields are never accepted",
+  "admission_policy": "Sol alone must expose a healthy Responses endpoint >=128K, parseable positive pricing and a conservative probe+80K-input+8192-output upper bound <=100 RUB before the first request",
+  "scientific_boundary": "fifth-model low-context calibration/integration evidence only; no universal ECC/AMCE threshold inference"
 }
