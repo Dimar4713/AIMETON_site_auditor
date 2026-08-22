@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.7",
+  "schema_version": "1.8",
   "status": "owner_authorized",
   "date": "2026-08-23",
   "architecture_issue": "Dimar4713/aimeton-architecture#132",
@@ -7,11 +7,11 @@
   "pr_governance_relation": "Part of #798",
   "approved_routerai_balance_rub": 10000,
   "micro_gate_ceiling_rub": 100,
-  "retry_sequence": 8,
+  "retry_sequence": 9,
   "execution_mode": "retry-failed-three",
   "retry_scope": "sol-only",
   "workflow_compatibility_note": "The governed workflow keeps the historical retry-failed-three dispatch branch; the retry entrypoint narrows execution to one Sol model and overrides downstream evidence metadata to expected_models=1.",
-  "transport_adapter_version": "routerai-responses-v5-recursive-usage-fail-before-live",
+  "transport_adapter_version": "routerai-responses-v6-sanitized-scalar-error",
   "prior_attempts": [
     {
       "workflow_run": 32579887862,
@@ -54,10 +54,16 @@
       "estimated_spend_rub": null,
       "result": "Sol-only run reached both probe and full Responses generation but neither exposed token usage through the known wrapper paths",
       "reason": "Admission passed at a 27.807425 RUB conservative upper bound. The prior fallback allowed the real benchmark call after a usage-less probe; the live response also omitted discoverable usage, so no cognition score is valid and the actual run spend is UNKNOWN/unreconciled. The reported 1.729071 RUB was a conservative synthetic probe reservation, not a verified provider receipt."
+    },
+    {
+      "workflow_run": 32605102169,
+      "estimated_spend_rub": null,
+      "result": "fail-closed Sol tiny probe returned an HTTP-2xx error-only Responses envelope; full benchmark request was blocked",
+      "reason": "Runtime admission passed, but the tiny probe response had only the top-level key error, no request id and no discoverable token usage. The v5 sanitizer handled only object-valued errors, so the scalar/non-object provider error could not yet be classified safely. No 80K-class Sol benchmark request was made."
     }
   ],
   "confirmed_observed_experiment_spend_rub": 44.088727,
-  "unreconciled_runs": [32586356270, 32602626623],
+  "unreconciled_runs": [32586356270, 32602626623, 32605102169],
   "models": [
     "z-ai/glm-5.2",
     "deepseek/deepseek-v4-pro-0813",
@@ -81,18 +87,18 @@
     "reasoning_fields_must_never_be_used_as_candidate_trace": true
   },
   "probe_policy": {
-    "purpose": "tiny Responses transport/accounting capability gate before any further 80K-class Sol benchmark request",
+    "purpose": "tiny Responses error-classification and accounting gate before any full Sol benchmark request",
     "max_output_tokens": 4,
     "visible_final_text_required": false,
     "usage_required_before_live_call": true,
-    "usage_discovery": "recursively search nested response objects for input/prompt and output/completion token counters instead of assuming only top-level/data/response/result usage",
-    "missing_usage_behavior": "stop before the full benchmark call, mark spend UNKNOWN/unreconciled, and retain only safe key structure/request identifiers; never invent token measurements"
+    "error_handling": "any object or scalar error envelope stops before the full benchmark; retain HTTP status, safe type/code/param/status fields, hash/length and allowlisted integration markers only",
+    "missing_usage_behavior": "stop before the full benchmark call and mark spend UNKNOWN/unreconciled unless exact usage is present"
   },
   "accounting_policy": {
     "successful_live_envelope": "record exact recursively discovered usage and estimated cost before visible-final-text parsing",
-    "probe_without_discoverable_usage": "do not proceed to the full benchmark call",
-    "api_error_without_usage": "retain sanitized type/code/param/status only and fail; do not retain provider message or reasoning",
-    "unreconciled_prior_runs": "32586356270 and 32602626623 remain UNKNOWN until independent RouterAI billing evidence is available"
+    "error_envelope": "never proceed to full benchmark; account exact usage if the error envelope exposes it, otherwise keep run spend UNKNOWN/unreconciled",
+    "arbitrary_error_text": "never retain raw provider error strings; retain only SHA-256, length and allowlisted diagnostic markers",
+    "unreconciled_prior_runs": "32586356270, 32602626623 and 32605102169 remain UNKNOWN until independent RouterAI billing evidence is available"
   },
   "model_replacements": {
     "moonshotai/kimi-k2.6": {
@@ -108,11 +114,11 @@
     "gating": false,
     "reuse_policy": "not part of the five-model paid matrix"
   },
-  "scope": "freeze and reuse all four existing scored observations; issue only a tiny Sol Responses probe first; proceed to the full Sol benchmark request in the same run only if exact token usage is discoverable; never repurchase Qwen, GLM, DeepSeek or Kimi for this transport repair",
+  "scope": "freeze and reuse all four scored observations; issue only a tiny Sol Responses probe; classify error-only envelopes without retaining arbitrary text; proceed to the full Sol benchmark request only if the probe returns no API error and exposes exact token usage; never repurchase Qwen, GLM, DeepSeek or Kimi",
   "architecture_sha": "db18fcbc0a50d96af4e747db0ec2df10ca79f64c",
   "architecture_snapshot_policy": "retain the same canonical ACCB-DEV-001 snapshot used by the first four scores so a later fifth score remains directly comparable; A/B/C/D expansion is a later preregistered tranche",
   "provider_policy": "pin the OpenAI endpoint tag; allow_fallbacks=false; record actual provider metadata returned by RouterAI",
-  "transport_policy": "GPT-5.6 Sol follows the live endpoint-declared Responses transport; only visible final-answer fields may become candidate output; provider reasoning/thinking is never retained",
-  "admission_policy": "Sol must expose a healthy Responses endpoint >=128K and positive parseable pricing; the existing <=100 RUB upper bound remains, but the tiny probe additionally gates whether the expensive live request is permitted at all",
+  "transport_policy": "GPT-5.6 Sol follows the runtime endpoint-declared Responses transport; only visible final-answer fields may become candidate output; provider reasoning/thinking and arbitrary provider error text are never retained",
+  "admission_policy": "Sol must expose a healthy Responses endpoint >=128K and positive parseable pricing; the existing <=100 RUB upper bound remains, and the tiny probe must return no error plus exact token usage before any expensive live request is permitted",
   "scientific_boundary": "fifth-model low-context calibration/integration evidence only; no universal ECC/AMCE threshold inference"
 }
