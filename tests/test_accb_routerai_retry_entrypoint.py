@@ -116,12 +116,13 @@ def test_responses_retry_accepts_nested_routerai_envelope(monkeypatch) -> None:
 
 
 def test_retry_never_uses_reasoning_content_as_final_answer() -> None:
+    sentinel = "SENSITIVE_SENTINEL_4713"
     body = {
         "choices": [
             {
                 "message": {
                     "content": "",
-                    "reasoning_content": "private chain of thought that must not become benchmark output",
+                    "reasoning_content": sentinel,
                 }
             }
         ],
@@ -133,5 +134,6 @@ def test_retry_never_uses_reasoning_content_as_final_answer() -> None:
         message = str(exc)
     else:
         raise AssertionError("reasoning-only body must not be accepted as a final answer")
-    assert "private chain" not in message
-    assert "reasoning_content" in message
+    assert sentinel not in message
+    assert "reasoning_content" not in message
+    assert "no visible final text" in message
