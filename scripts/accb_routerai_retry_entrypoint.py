@@ -33,7 +33,7 @@ TRIGGER_PATH = Path("docs/research/ACCB_ROUTERAI_LIVE_TRIGGER_2026-08-22.json")
 SOL_MODEL = "openai/gpt-5.6-sol"
 SOL_RETRY_MODELS = [SOL_MODEL]
 SOL_SOURCE_RUN = 32595531554
-SOL_PREVIOUS_USAGELESS_RUN = 32612005192
+SOL_PREVIOUS_USAGELESS_RUN = 32618857912
 SOL_MAX_OUTPUT_TOKENS = RETRY_MAX_OUTPUT_TOKENS
 SOL_RESPONSES_OUTPUT_LIMIT_KEY = "max_output_tokens"
 SOL_RESPONSES_STRUCTURED_OUTPUT_KEY = "text.format"
@@ -292,8 +292,12 @@ def _normalize_sol_responses(raw: dict[str, Any], *, live_call: bool) -> dict[st
 
 
 def _sol_responses_generation_controls(endpoint: dict[str, Any], *, live_call: bool) -> dict[str, Any]:
-    """Translate shared Chat-style controls to the native Responses wire contract."""
+    """Translate shared Chat/proxy controls to the provider-native Responses wire contract."""
     controls = dict(_impl._common_generation_controls(endpoint, live_call=live_call))
+    # RouterAI advertises include_reasoning as a generic model control, but the
+    # native OpenAI Responses request contract uses `reasoning` and has no
+    # top-level `include_reasoning` request field. Never forward that proxy key.
+    controls.pop("include_reasoning", None)
     response_format = controls.pop("response_format", None)
     if response_format is not None:
         controls["text"] = {"format": response_format}
@@ -424,7 +428,7 @@ def _finalize_sol_metadata(result_path: Path) -> None:
     if not result_path.exists():
         return
     payload = json.loads(result_path.read_text(encoding="utf-8"))
-    payload["schema_version"] = "1.1-sol-native-text-format"
+    payload["schema_version"] = "1.2-sol-native-reasoning-contract"
     payload["retry_scope"] = "sol-only"
     payload["retry_of_run"] = SOL_PREVIOUS_USAGELESS_RUN
     payload["source_calibration_runs"] = [32584584044, SOL_SOURCE_RUN]
@@ -433,9 +437,11 @@ def _finalize_sol_metadata(result_path: Path) -> None:
     payload["responses_request_adapter"] = {
         "output_limit_key": SOL_RESPONSES_OUTPUT_LIMIT_KEY,
         "structured_output_key": SOL_RESPONSES_STRUCTURED_OUTPUT_KEY,
+        "reasoning_key": "reasoning.effort",
+        "include_reasoning_top_level_omitted": True,
         "routerai_catalog_declared_output_limit_key": "max_tokens",
         "routerai_catalog_declared_structured_output_key": "response_format",
-        "provider_native_contract": "OpenAI Responses API max_output_tokens + text.format",
+        "provider_native_contract": "OpenAI Responses API max_output_tokens + text.format + reasoning.effort; no top-level include_reasoning",
         "provider_pin_preserved": True,
         "null_error_semantics": "error:null is a no-error sentinel; only non-null error values are fail-closed",
     }
@@ -511,6 +517,7 @@ def _finalize_sol_metadata(result_path: Path) -> None:
             manifest["api_transport"] = endpoint.get("api_transport")
             manifest["responses_output_limit_key"] = SOL_RESPONSES_OUTPUT_LIMIT_KEY
             manifest["responses_structured_output_key"] = SOL_RESPONSES_STRUCTURED_OUTPUT_KEY
+            manifest["responses_include_reasoning_sent"] = False
             manifest["responses_null_error_is_error"] = False
 
     known = _known_cost_from_payload(payload)
