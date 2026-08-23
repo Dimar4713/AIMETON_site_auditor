@@ -56,7 +56,17 @@ jobs:
           unset AUTH_HEADER
           git checkout --detach --force FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
-          python3 -m py_compile scripts/accb_routerai_readonly_census.py
+          test -f scripts/accb_layer_b_no_paid_contract.py
+          python3 -m py_compile \
+            scripts/accb_layer_b_no_paid_contract.py \
+            scripts/accb_routerai_readonly_census.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, 'scripts')
+          import accb_layer_b_no_paid_contract as contract
+          assert contract.ARCHITECTURE_NO_PAID_MERGE_SHA == 'e8bdddf17cefad5304725567c2e4270aa5990442'
+          print('token/seed no-paid prerequisite verified')
+          PY
 
       - name: Execute fresh GET-only endpoint census
         shell: bash
