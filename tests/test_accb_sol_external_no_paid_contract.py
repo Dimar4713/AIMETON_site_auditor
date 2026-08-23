@@ -137,7 +137,7 @@ def test_external_contract_rejects_invalid_token_fit_before_provider_admission()
     bad = _receipt()
     bad["actual_L_model_input"] = 32000
 
-    with pytest.raises(external.ExternalSolContractError):
+    with pytest.raises(external.ContractError):
         external.build_openrouter_responses_contract(
             input_items=_input(),
             token_fit_receipt=bad,
