@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -61,13 +62,27 @@ def get_json(url: str, timeout: int = 60) -> dict[str, Any]:
     req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            raw = response.read().decode("utf-8")
+            raw_bytes = response.read()
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:500]
-        raise CensusError(f"endpoint GET failed: HTTP {exc.code}: {detail}") from exc
+        detail = exc.read()
+        raise CensusError(
+            f"endpoint GET failed: HTTP {exc.code}; body_bytes={len(detail)}; "
+            f"body_sha256={hashlib.sha256(detail).hexdigest()}"
+        ) from exc
     except urllib.error.URLError as exc:
-        raise CensusError(f"endpoint GET transport failure: {exc}") from exc
-    value = json.loads(raw)
+        reason = getattr(exc, "reason", None)
+        raise CensusError(
+            f"endpoint GET transport failure: reason_type={type(reason).__name__}"
+        ) from exc
+
+    raw = raw_bytes.decode("utf-8", errors="replace")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CensusError(
+            f"endpoint GET returned invalid JSON: body_bytes={len(raw_bytes)}; "
+            f"body_sha256={hashlib.sha256(raw_bytes).hexdigest()}"
+        ) from exc
     if not isinstance(value, dict):
         raise CensusError("endpoint GET returned non-object JSON")
     return value
@@ -205,6 +220,28 @@ def price_endpoint(endpoint: dict[str, Any]) -> dict[str, Any]:
     return {"anchors": rows, "model_total_rub": round(total, 6)}
 
 
+def _base_receipt(status: str) -> dict[str, Any]:
+    return {
+        "schema_version": "0.2-failure-observable",
+        "status": status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "site_auditor_sha": os.getenv("GITHUB_SHA"),
+        "architecture_prereg_merge_sha": ARCHITECTURE_PREREG_MERGE_SHA,
+        "architecture_no_paid_assembly_merge_sha": ARCHITECTURE_NO_PAID_ASSEMBLY_MERGE_SHA,
+        "models": [],
+        "anchors_tokens_nominal": ANCHORS,
+        "max_output_tokens_per_cell": MAX_OUTPUT_TOKENS,
+        "planned_cells": len(MODELS) * len(ANCHORS),
+        "whole_tranche_conservative_estimate_rub": None,
+        "pricing_policy": "prompt-threshold only above threshold; highest advertised time-of-day rate; no cache discount; unknown variable pricing fails closed",
+        "http_methods": ["GET"],
+        "routerai_authorization_header_sent": False,
+        "provider_generations_performed": 0,
+        "paid_spend_authorized_rub": 0,
+        "scientific_boundary": "Pricing/capability admission evidence only; no cognition score or ECC/AMCE threshold inference.",
+    }
+
+
 def census(fetcher=get_json) -> dict[str, Any]:
     model_rows: list[dict[str, Any]] = []
     total = 0.0
@@ -220,25 +257,36 @@ def census(fetcher=get_json) -> dict[str, Any]:
             "seed_advertised_fresh": "seed" in endpoint["supported_parameters"],
             "estimate": estimate,
         })
-    return {
-        "schema_version": "0.1",
-        "status": "FRESH_READ_ONLY_CENSUS",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "site_auditor_sha": os.getenv("GITHUB_SHA"),
-        "architecture_prereg_merge_sha": ARCHITECTURE_PREREG_MERGE_SHA,
-        "architecture_no_paid_assembly_merge_sha": ARCHITECTURE_NO_PAID_ASSEMBLY_MERGE_SHA,
-        "models": model_rows,
-        "anchors_tokens_nominal": ANCHORS,
-        "max_output_tokens_per_cell": MAX_OUTPUT_TOKENS,
-        "planned_cells": len(MODELS) * len(ANCHORS),
-        "whole_tranche_conservative_estimate_rub": round(total, 6),
-        "pricing_policy": "prompt-threshold only above threshold; highest advertised time-of-day rate; no cache discount; unknown variable pricing fails closed",
-        "http_methods": ["GET"],
-        "routerai_authorization_header_sent": False,
-        "provider_generations_performed": 0,
-        "paid_spend_authorized_rub": 0,
-        "scientific_boundary": "Pricing/capability admission evidence only; no cognition score or ECC/AMCE threshold inference.",
-    }
+    result = _base_receipt("FRESH_READ_ONLY_CENSUS")
+    result["models"] = model_rows
+    result["whole_tranche_conservative_estimate_rub"] = round(total, 6)
+    return result
+
+
+def failure_receipt(exc: BaseException) -> dict[str, Any]:
+    result = _base_receipt("FRESH_READ_ONLY_CENSUS_FAILED")
+    if isinstance(exc, CensusError):
+        result["failure"] = {
+            "error_type": type(exc).__name__,
+            "safe_message": str(exc)[:1000],
+        }
+    else:
+        raw = repr(exc).encode("utf-8", errors="replace")
+        result["failure"] = {
+            "error_type": type(exc).__name__,
+            "safe_message": "unexpected internal census failure; raw exception not retained",
+            "exception_repr_bytes": len(raw),
+            "exception_repr_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+    return result
+
+
+def _write_result(result: dict[str, Any], output: Path | None) -> None:
+    text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8")
+    print(text, end="")
 
 
 def main() -> int:
@@ -246,13 +294,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    result = census()
-    text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(text, encoding="utf-8")
-    print(text, end="")
-    return 0
+    try:
+        result = census()
+        rc = 0
+    except BaseException as exc:
+        result = failure_receipt(exc)
+        rc = 2
+    _write_result(result, args.output)
+    return rc
 
 
 if __name__ == "__main__":

@@ -75,6 +75,74 @@ jobs:
           cd "$WORKDIR"
           env -u ROUTERAI_API_KEY python3 scripts/accb_routerai_readonly_census.py --output "$RESULT_PATH"
 
+      - name: Publish sanitized failure receipt
+        if: failure()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - "$RESULT_PATH" "$EVIDENCE_ISSUE" "$REQUESTED_SHA" <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          issue = int(sys.argv[2])
+          requested_sha = sys.argv[3]
+          if path.is_file():
+              result = json.loads(path.read_text(encoding='utf-8'))
+          else:
+              result = {
+                  'schema_version': '0.2-failure-observable',
+                  'status': 'READ_ONLY_CENSUS_WORKFLOW_FAILED_BEFORE_RECEIPT',
+                  'site_auditor_sha': requested_sha,
+                  'http_methods': ['GET'],
+                  'routerai_authorization_header_sent': False,
+                  'provider_generations_performed': 0,
+                  'paid_spend_authorized_rub': 0,
+                  'failure': {
+                      'error_type': 'workflow_stage_failure',
+                      'safe_message': 'workflow failed before a census receipt could be materialized; inspect job steps for local CI/infrastructure failure',
+                  },
+              }
+          compact = {
+              'schema_version': result.get('schema_version'),
+              'status': result.get('status'),
+              'site_auditor_sha': result.get('site_auditor_sha') or requested_sha,
+              'http_methods': result.get('http_methods', ['GET']),
+              'routerai_authorization_header_sent': result.get('routerai_authorization_header_sent', False),
+              'provider_generations_performed': result.get('provider_generations_performed', 0),
+              'paid_spend_authorized_rub': result.get('paid_spend_authorized_rub', 0),
+              'failure': result.get('failure'),
+          }
+          body = (
+              '## ACCB read-only census failure receipt\n\n'
+              f"- workflow run: `{os.environ.get('GITHUB_RUN_ID')}`\n"
+              f"- exact Site Auditor SHA: `{compact['site_auditor_sha']}`\n"
+              '- RouterAI generation calls: `0`\n'
+              '- authorized spend: `0 RUB`\n'
+              '- admission result: **FAIL-CLOSED**\n\n'
+              '```json\n' + json.dumps(compact, ensure_ascii=False, indent=2) + '\n```\n'
+          )
+          repo = os.environ['GITHUB_REPOSITORY']
+          url = f'https://api.github.com/repos/{repo}/issues/{issue}/comments'
+          data = json.dumps({'body': body}, ensure_ascii=False).encode('utf-8')
+          req = urllib.request.Request(
+              url,
+              data=data,
+              method='POST',
+              headers={
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as response:
+              assert response.status in {200, 201}
+          PY
+
       - name: Enforce zero-generation census contract
         shell: bash
         run: |
