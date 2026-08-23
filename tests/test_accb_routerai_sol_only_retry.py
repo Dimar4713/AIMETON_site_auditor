@@ -70,6 +70,11 @@ def test_safe_usage_diagnostic_never_retains_text_or_reasoning_values() -> None:
     assert "$.meta.usage" in encoded
 
 
+def test_null_error_sentinel_is_not_an_error() -> None:
+    assert retry._safe_error_descriptor({"error": None}, http_status=200) is None
+    assert retry._safe_error_descriptor({"id": "resp_ok"}, http_status=200) is None
+
+
 def test_safe_scalar_error_descriptor_hashes_text_and_keeps_only_allowlisted_markers() -> None:
     raw_text = "invalid_request: unsupported max_tokens; use max_output_tokens; secret-detail-123"
     descriptor = retry._safe_error_descriptor({"error": raw_text}, http_status=200)
@@ -110,7 +115,7 @@ def test_safe_object_error_descriptor_uses_existing_allowlisted_fields_without_m
     assert descriptor["http_status"] == 200
 
 
-def test_sol_responses_adapter_uses_provider_native_max_output_tokens(monkeypatch) -> None:
+def test_sol_responses_adapter_accepts_null_error_with_exact_usage(monkeypatch) -> None:
     retry._SOL_SAFE_ERROR_DIAGNOSTIC = None
     retry._SOL_MISSING_USAGE_DIAGNOSTIC = None
     retry._SOL_ERROR_RECEIPT = None
@@ -119,8 +124,9 @@ def test_sol_responses_adapter_uses_provider_native_max_output_tokens(monkeypatc
     def fake_http_json(*args, **kwargs):
         calls.append(kwargs.get("payload") or {})
         return 200, {
+            "error": None,
             "id": "resp_probe",
-            "usage": {"input_tokens": 10, "output_tokens": 1, "total_tokens": 11},
+            "usage": {"input_tokens": 475, "output_tokens": 5, "total_tokens": 480},
             "output": [],
         }, 0.1
 
@@ -134,11 +140,12 @@ def test_sol_responses_adapter_uses_provider_native_max_output_tokens(monkeypatc
         timeout=30,
     )
     assert elapsed == 0.1
-    assert retry._sol_usage(body) == (10, 1, 11)
+    assert retry._sol_usage(body) == (475, 5, 480)
     assert len(calls) == 1
     assert calls[0]["max_output_tokens"] == 4
     assert "max_tokens" not in calls[0]
     assert calls[0]["provider"] == {"only": ["openai"], "allow_fallbacks": False}
+    assert retry._SOL_SAFE_ERROR_DIAGNOSTIC is None
 
 
 def test_probe_error_only_envelope_fails_before_usage_path_and_never_becomes_missing_usage(monkeypatch) -> None:
@@ -174,7 +181,7 @@ def test_probe_error_only_envelope_fails_before_usage_path_and_never_becomes_mis
 def test_probe_without_recursive_usage_fails_closed_before_live() -> None:
     retry._SOL_MISSING_USAGE_DIAGNOSTIC = None
     body = retry._normalize_sol_responses(
-        {"id": "resp_probe", "output": []},
+        {"id": "resp_probe", "error": None, "output": []},
         live_call=False,
     )
     assert body["_sol_usage_missing"] is True
@@ -187,6 +194,7 @@ def test_nested_probe_usage_is_normalized_without_visible_text_requirement() -> 
     retry._SOL_MISSING_USAGE_DIAGNOSTIC = None
     body = retry._normalize_sol_responses(
         {
+            "error": None,
             "id": "resp_probe",
             "data": {"meta": {"usage": {"input_tokens": 567, "output_tokens": 4}}},
             "output": [],
@@ -203,6 +211,7 @@ def test_sol_chat_captures_nested_live_usage_before_visible_parse(monkeypatch) -
     retry._SOL_SAFE_ERROR_DIAGNOSTIC = None
 
     raw = {
+        "error": None,
         "id": "resp_live",
         "model": retry.SOL_MODEL,
         "provider": "OpenAI",
@@ -281,6 +290,7 @@ def test_finalize_marks_missing_usage_spend_unknown_not_zero(tmp_path: Path) -> 
     assert final["confirmed_accounted_spend_rub"] == 0.0
     assert final["safe_usage_diagnostic"]["request_ids"][0]["value"] == "resp_missing"
     assert final["responses_request_adapter"]["output_limit_key"] == "max_output_tokens"
+    assert final["responses_request_adapter"]["null_error_semantics"].startswith("error:null")
 
 
 def test_finalize_marks_error_only_probe_unknown_without_inventing_cost(tmp_path: Path) -> None:
