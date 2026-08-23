@@ -18,6 +18,7 @@ import accb_routerai_retry_entrypoint as retry
 def test_sol_retry_is_exactly_one_model_and_freezes_four_scores() -> None:
     assert retry.SOL_RETRY_MODELS == ["openai/gpt-5.6-sol"]
     assert retry.SOL_MAX_OUTPUT_TOKENS == 8192
+    assert retry.SOL_RESPONSES_OUTPUT_LIMIT_KEY == "max_output_tokens"
     assert set(retry.FOUR_MODEL_EVIDENCE) == {
         "qwen/qwen3.7-plus",
         "z-ai/glm-5.2",
@@ -109,6 +110,37 @@ def test_safe_object_error_descriptor_uses_existing_allowlisted_fields_without_m
     assert descriptor["http_status"] == 200
 
 
+def test_sol_responses_adapter_uses_provider_native_max_output_tokens(monkeypatch) -> None:
+    retry._SOL_SAFE_ERROR_DIAGNOSTIC = None
+    retry._SOL_MISSING_USAGE_DIAGNOSTIC = None
+    retry._SOL_ERROR_RECEIPT = None
+    calls: list[dict] = []
+
+    def fake_http_json(*args, **kwargs):
+        calls.append(kwargs.get("payload") or {})
+        return 200, {
+            "id": "resp_probe",
+            "usage": {"input_tokens": 10, "output_tokens": 1, "total_tokens": 11},
+            "output": [],
+        }, 0.1
+
+    monkeypatch.setattr(pilot, "http_json", fake_http_json)
+    body, elapsed = retry._sol_chat(
+        "secret",
+        retry.SOL_MODEL,
+        {"api_transport": "responses", "tag": "openai", "supported_parameters": ["max_tokens"]},
+        [{"role": "user", "content": "probe"}],
+        max_tokens=4,
+        timeout=30,
+    )
+    assert elapsed == 0.1
+    assert retry._sol_usage(body) == (10, 1, 11)
+    assert len(calls) == 1
+    assert calls[0]["max_output_tokens"] == 4
+    assert "max_tokens" not in calls[0]
+    assert calls[0]["provider"] == {"only": ["openai"], "allow_fallbacks": False}
+
+
 def test_probe_error_only_envelope_fails_before_usage_path_and_never_becomes_missing_usage(monkeypatch) -> None:
     retry._SOL_SAFE_ERROR_DIAGNOSTIC = None
     retry._SOL_MISSING_USAGE_DIAGNOSTIC = None
@@ -117,7 +149,7 @@ def test_probe_error_only_envelope_fails_before_usage_path_and_never_becomes_mis
 
     def fake_http_json(*args, **kwargs):
         calls.append(kwargs.get("payload") or {})
-        return 200, {"error": "invalid_request unsupported max_tokens; use max_output_tokens"}, 0.1
+        return 200, {"error": "invalid_request provider failure secret-detail-123"}, 0.1
 
     monkeypatch.setattr(pilot, "http_json", fake_http_json)
     with pytest.raises(pilot.IntegrationError, match="sanitized API error envelope") as excinfo:
@@ -130,12 +162,13 @@ def test_probe_error_only_envelope_fails_before_usage_path_and_never_becomes_mis
             timeout=30,
         )
     assert len(calls) == 1
-    assert "max_output_tokens" not in calls[0]
+    assert calls[0]["max_output_tokens"] == 4
+    assert "max_tokens" not in calls[0]
     assert retry._SOL_MISSING_USAGE_DIAGNOSTIC is None
     assert retry._SOL_SAFE_ERROR_DIAGNOSTIC is not None
     safe = retry._SOL_SAFE_ERROR_DIAGNOSTIC["safe_error"]
-    assert set(safe["safe_markers"]) >= {"invalid_request", "unsupported", "max_tokens", "max_output_tokens"}
-    assert "invalid_request unsupported max_tokens; use max_output_tokens" not in str(excinfo.value)
+    assert set(safe["safe_markers"]) >= {"invalid_request", "provider"}
+    assert "secret-detail-123" not in str(excinfo.value)
 
 
 def test_probe_without_recursive_usage_fails_closed_before_live() -> None:
@@ -247,6 +280,7 @@ def test_finalize_marks_missing_usage_spend_unknown_not_zero(tmp_path: Path) -> 
     assert row["usage_accounting_status"] == "UNKNOWN/unreconciled"
     assert final["confirmed_accounted_spend_rub"] == 0.0
     assert final["safe_usage_diagnostic"]["request_ids"][0]["value"] == "resp_missing"
+    assert final["responses_request_adapter"]["output_limit_key"] == "max_output_tokens"
 
 
 def test_finalize_marks_error_only_probe_unknown_without_inventing_cost(tmp_path: Path) -> None:
