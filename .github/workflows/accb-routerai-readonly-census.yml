@@ -101,6 +101,8 @@ jobs:
               assert row['tag']
               assert row['transport'] in {'chat', 'responses'}
               assert row['context_length'] >= 524288 + 8192
+              max_completion = row['max_completion_tokens']
+              assert max_completion is None or max_completion >= 8192
               assert set(row['estimate']['anchors']) == {'32768', '131072', '524288'}
           print(json.dumps({'zero_generation_contract': 'PASS', 'whole_tranche_conservative_estimate_rub': estimate}, sort_keys=True))
           PY
@@ -142,6 +144,7 @@ jobs:
                       'transport': row['transport'],
                       'context_length': row['context_length'],
                       'max_prompt_tokens': row['max_prompt_tokens'],
+                      'max_completion_tokens': row['max_completion_tokens'],
                       'seed_advertised_fresh': row['seed_advertised_fresh'],
                       'estimate': row['estimate'],
                   }
