@@ -1,5 +1,5 @@
 {
-  "schema_version": "2.0",
+  "schema_version": "2.1",
   "status": "owner_authorized",
   "date": "2026-08-23",
   "architecture_issue": "Dimar4713/aimeton-architecture#132",
@@ -7,11 +7,11 @@
   "pr_governance_relation": "Part of #798",
   "approved_routerai_balance_rub": 10000,
   "micro_gate_ceiling_rub": 100,
-  "retry_sequence": 11,
+  "retry_sequence": 12,
   "execution_mode": "retry-failed-three",
   "retry_scope": "sol-only",
   "workflow_compatibility_note": "The governed workflow keeps the historical retry-failed-three dispatch branch; the retry entrypoint narrows execution to one Sol model and overrides downstream evidence metadata to expected_models=1.",
-  "transport_adapter_version": "routerai-responses-v8-null-error-sentinel",
+  "transport_adapter_version": "routerai-responses-v9-native-text-format",
   "prior_attempts": [
     {
       "workflow_run": 32579887862,
@@ -65,16 +65,22 @@
       "workflow_run": 32605965700,
       "estimated_spend_rub": null,
       "result": "sanitized tiny probe classified the Responses failure as invalid_request involving max_tokens/provider; full benchmark request was blocked",
-      "reason": "Runtime error fingerprint: HTTP 200 wrapper, scalar error length 400, SHA-256 58cda13c0c013d44a48281ec2b702b783b2434c78e37935b9e0e07e11d15c843, safe markers invalid_request/max_tokens/provider, and no discoverable usage. RouterAI's Sol catalog advertises max_tokens for /responses, while the OpenAI Responses provider contract uses max_output_tokens. The v7 adapter therefore translates only the Responses output-limit key while preserving the strict OpenAI provider pin."
+      "reason": "Runtime error fingerprint: HTTP 200 wrapper, scalar error length 400, SHA-256 58cda13c0c013d44a48281ec2b702b783b2434c78e37935b9e0e07e11d15c843, safe markers invalid_request/max_tokens/provider, and no discoverable usage. RouterAI's Sol catalog advertises max_tokens for /responses, while the OpenAI Responses provider contract uses max_output_tokens."
     },
     {
       "workflow_run": 32607116585,
       "estimated_spend_rub": 0.107797,
       "result": "provider-native max_output_tokens repair succeeded: tiny Sol probe returned exact usage but harness misclassified error:null as an API error; full benchmark request was blocked",
-      "reason": "The pinned OpenAI Responses probe returned HTTP 200 with exact usage: 475 prompt tokens and 5 completion/output tokens, estimated cost 0.107797 RUB. The previous invalid_request/max_tokens failure disappeared. The only remaining gate failure was local parser semantics: the response carried a nullable error:null sentinel and v7 treated key presence as an error. No full 80K-class Sol benchmark request was made."
+      "reason": "The pinned OpenAI Responses probe returned HTTP 200 with exact usage: 475 prompt tokens and 5 completion/output tokens, estimated cost 0.107797 RUB. The previous invalid_request/max_tokens failure disappeared. The only remaining gate failure was local parser semantics: the response carried a nullable error:null sentinel."
+    },
+    {
+      "workflow_run": 32612005192,
+      "estimated_spend_rub": 0.107797,
+      "result": "tiny Sol probe passed max_output_tokens and error:null gates; full request was blocked by Chat-style response_format on native Responses API",
+      "reason": "Admission passed at 27.807425 RUB. The tiny pinned OpenAI probe again returned exact 475 prompt + 5 output tokens at 0.107797 RUB. The full request failed before billable usage with sanitized markers invalid_request/unsupported_parameter/unsupported/response_format/provider. Native OpenAI Responses structured output uses text.format, so the v9 adapter translates only that wire control while preserving provider pinning, accounting and fail-closed behavior."
     }
   ],
-  "confirmed_observed_experiment_spend_rub": 44.196524,
+  "confirmed_observed_experiment_spend_rub": 44.304321,
   "unreconciled_runs": [32586356270, 32602626623, 32605102169, 32605965700],
   "models": [
     "z-ai/glm-5.2",
@@ -98,34 +104,39 @@
     "raw_provider_reasoning_saved": false,
     "reasoning_fields_must_never_be_used_as_candidate_trace": true
   },
-  "transport_contract_conflict": {
-    "runtime_evidence_run": 32605965700,
-    "runtime_safe_markers": ["invalid_request", "max_tokens", "provider"],
-    "routerai_catalog_declared_responses_limit_key": "max_tokens",
-    "openai_provider_native_responses_limit_key": "max_output_tokens",
-    "repair": "translate max_tokens semantic limit to max_output_tokens only on the Sol Responses wire payload",
-    "provider_selection_changed": false,
-    "repair_verified_by_run": 32607116585
-  },
-  "nullable_error_contract": {
-    "runtime_evidence_run": 32607116585,
-    "observed_http_status": 200,
-    "observed_error_value": null,
-    "exact_probe_usage": {"prompt_tokens": 475, "completion_tokens": 5, "estimated_cost_rub": 0.107797},
-    "semantics": "error:null is absence of an API error; only non-null error values are fail-closed"
+  "responses_transport_repairs": {
+    "output_limit": {
+      "runtime_evidence_run": 32605965700,
+      "routerai_catalog_key": "max_tokens",
+      "provider_native_key": "max_output_tokens",
+      "verified_by_run": 32607116585
+    },
+    "nullable_error": {
+      "runtime_evidence_run": 32607116585,
+      "semantics": "error:null is absence of API error; only non-null error values are fail-closed",
+      "verified_by_run": 32612005192
+    },
+    "structured_output": {
+      "runtime_evidence_run": 32612005192,
+      "runtime_safe_markers": ["invalid_request", "unsupported_parameter", "unsupported", "response_format", "provider"],
+      "routerai_catalog_key": "response_format",
+      "provider_native_key": "text.format",
+      "repair": "translate {response_format:{type:json_object}} into {text:{format:{type:json_object}}} only on the Sol Responses live wire payload",
+      "provider_selection_changed": false
+    }
   },
   "probe_policy": {
     "purpose": "tiny Responses transport/accounting gate before any full Sol benchmark request",
     "max_output_tokens": 4,
     "visible_final_text_required": false,
     "usage_required_before_live_call": true,
-    "error_handling": "missing error key or error:null is non-error; any non-null object/scalar/list error stops before the full benchmark and is sanitized",
+    "structured_output_controls": "disabled on probe",
+    "error_handling": "missing error key or error:null is non-error; any non-null object/scalar/list error stops and is sanitized",
     "missing_usage_behavior": "stop before the full benchmark call and mark spend UNKNOWN/unreconciled unless exact usage is present"
   },
   "accounting_policy": {
     "successful_live_envelope": "record exact recursively discovered usage and estimated cost before visible-final-text parsing",
-    "error_envelope": "non-null errors never proceed to full benchmark; account exact usage if exposed, otherwise keep spend UNKNOWN/unreconciled",
-    "nullable_error_sentinel": "error:null does not override otherwise exact usage and does not itself block the benchmark",
+    "error_envelope": "non-null errors never proceed to scoring; account exact usage if exposed, otherwise keep spend UNKNOWN/unreconciled",
     "arbitrary_error_text": "never retain raw provider error strings; retain only SHA-256, length and allowlisted diagnostic markers",
     "unreconciled_prior_runs": "32586356270, 32602626623, 32605102169 and 32605965700 remain UNKNOWN until independent RouterAI billing evidence is available"
   },
@@ -143,11 +154,11 @@
     "gating": false,
     "reuse_policy": "not part of the five-model paid matrix"
   },
-  "scope": "freeze and reuse all four scored observations; reuse the now-verified Sol Responses max_output_tokens wire adapter; treat error:null as a no-error sentinel; issue one tiny Sol probe first; proceed to the full Sol benchmark only if the probe has no non-null API error and exact token usage; never repurchase Qwen, GLM, DeepSeek or Kimi",
+  "scope": "freeze/reuse all four scored observations; issue one tiny Sol probe first; use OpenAI-native max_output_tokens and text.format on Responses; proceed to the full Sol benchmark only after clean exact-usage probe; never repurchase Qwen, GLM, DeepSeek or Kimi",
   "architecture_sha": "db18fcbc0a50d96af4e747db0ec2df10ca79f64c",
   "architecture_snapshot_policy": "retain the same canonical ACCB-DEV-001 snapshot used by the first four scores so a later fifth score remains directly comparable; A/B/C/D expansion is a later preregistered tranche",
   "provider_policy": "pin the OpenAI endpoint tag; allow_fallbacks=false; record actual provider metadata returned by RouterAI",
-  "transport_policy": "GPT-5.6 Sol follows the runtime endpoint-declared Responses transport; use OpenAI-native max_output_tokens on the Responses wire; treat error:null as absence of error; only visible final-answer fields may become candidate output; provider reasoning/thinking and arbitrary provider error text are never retained",
-  "admission_policy": "Sol must expose a healthy Responses endpoint >=128K and positive parseable pricing; the existing <=100 RUB upper bound remains, and the tiny probe must return no non-null error plus exact token usage before any expensive live request is permitted",
+  "transport_policy": "GPT-5.6 Sol follows the runtime endpoint-declared Responses transport; native wire uses max_output_tokens and text.format; only visible final-answer fields may become candidate output; provider reasoning/thinking and arbitrary provider error text are never retained",
+  "admission_policy": "Sol must expose a healthy Responses endpoint >=128K and positive parseable pricing; existing <=100 RUB upper bound remains; tiny probe must return no non-null error plus exact token usage before the expensive live request",
   "scientific_boundary": "fifth-model low-context calibration/integration evidence only; no universal ECC/AMCE threshold inference"
 }
