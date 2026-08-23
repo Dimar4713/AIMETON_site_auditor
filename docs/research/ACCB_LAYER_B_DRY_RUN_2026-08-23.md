@@ -81,13 +81,16 @@ This is an implementation consistency check against retained pricing, not a live
 
 ## CI and safety contract
 
-`.github/workflows/accb-layer-b-dry-run.yml` runs only local Python/pytest work on the existing self-hosted Site Auditor runner. It contains no RouterAI secret, makes no RouterAI generation request, uses no Marketplace Actions, and asserts in the generated report:
+`Baseline CI` owns unit/regression execution in its isolated Python environment and includes `tests/test_accb_layer_b_dry_run.py`. `.github/workflows/accb-layer-b-dry-run.yml` is deliberately stdlib-only: it compiles the harness, materializes the exact deterministic report and validates the no-provider/no-spend invariants on the existing self-hosted Site Auditor runner. Neither workflow uses Marketplace Actions for this path, and the dedicated dry-run guard requires no RouterAI secret or provider SDK.
 
-- `network_calls_performed = 0`;
+The generated dry-run report must assert:
+
+- `network_calls_performed = 0` for the dry-run harness itself;
 - `routerai_generation_calls_performed = 0`;
 - `spend_authorized_rub = 0`;
 - `planned_calls = 15`;
-- `planning_cost_recomputed_rub = 1001.827382`.
+- `planning_cost_recomputed_rub = 1001.827382`;
+- every context keeps `provider_token_count = null` until provider-exact tokenization is measured.
 
 The existing paid ACCB trigger file `docs/research/ACCB_ROUTERAI_LIVE_TRIGGER_2026-08-22.json` is deliberately untouched, so merging this work cannot activate the historical paid push trigger.
 
