@@ -33,7 +33,7 @@ TRIGGER_PATH = Path("docs/research/ACCB_ROUTERAI_LIVE_TRIGGER_2026-08-22.json")
 SOL_MODEL = "openai/gpt-5.6-sol"
 SOL_RETRY_MODELS = [SOL_MODEL]
 SOL_SOURCE_RUN = 32595531554
-SOL_PREVIOUS_USAGELESS_RUN = 32605965700
+SOL_PREVIOUS_USAGELESS_RUN = 32607116585
 SOL_MAX_OUTPUT_TOKENS = RETRY_MAX_OUTPUT_TOKENS
 SOL_RESPONSES_OUTPUT_LIMIT_KEY = "max_output_tokens"
 SOL_EVIDENCE_LABEL = "ACCB RouterAI Sol-only completion gate"
@@ -212,15 +212,18 @@ def _classify_error_text(text: str) -> dict[str, Any]:
 
 
 def _safe_error_descriptor(body: dict[str, Any], *, http_status: int) -> dict[str, Any] | None:
-    """Sanitize both object and scalar RouterAI `error` envelopes.
+    """Sanitize a non-null RouterAI `error` envelope.
 
-    Never retains an arbitrary provider message. Object errors expose only the
-    existing allowlisted type/code/param/status fields plus a message fingerprint;
-    scalar strings expose only length/hash and known integration markers.
+    RouterAI Responses success envelopes may include the nullable sentinel
+    `"error": null`; that is explicitly absence of an API error and must not
+    block an otherwise accounted probe. Non-null errors remain fail-closed.
+    Arbitrary provider message text is never retained.
     """
     if "error" not in body:
         return None
     error = body.get("error")
+    if error is None:
+        return None
     descriptor: dict[str, Any] = {
         "http_status": http_status,
         "error_value_type": type(error).__name__,
@@ -239,7 +242,7 @@ def _safe_error_descriptor(body: dict[str, Any], *, http_status: int) -> dict[st
         descriptor["error_list_length"] = len(error)
         descriptor["error_item_types"] = sorted({type(item).__name__ for item in error})[:16]
         return descriptor
-    if isinstance(error, (int, float, bool)) or error is None:
+    if isinstance(error, (int, float, bool)):
         return descriptor
     descriptor["error_repr_sha256"] = hashlib.sha256(repr(error).encode("utf-8")).hexdigest()
     return descriptor
@@ -409,7 +412,7 @@ def _finalize_sol_metadata(result_path: Path) -> None:
     if not result_path.exists():
         return
     payload = json.loads(result_path.read_text(encoding="utf-8"))
-    payload["schema_version"] = "0.9-sol-openai-native-output-limit"
+    payload["schema_version"] = "1.0-sol-null-error-sentinel"
     payload["retry_scope"] = "sol-only"
     payload["retry_of_run"] = SOL_PREVIOUS_USAGELESS_RUN
     payload["source_calibration_runs"] = [32584584044, SOL_SOURCE_RUN]
@@ -420,6 +423,7 @@ def _finalize_sol_metadata(result_path: Path) -> None:
         "routerai_catalog_declared_key": "max_tokens",
         "provider_native_contract": "OpenAI Responses API max_output_tokens",
         "provider_pin_preserved": True,
+        "null_error_semantics": "error:null is a no-error sentinel; only non-null error values are fail-closed",
     }
     payload["responses_usage_discovery"] = {
         "strategy": "recursive numeric token-counter search across the RouterAI Responses envelope",
@@ -429,6 +433,8 @@ def _finalize_sol_metadata(result_path: Path) -> None:
     }
     payload["error_envelope_policy"] = {
         "arbitrary_error_text_retained": False,
+        "null_error_is_error": False,
+        "non_null_error_is_fail_closed": True,
         "retained": "HTTP status, error value type, allowlisted type/code/param/status, hash/length and allowlisted markers",
         "full_benchmark_after_error": False,
     }
@@ -436,11 +442,11 @@ def _finalize_sol_metadata(result_path: Path) -> None:
         "purpose": "tiny transport/accounting capability gate before the full Sol benchmark request",
         "visible_final_text_required": False,
         "usage_required_before_live_call": True,
-        "failure_behavior": "stop before the 80K-class benchmark call on API error or missing exact usage",
+        "failure_behavior": "stop before the 80K-class benchmark call on non-null API error or missing exact usage",
     }
     payload["accounting_policy"] = (
-        "No synthetic token counts are accepted. An error-only envelope stops the run before the full Sol request. "
-        "If an error envelope contains exact usage, that usage is cost-accounted even though the benchmark remains blocked."
+        "No synthetic token counts are accepted. A non-null error envelope stops the run before the full Sol request. "
+        "A nullable error:null sentinel does not override otherwise valid exact usage."
     )
 
     if _SOL_SAFE_ERROR_DIAGNOSTIC is not None:
@@ -490,6 +496,7 @@ def _finalize_sol_metadata(result_path: Path) -> None:
             manifest["retry_of_run"] = SOL_PREVIOUS_USAGELESS_RUN
             manifest["api_transport"] = endpoint.get("api_transport")
             manifest["responses_output_limit_key"] = SOL_RESPONSES_OUTPUT_LIMIT_KEY
+            manifest["responses_null_error_is_error"] = False
 
     known = _known_cost_from_payload(payload)
     if _SOL_ERROR_RECEIPT is not None and not known:
