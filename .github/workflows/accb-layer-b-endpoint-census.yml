@@ -1,0 +1,117 @@
+name: ACCB Layer B Endpoint Census
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/accb_layer_b_endpoint_census.py'
+      - 'tests/test_accb_layer_b_endpoint_census.py'
+      - 'scripts/accb_layer_b_dry_run.py'
+      - 'docs/research/accb_layer_b_snapshot/**'
+      - '.github/workflows/accb-layer-b-endpoint-census.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/accb_layer_b_endpoint_census.py'
+      - 'tests/test_accb_layer_b_endpoint_census.py'
+      - 'scripts/accb_layer_b_dry_run.py'
+      - 'docs/research/accb_layer_b_snapshot/**'
+      - '.github/workflows/accb-layer-b-endpoint-census.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accb-layer-b-endpoint-census-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  census:
+    name: Read-only 512K endpoint admission census
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 15
+    env:
+      WORKDIR: /tmp/aimeton-accb-layer-b-census-${{ github.run_id }}
+      REPORT: /tmp/accb-layer-b-census-${{ github.run_id }}.json
+    steps:
+      - name: Materialize exact public commit without Marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf "$WORKDIR"
+          mkdir -p "$WORKDIR"
+          cd "$WORKDIR"
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach --force FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Compile census harness
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR"
+          python3 -m py_compile scripts/accb_layer_b_dry_run.py scripts/accb_layer_b_endpoint_census.py
+
+      - name: Execute public read-only endpoint census
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$WORKDIR"
+          python3 scripts/accb_layer_b_endpoint_census.py --output "$REPORT"
+
+      - name: Validate census safety and print sanitized receipt
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - "$REPORT" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+          assert payload['status'] == 'READ_ONLY_CENSUS_NO_MODEL_GENERATION'
+          assert payload['authorization_header_sent'] is False
+          assert payload['routerai_generation_calls_performed'] == 0
+          assert payload['spend_authorized_rub'] == 0
+          assert payload['paid_execution_authorized'] is False
+          assert payload['planned_calls'] == 15
+          assert payload['capacity_gate']['max_anchor_tokens'] == 524288
+          assert payload['capacity_gate']['max_output_tokens'] == 8192
+          assert payload['capacity_gate']['total_context_required'] == 532480
+          assert len(payload['selected_endpoints']) == 5
+          assert all(row['provider_pin_required'] is True for row in payload['cells'])
+          assert all(row['allow_fallbacks'] is False for row in payload['cells'])
+
+          receipt = {
+              'ok': True,
+              'status': payload['status'],
+              'whole_tranche_conservative_estimate_rub': payload['whole_tranche_conservative_estimate_rub'],
+              'selected_endpoints': {
+                  model: {
+                      'provider_name': row['provider_name'],
+                      'tag': row['tag'],
+                      'routerai_priority_index': row['routerai_priority_index'],
+                      'required_transport': row['required_transport'],
+                      'context_length': row['context_length'],
+                      'max_prompt_tokens': row['max_prompt_tokens'],
+                      'max_completion_tokens': row['max_completion_tokens'],
+                      'seed_advertised': row['seed_advertised'],
+                      'pricing': row['pricing'],
+                      'variable_pricings': row['variable_pricings'],
+                  }
+                  for model, row in payload['selected_endpoints'].items()
+              },
+              'routerai_generation_calls_performed': 0,
+              'spend_authorized_rub': 0,
+          }
+          print(json.dumps(receipt, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$WORKDIR"
+          rm -f "$REPORT"
