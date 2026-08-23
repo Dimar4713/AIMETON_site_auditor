@@ -12,6 +12,7 @@ OWNER = "Dimar4713"
 ROUTES: dict[str, tuple[int, str, dict[str, str]]] = {
     "deploy-stage": (337, "deploy-stage.yml", {"commit_sha": "{sha}"}),
     "validate-baseline-self-hosted": (767, "baseline-self-hosted-dispatch.yml", {"expected_sha": "{sha}", "evidence_issue": "767"}),
+    "census-accb-routerai-readonly": (816, "accb-routerai-readonly-census.yml", {"expected_sha": "{sha}", "evidence_issue": "816"}),
     "accept-admin-trace-stage": (293, "accept-admin-trace-stage.yml", {"expected_sha": "{sha}"}),
     "accept-aimeton-self-audit-stage": (293, "accept-aimeton-self-audit-stage.yml", {"expected_sha": "{sha}"}),
     "audit-competitor-services-realty-stage": (293, "audit-competitor-services-realty-stage.yml", {"expected_sha": "{sha}"}),
