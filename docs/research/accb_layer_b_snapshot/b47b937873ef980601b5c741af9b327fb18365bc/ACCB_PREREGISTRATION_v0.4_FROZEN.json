@@ -20,11 +20,70 @@
     "matrix_complete": true,
     "observations_are_single_run_calibration_only": true,
     "rows": [
-      {"model": "qwen/qwen3.7-plus", "run_id": 32584584044, "endpoint_tag": "alibaba", "api_transport": "chat", "prompt_tokens": 43790, "completion_tokens": 2010, "scored_call_cost_rub": 1.787885, "ACI": 1.0, "ACI_min": 1.0, "critical_failure_count": 0},
-      {"model": "z-ai/glm-5.2", "run_id": 32584584044, "endpoint_tag": "alibaba", "api_transport": "chat", "prompt_tokens": 41579, "completion_tokens": 156, "scored_call_cost_rub": 10.47576, "ACI": 0.916667, "ACI_min": 0.5, "critical_failure_count": 1},
-      {"model": "moonshotai/kimi-k3", "run_id": 32595531554, "endpoint_tag": "alibaba", "api_transport": "chat", "prompt_tokens": 39386, "completion_tokens": 3986, "scored_call_cost_rub": 22.059688, "ACI": 0.833333, "ACI_min": 0.5, "critical_failure_count": 2, "replacement_for": "moonshotai/kimi-k2.6", "replacement_reason": "runtime endpoint truth exposed no healthy >=128K Kimi K2.6 route; Kimi K3 preserves the planned Kimi/Chinese slot"},
-      {"model": "deepseek/deepseek-v4-pro-0813", "run_id": 32595531554, "endpoint_tag": "deepseek", "api_transport": "chat", "prompt_tokens": 40464, "completion_tokens": 3456, "scored_call_cost_rub": 5.063112, "ACI": 0.716667, "ACI_min": 0.0, "critical_failure_count": 2},
-      {"model": "openai/gpt-5.6-sol", "run_id": 32619553092, "endpoint_tag": "openai", "api_transport": "responses", "prompt_tokens": 39256, "completion_tokens": 147, "scored_call_cost_rub": 8.621854, "probe_cost_rub": 0.107797, "run_estimated_spend_rub": 8.729651, "ACI": 0.916667, "ACI_min": 0.5, "critical_failure_count": 1}
+      {
+        "model": "qwen/qwen3.7-plus",
+        "run_id": 32584584044,
+        "endpoint_tag": "alibaba",
+        "api_transport": "chat",
+        "prompt_tokens": 43790,
+        "completion_tokens": 2010,
+        "scored_call_cost_rub": 1.787885,
+        "ACI": 1.0,
+        "ACI_min": 1.0,
+        "critical_failure_count": 0
+      },
+      {
+        "model": "z-ai/glm-5.2",
+        "run_id": 32584584044,
+        "endpoint_tag": "alibaba",
+        "api_transport": "chat",
+        "prompt_tokens": 41579,
+        "completion_tokens": 156,
+        "scored_call_cost_rub": 10.47576,
+        "ACI": 0.916667,
+        "ACI_min": 0.5,
+        "critical_failure_count": 1
+      },
+      {
+        "model": "moonshotai/kimi-k3",
+        "run_id": 32595531554,
+        "endpoint_tag": "alibaba",
+        "api_transport": "chat",
+        "prompt_tokens": 39386,
+        "completion_tokens": 3986,
+        "scored_call_cost_rub": 22.059688,
+        "ACI": 0.833333,
+        "ACI_min": 0.5,
+        "critical_failure_count": 2,
+        "replacement_for": "moonshotai/kimi-k2.6",
+        "replacement_reason": "runtime endpoint truth exposed no healthy >=128K Kimi K2.6 route; Kimi K3 preserves the planned Kimi/Chinese slot"
+      },
+      {
+        "model": "deepseek/deepseek-v4-pro-0813",
+        "run_id": 32595531554,
+        "endpoint_tag": "deepseek",
+        "api_transport": "chat",
+        "prompt_tokens": 40464,
+        "completion_tokens": 3456,
+        "scored_call_cost_rub": 5.063112,
+        "ACI": 0.716667,
+        "ACI_min": 0.0,
+        "critical_failure_count": 2
+      },
+      {
+        "model": "openai/gpt-5.6-sol",
+        "run_id": 32619553092,
+        "endpoint_tag": "openai",
+        "api_transport": "responses",
+        "prompt_tokens": 39256,
+        "completion_tokens": 147,
+        "scored_call_cost_rub": 8.621854,
+        "probe_cost_rub": 0.107797,
+        "run_estimated_spend_rub": 8.729651,
+        "ACI": 0.916667,
+        "ACI_min": 0.5,
+        "critical_failure_count": 1
+      }
     ],
     "confirmed_observed_experiment_spend_floor_rub": 53.141769,
     "unreconciled_historical_runs": [32586356270, 32602626623, 32605102169, 32605965700, 32618857912],
@@ -44,7 +103,13 @@
     "negative_trace": {"rejected": true, "ACI": 0.575, "ACI_min": 0.0, "critical_failure_count": 3},
     "boundary": "deterministic benchmark plumbing/discrimination evidence, not LLM performance evidence"
   },
-  "model_matrix": ["z-ai/glm-5.2", "deepseek/deepseek-v4-pro-0813", "qwen/qwen3.7-plus", "moonshotai/kimi-k3", "openai/gpt-5.6-sol"],
+  "model_matrix": [
+    "z-ai/glm-5.2",
+    "deepseek/deepseek-v4-pro-0813",
+    "qwen/qwen3.7-plus",
+    "moonshotai/kimi-k3",
+    "openai/gpt-5.6-sol"
+  ],
   "layer_b_diagnostic_tranche": {
     "scenario": "ACCB-DEV-004",
     "scenario_version": "0.1",
@@ -62,7 +127,15 @@
         {"anchor_tokens": 131072, "seed_u32": 1227261303, "derivation_sha256": "49268577b5596c86d032a900b2a5478f39b2970d6845c25535b18cbf8669e091"},
         {"anchor_tokens": 524288, "seed_u32": 990456894, "derivation_sha256": "3b092c3ed52c7b09da294950a99f8d0cb2ea4364a8aef2297d68041597d64c07"}
       ],
-      "must_record_before_each_call": ["exact scenario bytes/hash", "exact context assembly implementation version", "exact filler/distractor corpus version and order", "exact prompt hashes", "actual L_model_input and L_task_payload", "endpoint tag/provider/transport", "generation controls actually sent"]
+      "must_record_before_each_call": [
+        "exact scenario bytes/hash",
+        "exact context assembly implementation version",
+        "exact filler/distractor corpus version and order",
+        "exact prompt hashes",
+        "actual L_model_input and L_task_payload",
+        "endpoint tag/provider/transport",
+        "generation controls actually sent"
+      ]
     },
     "provider_seed_policy": {
       "claim_boundary": "Provider seed is a capability-dependent best-effort control, not a universal determinism guarantee.",
@@ -90,7 +163,14 @@
   "planning_cost_envelope": {
     "status": "PLANNING_ESTIMATE_NOT_LIVE_ADMISSION",
     "source_runtime_pricing_runs": [32584584044, 32595531554, 32619553092],
-    "assumptions": ["input-token billing target equals each anchor token count", "each cell conservatively reserves the full 8192-token output cap", "DeepSeek uses the highest retained time-of-day prompt/completion rates", "Qwen applies its retained >256000 prompt-token tier to the 512K anchor", "GPT-5.6 Sol applies its retained >272000 prompt-token tier to the 512K anchor", "no cache discount is assumed"],
+    "assumptions": [
+      "input-token billing target equals each anchor token count",
+      "each cell conservatively reserves the full 8192-token output cap",
+      "DeepSeek uses the highest retained time-of-day prompt/completion rates",
+      "Qwen applies its retained >256000 prompt-token tier to the 512K anchor",
+      "GPT-5.6 Sol applies its retained >272000 prompt-token tier to the 512K anchor",
+      "no cache discount is assumed"
+    ],
     "per_model_rub": {
       "z-ai/glm-5.2": {"32768": 14.570763, "131072": 39.049645, "524288": 136.965172, "total": 190.58558},
       "deepseek/deepseek-v4-pro-0813": {"32768": 11.423478, "131072": 31.006584, "524288": 109.339006, "total": 151.769068},
@@ -102,10 +182,23 @@
     "owner_approved_ceiling_rub": null,
     "admission_rule": "Immediately before any paid execution, perform a fresh read-only endpoint census, recompute the whole-tranche conservative estimate from actual selected endpoint pricing/tiers, fail closed on missing/non-positive/unparseable pricing, and require explicit owner approval of a spend ceiling that covers the recomputed tranche."
   },
-  "execution_gates": ["Implement and test the deterministic Layer B context assembler without paid model calls.", "Implement provider-seed capability recording and no-paid transport contract tests; never invent seed support.", "Perform a fresh read-only RouterAI endpoint census and recompute the 15-call whole-tranche estimate.", "Obtain explicit owner approval for the Layer B spend ceiling after the fresh estimate is visible.", "Only then create a separately governed paid execution trigger with exact SHA, provider pins, fallback disabled, accounting and evidence publication."],
+  "execution_gates": [
+    "Implement and test the deterministic Layer B context assembler without paid model calls.",
+    "Implement provider-seed capability recording and no-paid transport contract tests; never invent seed support.",
+    "Perform a fresh read-only RouterAI endpoint census and recompute the 15-call whole-tranche estimate.",
+    "Obtain explicit owner approval for the Layer B spend ceiling after the fresh estimate is visible.",
+    "Only then create a separately governed paid execution trigger with exact SHA, provider pins, fallback disabled, accounting and evidence publication."
+  ],
   "confirmatory_campaign": {
     "status": "NOT_FROZEN_NOT_AUTHORIZED",
-    "required_before_freeze": ["repeat count and statistical/power rationale", "seed/randomization design across supported and unsupported provider surfaces", "fact-position balancing", "exclusion/failure handling rules", "model-version/snapshot policy", "fresh cost envelope and owner-approved budget"]
+    "required_before_freeze": [
+      "repeat count and statistical/power rationale",
+      "seed/randomization design across supported and unsupported provider surfaces",
+      "fact-position balancing",
+      "exclusion/failure handling rules",
+      "model-version/snapshot policy",
+      "fresh cost envelope and owner-approved budget"
+    ]
   },
   "next_safe_action": "Implement the no-paid Layer B deterministic context assembler and provider seed-capability manifest against this frozen calibration design; do not execute RouterAI model generations."
 }
