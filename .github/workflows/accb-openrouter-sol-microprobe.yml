@@ -1,0 +1,75 @@
+name: ACCB OpenRouter Sol Bounded Microprobe
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha: { required: true, type: string }
+      evidence_issue: { required: true, default: "820", type: string }
+      owner_spend_authorized: { required: true, type: string }
+      max_budget_rub: { required: true, type: string }
+permissions:
+  contents: read
+  issues: write
+jobs:
+  probe:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
+      OWNER_SPEND_AUTHORIZED: ${{ inputs.owner_spend_authorized }}
+      MAX_BUDGET_RUB: ${{ inputs.max_budget_rub }}
+      OPENROUTER_PROXY_URL: ${{ vars.OPENROUTER_PROXY_URL }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - name: Guard budget and exact source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$OWNER_SPEND_AUTHORIZED" == "true" ]]
+          [[ "$MAX_BUDGET_RUB" == "1" ]]
+      - name: One pinned Sol request through proxy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,urllib.error,urllib.request
+          proxy=os.environ.get("OPENROUTER_PROXY_URL","").strip()
+          key=os.environ.get("OPENROUTER_API_KEY","").strip()
+          r={"status":"OPENROUTER_SOL_MICROPROBE_FAILED","model_requested":"openai/gpt-5.6-sol","provider_only":"openai","allow_fallbacks":False,"proxy_configured":bool(proxy),"proxy_value_retained":False,"api_key_value_retained":False,"max_budget_rub":1,"model_generation_requests":0,"store":False,"raw_model_output_retained":False}
+          if not proxy.startswith(("http://","https://")) or not key: r["failure_class"]="proxy_or_api_key_missing"
+          else:
+              payload={"model":"openai/gpt-5.6-sol","input":"Reply exactly: AIMETON_SOL_PROXY_OK","max_output_tokens":32,"reasoning":{"effort":"low"},"store":False,"provider":{"only":["openai"],"order":["openai"],"allow_fallbacks":False,"require_parameters":True,"data_collection":"deny"}}
+              opener=urllib.request.build_opener(urllib.request.ProxyHandler({"http":proxy,"https":proxy}))
+              req=urllib.request.Request("https://openrouter.ai/api/v1/responses",data=json.dumps(payload,separators=(",",":")).encode(),method="POST",headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"aimeton-accb-sol-microprobe"})
+              try:
+                  with opener.open(req,timeout=90) as x:
+                      raw=x.read(); data=json.loads(raw.decode("utf-8"))
+                      r.update({"status":"OPENROUTER_SOL_MICROPROBE_COMPLETE","http_status":int(x.status),"response_id":str(data.get("id") or "")[:128],"response_model":str(data.get("model") or "")[:128],"usage":data.get("usage") if isinstance(data.get("usage"),dict) else {},"response_sha256":hashlib.sha256(raw).hexdigest(),"model_generation_requests":1})
+              except urllib.error.HTTPError as x: r.update({"http_status":int(x.code),"failure_class":"openrouter_http_error"})
+              except Exception as x: r["failure_class"]="transport_"+type(x).__name__
+          pathlib.Path("/tmp/accb-openrouter-sol-microprobe.json").write_text(json.dumps(r,sort_keys=True),encoding="utf-8")
+          print(json.dumps(r,sort_keys=True))
+          PY
+      - name: Publish sanitized receipt
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json,os,pathlib,urllib.request
+          p=pathlib.Path("/tmp/accb-openrouter-sol-microprobe.json"); r=json.loads(p.read_text()) if p.exists() else {"status":"MICROPROBE_DID_NOT_EMIT_RECEIPT"}
+          body="\n".join(["## ACCB OpenRouter GPT-5.6 Sol bounded microprobe","",f"- exact SHA: {os.environ['EXPECTED_SHA']}",f"- runner: {os.environ.get('RUNNER_NAME')}",f"- status: {r.get('status')}",f"- model requested: {r.get('model_requested')}",f"- response model: {r.get('response_model')}",f"- provider pinned: {r.get('provider_only')}","- fallback: false","- storage: false","- raw output retained: false",f"- HTTP status: {r.get('http_status')}",f"- response digest: {r.get('response_sha256')}",f"- usage: {json.dumps(r.get('usage') or {},sort_keys=True)}","- authorized hard ceiling: 1 RUB",f"- generation requests: {r.get('model_generation_requests')}",f"- failure class: {r.get('failure_class')}"])
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['EVIDENCE_ISSUE']}/comments",data=json.dumps({"body":body}).encode(),method="POST",headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json","Content-Type":"application/json"})
+          with urllib.request.urlopen(req,timeout=30) as x: assert x.status in (200,201)
+          PY
+      - name: Enforce bounded result
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          r=json.loads(pathlib.Path("/tmp/accb-openrouter-sol-microprobe.json").read_text())
+          assert r["max_budget_rub"] == 1 and r["model_generation_requests"] <= 1 and r["store"] is False and r["allow_fallbacks"] is False
+          if r["status"] != "OPENROUTER_SOL_MICROPROBE_COMPLETE": raise SystemExit(r["status"])
+          PY
