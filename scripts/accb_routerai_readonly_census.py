@@ -29,7 +29,9 @@ SUPPORTED_VARIABLE_TYPES = {"prompt-threshold", "time-of-day"}
 
 
 class CensusError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = details
 
 
 def _positive(raw: Any, label: str) -> float:
@@ -97,6 +99,23 @@ def _transport(apis: Any) -> str | None:
     return None
 
 
+def _capacity_rejection_reasons(endpoint: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    required_context = MIN_PROMPT_SUPPORT + MAX_OUTPUT_TOKENS
+    context = endpoint.get("context_length")
+    if not isinstance(context, int):
+        reasons.append("context_length_missing_or_non_integer")
+    elif context < required_context:
+        reasons.append("context_length_below_prompt_plus_output_reserve")
+    max_prompt = endpoint.get("max_prompt_tokens")
+    if isinstance(max_prompt, int) and max_prompt < MIN_PROMPT_SUPPORT:
+        reasons.append("max_prompt_tokens_below_524288")
+    max_completion = endpoint.get("max_completion_tokens")
+    if isinstance(max_completion, int) and max_completion < MAX_OUTPUT_TOKENS:
+        reasons.append("max_completion_tokens_below_8192")
+    return reasons
+
+
 def _supports_anchor(endpoint: dict[str, Any], anchor: int) -> bool:
     context = endpoint.get("context_length")
     if not isinstance(context, int) or context < anchor + MAX_OUTPUT_TOKENS:
@@ -108,6 +127,34 @@ def _supports_anchor(endpoint: dict[str, Any], anchor: int) -> bool:
     if isinstance(max_completion, int) and max_completion < MAX_OUTPUT_TOKENS:
         return False
     return True
+
+
+def _safe_endpoint_observation(endpoint: dict[str, Any]) -> dict[str, Any]:
+    apis = endpoint.get("supported_apis")
+    params = endpoint.get("supported_parameters")
+    pricing = endpoint.get("pricing")
+    variable = endpoint.get("variable_pricings")
+    variable_types: list[str] = []
+    if isinstance(variable, list):
+        variable_types = sorted(
+            str(row.get("type"))
+            for row in variable
+            if isinstance(row, dict) and row.get("type") is not None
+        )[:16]
+    return {
+        "provider_name": str(endpoint.get("provider_name") or "")[:120],
+        "tag": str(endpoint.get("tag") or "")[:120],
+        "status": endpoint.get("status") if isinstance(endpoint.get("status"), (int, str)) else None,
+        "context_length": endpoint.get("context_length") if isinstance(endpoint.get("context_length"), int) else None,
+        "max_prompt_tokens": endpoint.get("max_prompt_tokens") if isinstance(endpoint.get("max_prompt_tokens"), int) else None,
+        "max_completion_tokens": endpoint.get("max_completion_tokens") if isinstance(endpoint.get("max_completion_tokens"), int) else None,
+        "supported_apis": sorted(str(x) for x in apis if isinstance(x, str))[:16] if isinstance(apis, list) else [],
+        "supported_parameters": sorted(str(x) for x in params if isinstance(x, str))[:64] if isinstance(params, list) else [],
+        "pricing_object_present": isinstance(pricing, dict),
+        "prompt_price_present": isinstance(pricing, dict) and "prompt" in pricing,
+        "completion_price_present": isinstance(pricing, dict) and "completion" in pricing,
+        "variable_pricing_types": variable_types,
+    }
 
 
 def _sanitize_variable_rows(rows: Any) -> list[dict[str, Any]]:
@@ -143,24 +190,46 @@ def select_endpoint(model: str, body: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(endpoints, list) or not endpoints:
         raise CensusError(f"no endpoint data for {model}")
     candidates: list[dict[str, Any]] = []
+    observations: list[dict[str, Any]] = []
     for endpoint in endpoints:
         if not isinstance(endpoint, dict):
             continue
+        observation = _safe_endpoint_observation(endpoint)
+        reasons: list[str] = []
         tag = str(endpoint.get("tag") or "").strip()
         transport = _transport(endpoint.get("supported_apis"))
         status = endpoint.get("status")
-        if not tag or transport is None:
-            continue
+        if not tag:
+            reasons.append("provider_tag_missing")
+        if transport is None:
+            reasons.append("supported_chat_or_responses_transport_missing")
         if isinstance(status, int) and status < 0:
-            continue
-        if not all(_supports_anchor(endpoint, anchor) for anchor in ANCHORS):
-            continue
+            reasons.append("endpoint_status_negative")
+        reasons.extend(_capacity_rejection_reasons(endpoint))
         pricing = endpoint.get("pricing")
         if not isinstance(pricing, dict):
+            reasons.append("pricing_object_missing")
+        observation["selected_transport_if_eligible"] = transport
+        observation["rejection_reasons"] = reasons
+        observations.append(observation)
+        if reasons:
             continue
-        prompt = _positive(pricing.get("prompt"), f"{model}.{tag}.base.prompt")
-        completion = _positive(pricing.get("completion"), f"{model}.{tag}.base.completion")
-        variable = _sanitize_variable_rows(endpoint.get("variable_pricings") or [])
+
+        try:
+            prompt = _positive(pricing.get("prompt"), f"{model}.{tag}.base.prompt")
+            completion = _positive(pricing.get("completion"), f"{model}.{tag}.base.completion")
+            variable = _sanitize_variable_rows(endpoint.get("variable_pricings") or [])
+        except CensusError as exc:
+            observation["rejection_reasons"] = ["pricing_contract_invalid"]
+            raise CensusError(
+                str(exc),
+                details={
+                    "model": model,
+                    "required_prompt_tokens": MIN_PROMPT_SUPPORT,
+                    "required_output_reserve_tokens": MAX_OUTPUT_TOKENS,
+                    "observed_endpoints": observations[:16],
+                },
+            ) from exc
         candidates.append({
             "model": model,
             "provider_name": str(endpoint.get("provider_name") or ""),
@@ -176,7 +245,15 @@ def select_endpoint(model: str, body: dict[str, Any]) -> dict[str, Any]:
             "variable_pricings": variable,
         })
     if not candidates:
-        raise CensusError(f"no healthy priced endpoint supports all Layer B anchors for {model}")
+        raise CensusError(
+            f"no healthy priced endpoint supports all Layer B anchors for {model}",
+            details={
+                "model": model,
+                "required_prompt_tokens": MIN_PROMPT_SUPPORT,
+                "required_output_reserve_tokens": MAX_OUTPUT_TOKENS,
+                "observed_endpoints": observations[:16],
+            },
+        )
     return candidates[0]
 
 
@@ -222,7 +299,7 @@ def price_endpoint(endpoint: dict[str, Any]) -> dict[str, Any]:
 
 def _base_receipt(status: str) -> dict[str, Any]:
     return {
-        "schema_version": "0.2-failure-observable",
+        "schema_version": "0.3-endpoint-rejection-observable",
         "status": status,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "site_auditor_sha": os.getenv("GITHUB_SHA"),
@@ -270,6 +347,8 @@ def failure_receipt(exc: BaseException) -> dict[str, Any]:
             "error_type": type(exc).__name__,
             "safe_message": str(exc)[:1000],
         }
+        if isinstance(exc.details, dict):
+            result["failure"]["safe_details"] = exc.details
     else:
         raw = repr(exc).encode("utf-8", errors="replace")
         result["failure"] = {
