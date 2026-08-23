@@ -33,8 +33,9 @@ TRIGGER_PATH = Path("docs/research/ACCB_ROUTERAI_LIVE_TRIGGER_2026-08-22.json")
 SOL_MODEL = "openai/gpt-5.6-sol"
 SOL_RETRY_MODELS = [SOL_MODEL]
 SOL_SOURCE_RUN = 32595531554
-SOL_PREVIOUS_USAGELESS_RUN = 32605102169
+SOL_PREVIOUS_USAGELESS_RUN = 32605965700
 SOL_MAX_OUTPUT_TOKENS = RETRY_MAX_OUTPUT_TOKENS
+SOL_RESPONSES_OUTPUT_LIMIT_KEY = "max_output_tokens"
 SOL_EVIDENCE_LABEL = "ACCB RouterAI Sol-only completion gate"
 
 FOUR_MODEL_EVIDENCE = {
@@ -317,7 +318,7 @@ def _sol_chat(
     payload: dict[str, Any] = {
         "model": model_id,
         "input": input_messages,
-        "max_tokens": max_tokens,
+        SOL_RESPONSES_OUTPUT_LIMIT_KEY: max_tokens,
         "provider": {"only": [provider_tag], "allow_fallbacks": False},
         **_impl._common_generation_controls(endpoint, live_call=live_call),
     }
@@ -408,12 +409,18 @@ def _finalize_sol_metadata(result_path: Path) -> None:
     if not result_path.exists():
         return
     payload = json.loads(result_path.read_text(encoding="utf-8"))
-    payload["schema_version"] = "0.8-sol-safe-error-envelope"
+    payload["schema_version"] = "0.9-sol-openai-native-output-limit"
     payload["retry_scope"] = "sol-only"
     payload["retry_of_run"] = SOL_PREVIOUS_USAGELESS_RUN
     payload["source_calibration_runs"] = [32584584044, SOL_SOURCE_RUN]
     payload["prior_successful_models_reused_not_repeated"] = FOUR_MODEL_EVIDENCE
     payload["retry_models"] = list(SOL_RETRY_MODELS)
+    payload["responses_request_adapter"] = {
+        "output_limit_key": SOL_RESPONSES_OUTPUT_LIMIT_KEY,
+        "routerai_catalog_declared_key": "max_tokens",
+        "provider_native_contract": "OpenAI Responses API max_output_tokens",
+        "provider_pin_preserved": True,
+    }
     payload["responses_usage_discovery"] = {
         "strategy": "recursive numeric token-counter search across the RouterAI Responses envelope",
         "probe_usage_path": _SOL_USAGE_PATHS.get("probe"),
@@ -482,6 +489,7 @@ def _finalize_sol_metadata(result_path: Path) -> None:
             manifest["max_output_tokens"] = SOL_MAX_OUTPUT_TOKENS
             manifest["retry_of_run"] = SOL_PREVIOUS_USAGELESS_RUN
             manifest["api_transport"] = endpoint.get("api_transport")
+            manifest["responses_output_limit_key"] = SOL_RESPONSES_OUTPUT_LIMIT_KEY
 
     known = _known_cost_from_payload(payload)
     if _SOL_ERROR_RECEIPT is not None and not known:
