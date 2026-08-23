@@ -89,6 +89,9 @@ def _supports_anchor(endpoint: dict[str, Any], anchor: int) -> bool:
     max_prompt = endpoint.get("max_prompt_tokens")
     if isinstance(max_prompt, int) and max_prompt < anchor:
         return False
+    max_completion = endpoint.get("max_completion_tokens")
+    if isinstance(max_completion, int) and max_completion < MAX_OUTPUT_TOKENS:
+        return False
     return True
 
 
@@ -159,7 +162,6 @@ def select_endpoint(model: str, body: dict[str, Any]) -> dict[str, Any]:
         })
     if not candidates:
         raise CensusError(f"no healthy priced endpoint supports all Layer B anchors for {model}")
-    # Preserve current ACCB admission semantics: first healthy catalog endpoint wins.
     return candidates[0]
 
 
