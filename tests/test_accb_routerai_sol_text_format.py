@@ -24,7 +24,7 @@ def _endpoint() -> dict:
     }
 
 
-def test_sol_live_responses_translates_json_mode_to_text_format(monkeypatch) -> None:
+def test_sol_live_responses_translates_chat_controls_to_native_contract(monkeypatch) -> None:
     calls: list[dict] = []
 
     def fake_http_json(*args, **kwargs):
@@ -59,11 +59,11 @@ def test_sol_live_responses_translates_json_mode_to_text_format(monkeypatch) -> 
     assert "response_format" not in payload
     assert payload["text"] == {"format": {"type": "json_object"}}
     assert payload["reasoning"] == {"effort": "low"}
-    assert payload["include_reasoning"] is False
+    assert "include_reasoning" not in payload
     assert payload["provider"] == {"only": ["openai"], "allow_fallbacks": False}
 
 
-def test_sol_probe_keeps_structured_output_controls_off(monkeypatch) -> None:
+def test_sol_probe_keeps_generation_controls_off(monkeypatch) -> None:
     calls: list[dict] = []
 
     def fake_http_json(*args, **kwargs):
