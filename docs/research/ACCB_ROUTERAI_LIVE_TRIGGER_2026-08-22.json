@@ -1,5 +1,5 @@
 {
-  "schema_version": "2.1",
+  "schema_version": "2.2",
   "status": "owner_authorized",
   "date": "2026-08-23",
   "architecture_issue": "Dimar4713/aimeton-architecture#132",
@@ -7,11 +7,11 @@
   "pr_governance_relation": "Part of #798",
   "approved_routerai_balance_rub": 10000,
   "micro_gate_ceiling_rub": 100,
-  "retry_sequence": 12,
+  "retry_sequence": 13,
   "execution_mode": "retry-failed-three",
   "retry_scope": "sol-only",
   "workflow_compatibility_note": "The governed workflow keeps the historical retry-failed-three dispatch branch; the retry entrypoint narrows execution to one Sol model and overrides downstream evidence metadata to expected_models=1.",
-  "transport_adapter_version": "routerai-responses-v9-native-text-format",
+  "transport_adapter_version": "routerai-responses-v10-native-reasoning-contract",
   "prior_attempts": [
     {
       "workflow_run": 32579887862,
@@ -77,11 +77,18 @@
       "workflow_run": 32612005192,
       "estimated_spend_rub": 0.107797,
       "result": "tiny Sol probe passed max_output_tokens and error:null gates; full request was blocked by Chat-style response_format on native Responses API",
-      "reason": "Admission passed at 27.807425 RUB. The tiny pinned OpenAI probe again returned exact 475 prompt + 5 output tokens at 0.107797 RUB. The full request failed before billable usage with sanitized markers invalid_request/unsupported_parameter/unsupported/response_format/provider. Native OpenAI Responses structured output uses text.format, so the v9 adapter translates only that wire control while preserving provider pinning, accounting and fail-closed behavior."
+      "reason": "Admission passed at 27.807425 RUB. The tiny pinned OpenAI probe again returned exact 475 prompt + 5 output tokens at 0.107797 RUB. The full request failed before billable usage with sanitized markers invalid_request/unsupported_parameter/unsupported/response_format/provider. Native OpenAI Responses structured output uses text.format."
+    },
+    {
+      "workflow_run": 32618857912,
+      "estimated_spend_rub": null,
+      "confirmed_subspend_rub": 0.107797,
+      "result": "max_output_tokens, error:null and text.format gates passed; full request was rejected by a proxy-only top-level include_reasoning control on the native OpenAI Responses route",
+      "reason": "The tiny pinned OpenAI probe again returned exact 475 prompt + 5 output tokens at 0.107797 RUB. The full request returned a sanitized HTTP-200 error envelope with no discoverable usage and safe markers invalid_request/provider/reasoning/include_reasoning. OpenAI's native Responses request contract accepts reasoning as an object such as reasoning.effort, but has no top-level include_reasoning request field. The v10 adapter therefore preserves reasoning.effort=low and omits only include_reasoning on the Sol Responses wire. Because the full error envelope exposed no usage, total spend for this run remains UNKNOWN/unreconciled rather than synthetic zero."
     }
   ],
-  "confirmed_observed_experiment_spend_rub": 44.304321,
-  "unreconciled_runs": [32586356270, 32602626623, 32605102169, 32605965700],
+  "confirmed_observed_experiment_spend_rub": 44.412118,
+  "unreconciled_runs": [32586356270, 32602626623, 32605102169, 32605965700, 32618857912],
   "models": [
     "z-ai/glm-5.2",
     "deepseek/deepseek-v4-pro-0813",
@@ -99,6 +106,7 @@
   "retry_generation_policy": {
     "reasoning_effort": "low",
     "include_reasoning": false,
+    "responses_wire_include_reasoning": "omit top-level field",
     "max_output_tokens": 8192,
     "json_mode_when_supported": true,
     "raw_provider_reasoning_saved": false,
@@ -122,6 +130,16 @@
       "routerai_catalog_key": "response_format",
       "provider_native_key": "text.format",
       "repair": "translate {response_format:{type:json_object}} into {text:{format:{type:json_object}}} only on the Sol Responses live wire payload",
+      "provider_selection_changed": false,
+      "verified_by_run": 32618857912
+    },
+    "reasoning_controls": {
+      "runtime_evidence_run": 32618857912,
+      "runtime_safe_markers": ["invalid_request", "provider", "reasoning", "include_reasoning"],
+      "routerai_catalog_keys": ["reasoning", "include_reasoning"],
+      "provider_native_reasoning_key": "reasoning.effort",
+      "omitted_proxy_key": "include_reasoning",
+      "repair": "preserve reasoning={effort:low} but omit top-level include_reasoning only on the Sol native Responses wire payload",
       "provider_selection_changed": false
     }
   },
@@ -131,14 +149,15 @@
     "visible_final_text_required": false,
     "usage_required_before_live_call": true,
     "structured_output_controls": "disabled on probe",
+    "reasoning_controls": "disabled on probe",
     "error_handling": "missing error key or error:null is non-error; any non-null object/scalar/list error stops and is sanitized",
     "missing_usage_behavior": "stop before the full benchmark call and mark spend UNKNOWN/unreconciled unless exact usage is present"
   },
   "accounting_policy": {
     "successful_live_envelope": "record exact recursively discovered usage and estimated cost before visible-final-text parsing",
-    "error_envelope": "non-null errors never proceed to scoring; account exact usage if exposed, otherwise keep spend UNKNOWN/unreconciled",
+    "error_envelope": "non-null errors never proceed to scoring; account exact usage if exposed, otherwise keep total run spend UNKNOWN/unreconciled while retaining any independently confirmed probe subspend",
     "arbitrary_error_text": "never retain raw provider error strings; retain only SHA-256, length and allowlisted diagnostic markers",
-    "unreconciled_prior_runs": "32586356270, 32602626623, 32605102169 and 32605965700 remain UNKNOWN until independent RouterAI billing evidence is available"
+    "unreconciled_prior_runs": "32586356270, 32602626623, 32605102169, 32605965700 and 32618857912 remain UNKNOWN until independent RouterAI billing evidence is available"
   },
   "model_replacements": {
     "moonshotai/kimi-k2.6": {
@@ -154,11 +173,11 @@
     "gating": false,
     "reuse_policy": "not part of the five-model paid matrix"
   },
-  "scope": "freeze/reuse all four scored observations; issue one tiny Sol probe first; use OpenAI-native max_output_tokens and text.format on Responses; proceed to the full Sol benchmark only after clean exact-usage probe; never repurchase Qwen, GLM, DeepSeek or Kimi",
+  "scope": "freeze/reuse all four scored observations; issue one tiny Sol probe first; use OpenAI-native max_output_tokens, text.format and reasoning.effort on Responses while omitting top-level include_reasoning; proceed to the full Sol benchmark only after clean exact-usage probe; never repurchase Qwen, GLM, DeepSeek or Kimi",
   "architecture_sha": "db18fcbc0a50d96af4e747db0ec2df10ca79f64c",
   "architecture_snapshot_policy": "retain the same canonical ACCB-DEV-001 snapshot used by the first four scores so a later fifth score remains directly comparable; A/B/C/D expansion is a later preregistered tranche",
   "provider_policy": "pin the OpenAI endpoint tag; allow_fallbacks=false; record actual provider metadata returned by RouterAI",
-  "transport_policy": "GPT-5.6 Sol follows the runtime endpoint-declared Responses transport; native wire uses max_output_tokens and text.format; only visible final-answer fields may become candidate output; provider reasoning/thinking and arbitrary provider error text are never retained",
+  "transport_policy": "GPT-5.6 Sol follows the runtime endpoint-declared Responses transport; native wire uses max_output_tokens, text.format and reasoning.effort; top-level include_reasoning is omitted; only visible final-answer fields may become candidate output; provider reasoning/thinking and arbitrary provider error text are never retained",
   "admission_policy": "Sol must expose a healthy Responses endpoint >=128K and positive parseable pricing; existing <=100 RUB upper bound remains; tiny probe must return no non-null error plus exact token usage before the expensive live request",
   "scientific_boundary": "fifth-model low-context calibration/integration evidence only; no universal ECC/AMCE threshold inference"
 }
