@@ -20,7 +20,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
-      OPENROUTER_PROXY_URL: ${{ secrets.OPENROUTER_PROXY_URL }}
+      OPENROUTER_PROXY_URL: ${{ vars.OPENROUTER_PROXY_URL }}
     steps:
       - name: Materialize exact main
         shell: bash
