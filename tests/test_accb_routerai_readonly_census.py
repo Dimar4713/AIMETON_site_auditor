@@ -138,3 +138,21 @@ def test_census_records_five_models_seed_capability_and_zero_generation() -> Non
     assert result["http_methods"] == ["GET"]
     assert result["whole_tranche_conservative_estimate_rub"] > 0
     assert all(row["seed_advertised_fresh"] is True for row in result["models"])
+
+
+def test_census_workflow_is_dispatch_only_and_strips_routerai_key() -> None:
+    workflow = (ROOT / ".github/workflows/accb-routerai-readonly-census.yml").read_text(encoding="utf-8")
+    trigger_block = workflow.split("permissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger_block
+    assert "issue_comment:" not in trigger_block
+    assert "pull_request:" not in trigger_block
+    assert "push:" not in trigger_block
+    assert "inputs.expected_sha" in workflow
+    assert 'test "$REQUESTED_SHA" = "$GITHUB_SHA"' in workflow
+    assert "env -u ROUTERAI_API_KEY" in workflow
+    assert "Marketplace actions" in workflow
+
+
+def test_owner_command_router_has_exact_census_route() -> None:
+    router = (SCRIPTS / "aimeton_command_router.py").read_text(encoding="utf-8")
+    assert '"census-accb-routerai-readonly": (816, "accb-routerai-readonly-census.yml", {"expected_sha": "{sha}", "evidence_issue": "816"})' in router
