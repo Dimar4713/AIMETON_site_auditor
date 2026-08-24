@@ -107,8 +107,12 @@ jobs:
                   "budget_rub, current_policy, next_safe_step. Use statuses superseded/revoked where applicable."
               )
               model_body = client.build_response_body(
-                  wire_context + "\n\n[CHECKPOINT]\n" + task,
+                  "[FILLER LEGEND] old = stale legacy fallback noise; n = neutral noise.\n"
+                  + wire_context
+                  + "\n\n[CHECKPOINT]\n"
+                  + task,
                   max_output_tokens=256,
+                  stream=True,
               )
               receipt.update(
                   {
@@ -121,7 +125,7 @@ jobs:
                   }
               )
 
-              if len(model_body) >= 196608:
+              if len(model_body) >= 98304:
                   raise RuntimeError("compact_model_body_exceeds_observed_complete_upload_bound")
               targets = sorted({65536, len(model_body)})
               uploads = []
@@ -275,7 +279,7 @@ jobs:
           assert receipt["paid_spend_authorized_rub"] == 0
           assert receipt["authorization_header_sent_to_transport_target"] is False
           assert receipt["proxy_transport"] == "http"
-          assert receipt["exact_model_request_body_bytes"] < 196608
+          assert receipt["exact_model_request_body_bytes"] < 98304
           assert all(item.get("upload_complete") is True for item in receipt["uploads"])
           assert all(
               item.get("completion_signal") in {
