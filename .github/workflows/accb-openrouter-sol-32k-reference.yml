@@ -120,7 +120,7 @@ jobs:
                   proxy=proxy,
                   api_key=key,
                   body=request_body,
-                  total_timeout_seconds=900,
+                  total_timeout_seconds=1200,
               )
               receipt.update(
                   {
