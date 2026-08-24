@@ -57,7 +57,7 @@ jobs:
               "paid_spend_authorized_rub": 0,
               "authorization_header_sent_to_transport_target": False,
               "transport_target": "httpbin.org/post",
-              "proxy_transport": "http",
+              "proxy_transport": "socks5h",
               "synthetic_payload_only": True,
               "raw_transport_response_retained": False,
               "proxy_value_retained": False,
@@ -75,7 +75,7 @@ jobs:
               }
 
           try:
-              proxy = os.environ.get("OPENROUTER_PROXY_URL", "").strip()
+              proxy = os.environ.get("OPENROUTER_SOCKS5_URL", "").strip()
               client.validate_proxy_and_key(proxy, key)
               key_before_result = client.authenticated_get(
                   url=client.OPENROUTER_KEY_URL,
