@@ -30,7 +30,7 @@ jobs:
           set -Eeuo pipefail
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$OWNER_SPEND_AUTHORIZED" == "true" ]]
-          [[ "$MAX_BUDGET_RUB" == "10000" ]]
+          [[ "$MAX_BUDGET_RUB" == "100" ]]
           cd "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           if [[ ! -d .git ]]; then git init; fi
@@ -68,7 +68,7 @@ jobs:
               "proxy_value_retained": False,
               "proxy_transport": "http",
               "api_key_value_retained": False,
-              "max_budget_rub": 10000,
+              "max_budget_rub": 100,
               "max_output_tokens": 256,
               "stream": True,
               "submission_attempts": 0,
@@ -256,7 +256,7 @@ jobs:
                   f"- provider usage: `{json.dumps(receipt.get('provider_usage') or {}, sort_keys=True)}`",
                   f"- transport: `{json.dumps(receipt.get('transport_metrics') or {}, sort_keys=True)}`",
                   f"- proxy transport: `{receipt.get('proxy_transport')}`",
-                  "- authorized session ceiling: `10000 RUB`",
+                  "- authorized session ceiling: `100 RUB`",
                   f"- submission attempts: `{receipt.get('submission_attempts')}`",
                   f"- confirmed generation requests: `{receipt.get('model_generation_requests')}`",
                   f"- generation confirmed: `{receipt.get('generation_confirmed')}`",
