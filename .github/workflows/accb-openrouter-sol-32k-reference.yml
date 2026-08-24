@@ -70,6 +70,7 @@ jobs:
               "api_key_value_retained": False,
               "max_budget_rub": 10000,
               "max_output_tokens": 256,
+              "stream": True,
               "submission_attempts": 0,
               "model_generation_requests": 0,
               "generation_confirmed": False,
@@ -103,10 +104,14 @@ jobs:
                   "budget_rub, current_policy, next_safe_step. Use statuses superseded/revoked where applicable."
               )
               request_body = client.build_response_body(
-                  wire_context + "\n\n[CHECKPOINT]\n" + task,
+                  "[FILLER LEGEND] old = stale legacy fallback noise; n = neutral noise.\n"
+                  + wire_context
+                  + "\n\n[CHECKPOINT]\n"
+                  + task,
                   max_output_tokens=receipt["max_output_tokens"],
+                  stream=True,
               )
-              if len(request_body) >= 196608:
+              if len(request_body) >= 98304:
                   raise RuntimeError("compact_request_exceeds_observed_complete_upload_bound")
               receipt.update(
                   {
@@ -143,8 +148,11 @@ jobs:
               if not 200 <= result.http_status < 300:
                   raise RuntimeError(f"openrouter_http_{result.http_status}")
 
-              data = json.loads(result.body.decode("utf-8"))
-              answer = client.extract_output_text(data)
+              stream_result = client.parse_response_stream(result.body)
+              data = stream_result["terminal_response"]
+              if not data:
+                  raise RuntimeError("openrouter_stream_missing_terminal_response")
+              answer = stream_result["output_text"] or client.extract_output_text(data)
               candidate = (
                   answer[answer.find("{") : answer.rfind("}") + 1]
                   if "{" in answer and "}" in answer
@@ -163,14 +171,16 @@ jobs:
                   in ("pinned_no_fallback", "pinned-provider-no-fallback"),
                   "next_safe_step_present": bool(str(parsed.get("next_safe_step", "")).strip()),
               }
-              response_id = str(data.get("id") or "")[:128]
+              response_id = str(data.get("id") or stream_result.get("response_id") or "")[:128]
               receipt.update(
                   {
                       "status": "ACCB_OPENROUTER_SOL_32K_COMPLETE",
                       "response_model": str(data.get("model") or "")[:128],
                       "response_id": response_id,
                       "dashboard_generation_id": client.find_generation_id(data)
+                      or stream_result.get("generation_id")
                       or client.find_generation_id(result.diagnostic_headers),
+                      "stream_event_types": stream_result["event_types"],
                       "provider_usage": data.get("usage")
                       if isinstance(data.get("usage"), dict)
                       else {},
@@ -185,6 +195,11 @@ jobs:
           except client.CurlTransportError as exc:
               receipt["failure_class"] = exc.failure_class
               receipt["transport_metrics"] = exc.metrics
+              if exc.partial_body:
+                  partial_stream = client.parse_response_stream(exc.partial_body)
+                  receipt["partial_stream_event_types"] = partial_stream["event_types"]
+                  receipt["response_id"] = partial_stream.get("response_id")
+                  receipt["dashboard_generation_id"] = partial_stream.get("generation_id")
               receipt["ambiguous_delivery"] = bool(exc.metrics.get("upload_complete"))
           except Exception as exc:
               receipt["failure_class"] = str(exc)[:160]
@@ -235,6 +250,7 @@ jobs:
                   f"- response ID: `{receipt.get('response_id')}`",
                   f"- dashboard generation ID: `{receipt.get('dashboard_generation_id')}`",
                   f"- response digest: `{receipt.get('response_sha256')}`",
+                  f"- stream events: `{json.dumps(receipt.get('stream_event_types') or receipt.get('partial_stream_event_types') or [])}`",
                   f"- scoring: `{json.dumps(receipt.get('scoring') or {}, sort_keys=True)}`",
                   f"- score passed: `{receipt.get('score_passed')}`",
                   f"- provider usage: `{json.dumps(receipt.get('provider_usage') or {}, sort_keys=True)}`",
