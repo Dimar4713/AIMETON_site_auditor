@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -13,6 +14,30 @@ from typing import Any, Mapping
 
 OPENROUTER_RESPONSES_URL = "https://openrouter.ai/api/v1/responses"
 OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
+
+ACCB_COMPACT_FILLER_CORPUS_VERSION = "accb-layer-b-transport-compact-v0.1"
+ACCB_COMPACT_FILLER_MAP = {
+    "legacyfallback": "legacy",
+    "cachedpolicy": "cached",
+    "autofallback": "fallback",
+    "stalehandoff": "stale",
+    "oldrouting": "old",
+    "obsoletebudget": "obsolete",
+    "deprecateddecision": "deprecated",
+    "telemetry": "log",
+    "checkpoint": "mark",
+    "inventory": "item",
+    "heartbeat": "beat",
+    "observability": "trace",
+    "scheduler": "tick",
+    "archive": "arc",
+    "baseline": "base",
+    "diagnostic": "diag",
+    "metadata": "meta",
+    "capacity": "cap",
+    "latency": "lag",
+    "checksum": "sum",
+}
 
 
 @dataclass(frozen=True)
@@ -50,6 +75,31 @@ def resolve_proxy(http_proxy: str, socks5_proxy: str = "", *, socks5_port: int =
         raise RuntimeError("proxy_hostname_missing")
     host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
     return f"socks5h://{host}:{socks5_port}"
+
+
+def compact_accb_context(context: str) -> tuple[str, dict[str, Any]]:
+    source_tokens = context.split(" ")
+    wire_tokens: list[str] = []
+    replaced = 0
+    for token in source_tokens:
+        stem = token[:-3] if len(token) > 3 and token[-3:].isdigit() else ""
+        replacement = ACCB_COMPACT_FILLER_MAP.get(stem)
+        if replacement is None:
+            wire_tokens.append(token)
+            continue
+        wire_tokens.append(replacement)
+        replaced += 1
+    if len(wire_tokens) != len(source_tokens):
+        raise RuntimeError("accb_compact_logical_token_count_changed")
+    wire_context = " ".join(wire_tokens)
+    return wire_context, {
+        "wire_filler_corpus_version": ACCB_COMPACT_FILLER_CORPUS_VERSION,
+        "logical_whitespace_tokens": len(wire_tokens),
+        "replaced_filler_tokens": replaced,
+        "source_context_sha256": hashlib.sha256(context.encode("utf-8")).hexdigest(),
+        "wire_context_sha256": hashlib.sha256(wire_context.encode("utf-8")).hexdigest(),
+        "wire_context_bytes": len(wire_context.encode("utf-8")),
+    }
 
 
 def build_response_body(input_text: str, *, max_output_tokens: int) -> bytes:
