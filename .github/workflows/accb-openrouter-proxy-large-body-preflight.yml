@@ -17,7 +17,7 @@ jobs:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
       OPENROUTER_PROXY_URL: ${{ vars.OPENROUTER_PROXY_URL }}
-      OPENROUTER_SOCKS5_URL: ${{ vars.OPENROUTER_SOCKS5_URL }}
+      OPENROUTER_SOCKS_URL: ${{ vars.OPENROUTER_SOCKS_URL }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - name: Materialize exact source
@@ -45,6 +45,7 @@ jobs:
           import os
           import pathlib
           import sys
+          import urllib.parse
 
           sys.path.insert(0, "scripts")
           import accb_layer_b_dry_run as dry
@@ -75,7 +76,16 @@ jobs:
               }
 
           try:
-              proxy = os.environ.get("OPENROUTER_SOCKS5_URL", "").strip()
+              socks_endpoint = os.environ.get("OPENROUTER_SOCKS_URL", "").strip()
+              if socks_endpoint.startswith(("http://", "https://")):
+                  parsed = urllib.parse.urlsplit(socks_endpoint)
+                  if not parsed.hostname or parsed.username or parsed.password:
+                      raise RuntimeError("openrouter_socks_endpoint_invalid")
+                  host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+                  port = parsed.port or 50101
+                  proxy = f"socks5h://{host}:{port}"
+              else:
+                  proxy = socks_endpoint
               client.validate_proxy_and_key(proxy, key)
               key_before_result = client.authenticated_get(
                   url=client.OPENROUTER_KEY_URL,
