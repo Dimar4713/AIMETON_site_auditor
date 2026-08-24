@@ -15,28 +15,28 @@ from typing import Any, Mapping
 OPENROUTER_RESPONSES_URL = "https://openrouter.ai/api/v1/responses"
 OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 
-ACCB_COMPACT_FILLER_CORPUS_VERSION = "accb-layer-b-transport-compact-v0.1"
+ACCB_COMPACT_FILLER_CORPUS_VERSION = "accb-layer-b-transport-compact-v0.2"
 ACCB_COMPACT_FILLER_MAP = {
-    "legacyfallback": "legacy",
-    "cachedpolicy": "cached",
-    "autofallback": "fallback",
-    "stalehandoff": "stale",
+    "legacyfallback": "old",
+    "cachedpolicy": "old",
+    "autofallback": "old",
+    "stalehandoff": "old",
     "oldrouting": "old",
-    "obsoletebudget": "obsolete",
-    "deprecateddecision": "deprecated",
-    "telemetry": "log",
-    "checkpoint": "mark",
-    "inventory": "item",
-    "heartbeat": "beat",
-    "observability": "trace",
-    "scheduler": "tick",
-    "archive": "arc",
-    "baseline": "base",
-    "diagnostic": "diag",
-    "metadata": "meta",
-    "capacity": "cap",
-    "latency": "lag",
-    "checksum": "sum",
+    "obsoletebudget": "old",
+    "deprecateddecision": "old",
+    "telemetry": "n",
+    "checkpoint": "n",
+    "inventory": "n",
+    "heartbeat": "n",
+    "observability": "n",
+    "scheduler": "n",
+    "archive": "n",
+    "baseline": "n",
+    "diagnostic": "n",
+    "metadata": "n",
+    "capacity": "n",
+    "latency": "n",
+    "checksum": "n",
 }
 
 
@@ -49,10 +49,16 @@ class CurlResult:
 
 
 class CurlTransportError(RuntimeError):
-    def __init__(self, failure_class: str, metrics: Mapping[str, Any]):
+    def __init__(
+        self,
+        failure_class: str,
+        metrics: Mapping[str, Any],
+        partial_body: bytes = b"",
+    ):
         super().__init__(failure_class)
         self.failure_class = failure_class
         self.metrics = dict(metrics)
+        self.partial_body = partial_body
 
 
 def validate_proxy_and_key(proxy: str, api_key: str | None = None) -> None:
@@ -102,7 +108,12 @@ def compact_accb_context(context: str) -> tuple[str, dict[str, Any]]:
     }
 
 
-def build_response_body(input_text: str, *, max_output_tokens: int) -> bytes:
+def build_response_body(
+    input_text: str,
+    *,
+    max_output_tokens: int,
+    stream: bool = False,
+) -> bytes:
     payload = {
         "model": "openai/gpt-5.6-sol",
         "input": input_text,
@@ -117,7 +128,48 @@ def build_response_body(input_text: str, *, max_output_tokens: int) -> bytes:
             "data_collection": "deny",
         },
     }
+    if stream:
+        payload["stream"] = True
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def parse_response_stream(body: bytes) -> dict[str, Any]:
+    output_parts: list[str] = []
+    event_types: list[str] = []
+    terminal_response: dict[str, Any] = {}
+    response_id: str | None = None
+    generation_id: str | None = None
+    for raw_line in body.decode("utf-8", errors="replace").splitlines():
+        if not raw_line.startswith("data: "):
+            continue
+        raw_data = raw_line[6:]
+        if raw_data == "[DONE]":
+            event_types.append("done")
+            continue
+        try:
+            event = json.loads(raw_data)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type") or "unknown")[:80]
+        event_types.append(event_type)
+        if event_type == "response.output_text.delta" and isinstance(event.get("delta"), str):
+            output_parts.append(str(event["delta"]))
+        response = event.get("response")
+        if isinstance(response, dict):
+            if response.get("id"):
+                response_id = str(response["id"])[:128]
+            if event_type in {"response.completed", "response.failed", "response.incomplete"}:
+                terminal_response = response
+        generation_id = generation_id or find_generation_id(event)
+    return {
+        "output_text": "".join(output_parts).strip(),
+        "event_types": event_types,
+        "terminal_response": terminal_response,
+        "response_id": response_id,
+        "generation_id": generation_id,
+    }
 
 
 def extract_output_text(data: Mapping[str, Any]) -> str:
@@ -228,10 +280,14 @@ def request(
         metrics = _parse_metrics(completed.stdout.decode("utf-8", errors="replace"), expected_upload)
         metrics["curl_exit_code"] = int(completed.returncode)
         metrics["upload_complete"] = metrics.get("uploaded_bytes") == expected_upload
-        if completed.returncode != 0:
-            raise CurlTransportError(_classify_curl_failure(completed.returncode, metrics), metrics)
-
         response_body = response_path.read_bytes() if response_path.exists() else b""
+        if completed.returncode != 0:
+            raise CurlTransportError(
+                _classify_curl_failure(completed.returncode, metrics),
+                metrics,
+                partial_body=response_body,
+            )
+
         diagnostic_headers = _read_diagnostic_headers(response_header_path)
         return CurlResult(
             http_status=int(metrics.get("http_status") or 0),
