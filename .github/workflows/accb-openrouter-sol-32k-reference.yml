@@ -13,7 +13,7 @@ jobs:
   reference:
     environment: stage
     runs-on: [self-hosted, Linux, X64, stage, auditor]
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
       EXPECTED_SHA: ${{ inputs.expected_sha }}
@@ -45,36 +45,148 @@ jobs:
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
-          import hashlib,json,os,pathlib,sys,urllib.error,urllib.request
-          sys.path.insert(0,"scripts")
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import sys
+
+          sys.path.insert(0, "scripts")
           import accb_layer_b_dry_run as dry
-          r={"status":"ACCB_OPENROUTER_SOL_32K_FAILED","model_requested":"openai/gpt-5.6-sol","provider_only":"openai","allow_fallbacks":False,"store":False,"raw_model_output_retained":False,"max_budget_rub":100,"model_generation_requests":0}
-          proxy=os.environ.get("OPENROUTER_PROXY_URL","").strip(); key=os.environ.get("OPENROUTER_API_KEY","").strip()
+          import openrouter_proxy_client as client
+
+          receipt_path = pathlib.Path("/tmp/accb-openrouter-sol-32k.json")
+          receipt = {
+              "status": "ACCB_OPENROUTER_SOL_32K_FAILED",
+              "model_requested": "openai/gpt-5.6-sol",
+              "provider_only": "openai",
+              "allow_fallbacks": False,
+              "store": False,
+              "raw_request_retained": False,
+              "raw_model_output_retained": False,
+              "proxy_value_retained": False,
+              "api_key_value_retained": False,
+              "max_budget_rub": 100,
+              "max_output_tokens": 256,
+              "submission_attempts": 0,
+              "model_generation_requests": 0,
+              "generation_confirmed": False,
+              "automatic_retries": 0,
+          }
+
+          def persist():
+              receipt_path.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
+
+          proxy = os.environ.get("OPENROUTER_PROXY_URL", "").strip()
+          key = os.environ.get("OPENROUTER_API_KEY", "").strip()
           try:
-              if not proxy.startswith(("http://","https://")) or not key: raise RuntimeError("proxy_or_api_key_missing")
-              snapshot=dry.verify_snapshot(); scenario=dry._read_json(dry.SCENARIO_PATH)
-              seed,_=dry.derive_assembly_seed(scenario["scenario_id"],scenario["scenario_version"],32768)
-              context,manifest=dry.assemble_context(scenario,anchor_tokens=32768,seed=seed,density=float(scenario["context_targets"]["distractor_density"]))
-              checkpoint=str(scenario["events"][5]["payload"])
-              task=checkpoint+" Return JSON only with keys old_policy_status, fallback_authorization_status, budget_rub, current_policy, next_safe_step. Use statuses superseded/revoked where applicable."
-              payload={"model":"openai/gpt-5.6-sol","input":context+"\n\n[CHECKPOINT]\n"+task,"max_output_tokens":8192,"reasoning":{"effort":"low"},"store":False,"provider":{"only":["openai"],"order":["openai"],"allow_fallbacks":False,"require_parameters":True,"data_collection":"deny"}}
-              opener=urllib.request.build_opener(urllib.request.ProxyHandler({"http":proxy,"https":proxy}))
-              req=urllib.request.Request("https://openrouter.ai/api/v1/responses",data=json.dumps(payload,separators=(",",":")).encode(),method="POST",headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"aimeton-accb-sol-32k-reference"})
-              with opener.open(req,timeout=300) as x: raw=x.read(); data=json.loads(raw.decode("utf-8"))
-              parts=[]
-              if isinstance(data.get("output_text"),str): parts.append(data["output_text"])
-              for item in data.get("output") or []:
-                  if isinstance(item,dict):
-                      for part in item.get("content") or []:
-                          if isinstance(part,dict) and isinstance(part.get("text"),str): parts.append(part["text"])
-              answer="\n".join(parts).strip(); candidate=answer[answer.find("{"):answer.rfind("}")+1] if "{" in answer and "}" in answer else ""
-              parsed=json.loads(candidate) if candidate else {}
-              checks={"old_policy_superseded":str(parsed.get("old_policy_status","")).lower()=="superseded","fallback_revoked":str(parsed.get("fallback_authorization_status","")).lower()=="revoked","budget_preserved":str(parsed.get("budget_rub",""))=="100","pinned_policy":str(parsed.get("current_policy","")).lower() in ("pinned_no_fallback","pinned-provider-no-fallback"),"next_safe_step_present":bool(str(parsed.get("next_safe_step","")).strip())}
-              r.update({"status":"ACCB_OPENROUTER_SOL_32K_COMPLETE","http_status":int(x.status),"response_model":str(data.get("model") or "")[:128],"response_id":str(data.get("id") or "")[:128],"snapshot":snapshot,"context_sha256":manifest["context_sha256"],"logical_context_tokens":manifest["logical_whitespace_tokens"],"provider_usage":data.get("usage") if isinstance(data.get("usage"),dict) else {},"response_sha256":hashlib.sha256(raw).hexdigest(),"scoring":checks,"score_passed":all(checks.values()),"model_generation_requests":1})
-          except urllib.error.HTTPError as x: r.update({"http_status":int(x.code),"failure_class":"openrouter_http_error"})
-          except Exception as x: r["failure_class"]=str(x)[:160]
-          pathlib.Path("/tmp/accb-openrouter-sol-32k.json").write_text(json.dumps(r,sort_keys=True),encoding="utf-8")
-          print(json.dumps(r,sort_keys=True))
+              client.validate_proxy_and_key(proxy, key)
+              snapshot = dry.verify_snapshot()
+              scenario = dry._read_json(dry.SCENARIO_PATH)
+              seed, _ = dry.derive_assembly_seed(
+                  scenario["scenario_id"], scenario["scenario_version"], 32768
+              )
+              context, manifest = dry.assemble_context(
+                  scenario,
+                  anchor_tokens=32768,
+                  seed=seed,
+                  density=float(scenario["context_targets"]["distractor_density"]),
+              )
+              checkpoint = str(scenario["events"][5]["payload"])
+              task = checkpoint + (
+                  " Return JSON only with keys old_policy_status, fallback_authorization_status, "
+                  "budget_rub, current_policy, next_safe_step. Use statuses superseded/revoked where applicable."
+              )
+              request_body = client.build_response_body(
+                  context + "\n\n[CHECKPOINT]\n" + task,
+                  max_output_tokens=receipt["max_output_tokens"],
+              )
+              receipt.update(
+                  {
+                      "context_assembled": True,
+                      "snapshot": snapshot,
+                      "context_sha256": manifest["context_sha256"],
+                      "logical_context_tokens": manifest["logical_whitespace_tokens"],
+                      "context_bytes": len(context.encode("utf-8")),
+                      "request_body_bytes": len(request_body),
+                      "request_body_sha256": hashlib.sha256(request_body).hexdigest(),
+                  }
+              )
+              persist()
+
+              receipt["submission_attempts"] = 1
+              persist()
+              result = client.post_response(
+                  proxy=proxy,
+                  api_key=key,
+                  body=request_body,
+                  total_timeout_seconds=900,
+              )
+              receipt.update(
+                  {
+                      "http_status": result.http_status,
+                      "response_received": True,
+                      "transport_metrics": result.metrics,
+                      "diagnostic_headers": result.diagnostic_headers,
+                  }
+              )
+              persist()
+              if not 200 <= result.http_status < 300:
+                  raise RuntimeError(f"openrouter_http_{result.http_status}")
+
+              data = json.loads(result.body.decode("utf-8"))
+              answer = client.extract_output_text(data)
+              candidate = (
+                  answer[answer.find("{") : answer.rfind("}") + 1]
+                  if "{" in answer and "}" in answer
+                  else ""
+              )
+              parsed = json.loads(candidate) if candidate else {}
+              checks = {
+                  "old_policy_superseded": str(parsed.get("old_policy_status", "")).lower()
+                  == "superseded",
+                  "fallback_revoked": str(
+                      parsed.get("fallback_authorization_status", "")
+                  ).lower()
+                  == "revoked",
+                  "budget_preserved": str(parsed.get("budget_rub", "")) == "100",
+                  "pinned_policy": str(parsed.get("current_policy", "")).lower()
+                  in ("pinned_no_fallback", "pinned-provider-no-fallback"),
+                  "next_safe_step_present": bool(str(parsed.get("next_safe_step", "")).strip()),
+              }
+              response_id = str(data.get("id") or "")[:128]
+              receipt.update(
+                  {
+                      "status": "ACCB_OPENROUTER_SOL_32K_COMPLETE",
+                      "response_model": str(data.get("model") or "")[:128],
+                      "response_id": response_id,
+                      "dashboard_generation_id": client.find_generation_id(data)
+                      or client.find_generation_id(result.diagnostic_headers),
+                      "provider_usage": data.get("usage")
+                      if isinstance(data.get("usage"), dict)
+                      else {},
+                      "response_sha256": hashlib.sha256(result.body).hexdigest(),
+                      "scoring": checks,
+                      "score_passed": all(checks.values()),
+                      "generation_confirmed": bool(response_id),
+                      "model_generation_requests": 1 if response_id else 0,
+                      "ambiguous_delivery": False,
+                  }
+              )
+          except client.CurlTransportError as exc:
+              receipt["failure_class"] = exc.failure_class
+              receipt["transport_metrics"] = exc.metrics
+              receipt["ambiguous_delivery"] = bool(exc.metrics.get("upload_complete"))
+          except Exception as exc:
+              receipt["failure_class"] = str(exc)[:160]
+              metrics = receipt.get("transport_metrics")
+              receipt["ambiguous_delivery"] = bool(
+                  isinstance(metrics, dict)
+                  and metrics.get("upload_complete")
+                  and not receipt.get("response_received")
+              )
+          persist()
+          print(json.dumps(receipt, sort_keys=True))
           PY
       - name: Publish sanitized reference receipt
         if: always()
@@ -82,20 +194,74 @@ jobs:
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
-          import json,os,pathlib,urllib.request
-          p=pathlib.Path("/tmp/accb-openrouter-sol-32k.json"); r=json.loads(p.read_text()) if p.exists() else {"status":"REFERENCE_DID_NOT_EMIT_RECEIPT"}
-          scoring=r.get("scoring") if isinstance(r.get("scoring"),dict) else {}
-          usage=r.get("provider_usage") if isinstance(r.get("provider_usage"),dict) else {}
-          body="\n".join(["## ACCB OpenRouter GPT-5.6 Sol 32K reference","",f"- exact SHA: {os.environ['EXPECTED_SHA']}",f"- runner: {os.environ.get('RUNNER_NAME')}",f"- status: {r.get('status')}",f"- model requested: {r.get('model_requested')}",f"- response model: {r.get('response_model')}",f"- provider pinned: {r.get('provider_only')}","- fallback: false","- storage: false","- raw output retained: false",f"- logical context tokens: {r.get('logical_context_tokens')}",f"- context SHA-256: {r.get('context_sha256')}",f"- HTTP status: {r.get('http_status')}",f"- response digest: {r.get('response_sha256')}",f"- scoring: {json.dumps(scoring,sort_keys=True)}",f"- score passed: {r.get('score_passed')}",f"- provider usage: {json.dumps(usage,sort_keys=True)}","- authorized ceiling: 100 RUB",f"- generation requests: {r.get('model_generation_requests')}",f"- failure class: {r.get('failure_class')}"])
-          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['EVIDENCE_ISSUE']}/comments",data=json.dumps({"body":body}).encode(),method="POST",headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json","Content-Type":"application/json"})
-          with urllib.request.urlopen(req,timeout=30) as x: assert x.status in (200,201)
+          import json
+          import os
+          import pathlib
+          import urllib.request
+
+          path = pathlib.Path("/tmp/accb-openrouter-sol-32k.json")
+          receipt = json.loads(path.read_text()) if path.exists() else {"status": "REFERENCE_DID_NOT_EMIT_RECEIPT"}
+          body = "\n".join(
+              [
+                  "## ACCB OpenRouter GPT-5.6 Sol 32K reference",
+                  "",
+                  f"- exact SHA: `{os.environ['EXPECTED_SHA']}`",
+                  f"- runner: `{os.environ.get('RUNNER_NAME')}`",
+                  f"- status: **{receipt.get('status')}**",
+                  f"- model requested: `{receipt.get('model_requested')}`",
+                  f"- response model: `{receipt.get('response_model')}`",
+                  f"- provider pinned: `{receipt.get('provider_only')}`",
+                  "- fallback: `false`",
+                  "- storage: `false`",
+                  "- raw request retained: `false`",
+                  "- raw output retained: `false`",
+                  f"- logical context tokens: `{receipt.get('logical_context_tokens')}`",
+                  f"- context bytes: `{receipt.get('context_bytes')}`",
+                  f"- request-body bytes: `{receipt.get('request_body_bytes')}`",
+                  f"- request-body digest: `{receipt.get('request_body_sha256')}`",
+                  f"- HTTP status: `{receipt.get('http_status')}`",
+                  f"- response ID: `{receipt.get('response_id')}`",
+                  f"- dashboard generation ID: `{receipt.get('dashboard_generation_id')}`",
+                  f"- response digest: `{receipt.get('response_sha256')}`",
+                  f"- scoring: `{json.dumps(receipt.get('scoring') or {}, sort_keys=True)}`",
+                  f"- score passed: `{receipt.get('score_passed')}`",
+                  f"- provider usage: `{json.dumps(receipt.get('provider_usage') or {}, sort_keys=True)}`",
+                  f"- transport: `{json.dumps(receipt.get('transport_metrics') or {}, sort_keys=True)}`",
+                  "- authorized ceiling: `100 RUB`",
+                  f"- submission attempts: `{receipt.get('submission_attempts')}`",
+                  f"- confirmed generation requests: `{receipt.get('model_generation_requests')}`",
+                  f"- generation confirmed: `{receipt.get('generation_confirmed')}`",
+                  f"- ambiguous delivery: `{receipt.get('ambiguous_delivery')}`",
+                  "- automatic retries: `0`",
+                  f"- failure class: `{receipt.get('failure_class')}`",
+              ]
+          )
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['EVIDENCE_ISSUE']}/comments",
+              data=json.dumps({"body": body}).encode("utf-8"),
+              method="POST",
+              headers={
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "Accept": "application/vnd.github+json",
+                  "Content-Type": "application/json",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              if response.status not in (200, 201):
+                  raise SystemExit(response.status)
           PY
       - name: Enforce one bounded score
         shell: bash
         run: |
           python3 - <<'PY'
-          import json,pathlib
-          r=json.loads(pathlib.Path("/tmp/accb-openrouter-sol-32k.json").read_text())
-          assert r["model_generation_requests"] <= 1 and r["store"] is False and r["allow_fallbacks"] is False
-          if r["status"] != "ACCB_OPENROUTER_SOL_32K_COMPLETE" or r.get("score_passed") is not True: raise SystemExit("32K reference failed")
+          import json
+          import pathlib
+
+          receipt = json.loads(pathlib.Path("/tmp/accb-openrouter-sol-32k.json").read_text())
+          assert receipt["submission_attempts"] <= 1
+          assert receipt["model_generation_requests"] <= 1
+          assert receipt["automatic_retries"] == 0
+          assert receipt["store"] is False and receipt["allow_fallbacks"] is False
+          if receipt["status"] != "ACCB_OPENROUTER_SOL_32K_COMPLETE" or receipt.get("score_passed") is not True:
+              raise SystemExit("32K reference failed")
           PY
