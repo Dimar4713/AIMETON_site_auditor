@@ -1,0 +1,63 @@
+name: ACCB OpenRouter Sol 32K Generation Readback
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha: { required: true, type: string }
+      evidence_issue: { required: true, default: "820", type: string }
+permissions:
+  contents: read
+  issues: write
+jobs:
+  readback:
+    environment: stage
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
+      OPENROUTER_PROXY_URL: ${{ vars.OPENROUTER_PROXY_URL }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - name: Read one existing generation only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json,os,pathlib,urllib.parse,urllib.request,urllib.error
+          generation_id="gen-1787533694-dYNMWBNda3l0kMZmniyss"
+          proxy=os.environ.get("OPENROUTER_PROXY_URL","").strip(); key=os.environ.get("OPENROUTER_API_KEY","").strip()
+          r={"status":"OPENROUTER_GENERATION_READBACK_FAILED","generation_id":generation_id,"model_generation_requests":0,"paid_spend_authorized_rub":0,"raw_prompt_retained":False,"raw_completion_retained":False}
+          try:
+              if not proxy.startswith(("http://","https://")) or not key: raise RuntimeError("proxy_or_api_key_missing")
+              opener=urllib.request.build_opener(urllib.request.ProxyHandler({"http":proxy,"https":proxy}))
+              url="https://openrouter.ai/api/v1/generation?id="+urllib.parse.quote(generation_id,safe="")
+              req=urllib.request.Request(url,headers={"Authorization":"Bearer "+key,"User-Agent":"aimeton-accb-generation-readback"})
+              with opener.open(req,timeout=60) as x: data=json.loads(x.read().decode("utf-8"))
+              d=data.get("data") if isinstance(data.get("data"),dict) else data
+              r.update({"status":"OPENROUTER_GENERATION_READBACK_COMPLETE","http_status":int(x.status),"model":d.get("model"),"provider_name":d.get("provider_name") or d.get("provider"),"usage":d.get("usage") if isinstance(d.get("usage"),dict) else {},"total_cost":d.get("total_cost") or d.get("cost"),"native_tokens_prompt":d.get("native_tokens_prompt"),"native_tokens_completion":d.get("native_tokens_completion")})
+          except urllib.error.HTTPError as x: r.update({"http_status":int(x.code),"failure_class":"openrouter_http_error"})
+          except Exception as x: r["failure_class"]=str(x)[:160]
+          pathlib.Path("/tmp/accb-openrouter-sol-32k-readback.json").write_text(json.dumps(r,sort_keys=True),encoding="utf-8")
+          print(json.dumps(r,sort_keys=True))
+          PY
+      - name: Publish sanitized readback
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib,urllib.request
+          p=pathlib.Path("/tmp/accb-openrouter-sol-32k-readback.json"); r=json.loads(p.read_text()) if p.exists() else {"status":"READBACK_DID_NOT_EMIT_RECEIPT"}
+          body="\n".join(["## ACCB OpenRouter existing 32K generation readback","",f"- exact SHA: {os.environ['EXPECTED_SHA']}",f"- generation ID: {r.get('generation_id')}",f"- status: {r.get('status')}",f"- HTTP status: {r.get('http_status')}",f"- model: {r.get('model')}",f"- provider: {r.get('provider_name')}",f"- usage: {json.dumps(r.get('usage') or {},sort_keys=True)}",f"- total cost: {r.get('total_cost')}",f"- native prompt tokens: {r.get('native_tokens_prompt')}",f"- native completion tokens: {r.get('native_tokens_completion')}","- new generation requests: 0","- new spend authorized: 0 RUB","- raw prompt retained: false","- raw completion retained: false",f"- failure class: {r.get('failure_class')}"])
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['EVIDENCE_ISSUE']}/comments",data=json.dumps({"body":body}).encode(),method="POST",headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json","Content-Type":"application/json"})
+          with urllib.request.urlopen(req,timeout=30) as x: assert x.status in (200,201)
+          PY
+      - name: Enforce read only
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          r=json.loads(pathlib.Path("/tmp/accb-openrouter-sol-32k-readback.json").read_text())
+          assert r["model_generation_requests"] == 0 and r["paid_spend_authorized_rub"] == 0
+          if r["status"] != "OPENROUTER_GENERATION_READBACK_COMPLETE": raise SystemExit(r["status"])
+          PY
