@@ -6,6 +6,7 @@ import pathlib
 import re
 import subprocess
 import tempfile
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -30,10 +31,25 @@ class CurlTransportError(RuntimeError):
 
 
 def validate_proxy_and_key(proxy: str, api_key: str | None = None) -> None:
-    if not proxy.startswith(("http://", "https://")):
+    if not proxy.startswith(("http://", "https://", "socks5://", "socks5h://")):
         raise RuntimeError("proxy_url_missing_or_invalid")
     if api_key is not None and not api_key.strip():
         raise RuntimeError("openrouter_api_key_missing")
+
+
+def resolve_proxy(http_proxy: str, socks5_proxy: str = "", *, socks5_port: int = 50101) -> str:
+    if socks5_proxy.strip():
+        resolved = socks5_proxy.strip()
+        validate_proxy_and_key(resolved)
+        if not resolved.startswith(("socks5://", "socks5h://")):
+            raise RuntimeError("openrouter_socks5_url_invalid")
+        return resolved
+    validate_proxy_and_key(http_proxy)
+    parsed = urllib.parse.urlsplit(http_proxy)
+    if not parsed.hostname:
+        raise RuntimeError("proxy_hostname_missing")
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    return f"socks5h://{host}:{socks5_port}"
 
 
 def build_response_body(input_text: str, *, max_output_tokens: int) -> bytes:
