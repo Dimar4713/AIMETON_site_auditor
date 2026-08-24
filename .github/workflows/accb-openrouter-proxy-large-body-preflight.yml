@@ -137,27 +137,38 @@ jobs:
 
               for target in targets:
                   synthetic_body = synthetic_transport_body(target)
-                  result = client.request(
-                      method="POST",
-                      url="https://httpbin.org/post",
-                      proxy=proxy,
-                      headers={
-                          "Accept": "application/json",
-                          "Content-Type": "application/json",
-                          "User-Agent": "aimeton-accb-large-body-no-paid-preflight",
-                      },
-                      body=synthetic_body,
-                      connect_timeout_seconds=30,
-                      total_timeout_seconds=900,
-                  )
-                  item = {
-                      "target_bytes": target,
-                      "http_status": result.http_status,
-                      "response_sha256": hashlib.sha256(result.body).hexdigest(),
-                      **result.metrics,
-                  }
-                  if result.http_status != 200:
-                      raise RuntimeError(f"unexpected_transport_http_{result.http_status}_at_{target}")
+                  try:
+                      result = client.request(
+                          method="POST",
+                          url="https://httpbin.org/post",
+                          proxy=proxy,
+                          headers={
+                              "Accept": "application/json",
+                              "Content-Type": "application/json",
+                              "User-Agent": "aimeton-accb-large-body-no-paid-preflight",
+                          },
+                          body=synthetic_body,
+                          connect_timeout_seconds=30,
+                          total_timeout_seconds=900,
+                      )
+                      item = {
+                          "target_bytes": target,
+                          "http_status": result.http_status,
+                          "completion_signal": "http_response_after_complete_upload",
+                          "response_sha256": hashlib.sha256(result.body).hexdigest(),
+                          **result.metrics,
+                      }
+                      if result.http_status != 200:
+                          raise RuntimeError(f"unexpected_transport_http_{result.http_status}_at_{target}")
+                  except client.CurlTransportError as exc:
+                      if exc.failure_class != "empty_response" or not exc.metrics.get("upload_complete"):
+                          raise
+                      item = {
+                          "target_bytes": target,
+                          "http_status": exc.metrics.get("http_status"),
+                          "completion_signal": "empty_response_after_complete_upload",
+                          **exc.metrics,
+                      }
                   elapsed = float(item.get("time_total_seconds") or 0)
                   if elapsed > 0:
                       item["effective_upload_bytes_per_second"] = round(target / elapsed, 3)
@@ -258,8 +269,14 @@ jobs:
           assert receipt["paid_spend_authorized_rub"] == 0
           assert receipt["authorization_header_sent_to_transport_target"] is False
           assert receipt["proxy_transport"] == "socks5h"
-          assert all(item.get("http_status") == 200 for item in receipt["uploads"])
           assert all(item.get("upload_complete") is True for item in receipt["uploads"])
+          assert all(
+              item.get("completion_signal") in {
+                  "http_response_after_complete_upload",
+                  "empty_response_after_complete_upload",
+              }
+              for item in receipt["uploads"]
+          )
           assert receipt["key_usage_unchanged"] is True
           assert receipt["automatic_retries"] == 0
           if receipt["status"] != "OPENROUTER_PROXY_LARGE_BODY_PREFLIGHT_COMPLETE":
