@@ -66,7 +66,7 @@ jobs:
               "raw_request_retained": False,
               "raw_model_output_retained": False,
               "proxy_value_retained": False,
-              "proxy_transport": "socks5h",
+              "proxy_transport": "http",
               "api_key_value_retained": False,
               "max_budget_rub": 10000,
               "max_output_tokens": 256,
@@ -81,10 +81,7 @@ jobs:
 
           key = os.environ.get("OPENROUTER_API_KEY", "").strip()
           try:
-              proxy = client.resolve_proxy(
-                  os.environ.get("OPENROUTER_PROXY_URL", "").strip(),
-                  os.environ.get("OPENROUTER_SOCKS5_URL", "").strip(),
-              )
+              proxy = os.environ.get("OPENROUTER_PROXY_URL", "").strip()
               client.validate_proxy_and_key(proxy, key)
               snapshot = dry.verify_snapshot()
               scenario = dry._read_json(dry.SCENARIO_PATH)
@@ -97,22 +94,29 @@ jobs:
                   seed=seed,
                   density=float(scenario["context_targets"]["distractor_density"]),
               )
+              wire_context, wire_manifest = client.compact_accb_context(context)
+              if wire_manifest["logical_whitespace_tokens"] != 32768:
+                  raise RuntimeError("compact_logical_token_target_mismatch")
               checkpoint = str(scenario["events"][5]["payload"])
               task = checkpoint + (
                   " Return JSON only with keys old_policy_status, fallback_authorization_status, "
                   "budget_rub, current_policy, next_safe_step. Use statuses superseded/revoked where applicable."
               )
               request_body = client.build_response_body(
-                  context + "\n\n[CHECKPOINT]\n" + task,
+                  wire_context + "\n\n[CHECKPOINT]\n" + task,
                   max_output_tokens=receipt["max_output_tokens"],
               )
+              if len(request_body) >= 196608:
+                  raise RuntimeError("compact_request_exceeds_observed_complete_upload_bound")
               receipt.update(
                   {
                       "context_assembled": True,
                       "snapshot": snapshot,
                       "context_sha256": manifest["context_sha256"],
+                      **wire_manifest,
                       "logical_context_tokens": manifest["logical_whitespace_tokens"],
-                      "context_bytes": len(context.encode("utf-8")),
+                      "source_context_bytes": len(context.encode("utf-8")),
+                      "context_bytes": len(wire_context.encode("utf-8")),
                       "request_body_bytes": len(request_body),
                       "request_body_sha256": hashlib.sha256(request_body).hexdigest(),
                   }
@@ -222,6 +226,9 @@ jobs:
                   "- raw output retained: `false`",
                   f"- logical context tokens: `{receipt.get('logical_context_tokens')}`",
                   f"- context bytes: `{receipt.get('context_bytes')}`",
+                  f"- source context bytes: `{receipt.get('source_context_bytes')}`",
+                  f"- wire filler corpus: `{receipt.get('wire_filler_corpus_version')}`",
+                  f"- wire context digest: `{receipt.get('wire_context_sha256')}`",
                   f"- request-body bytes: `{receipt.get('request_body_bytes')}`",
                   f"- request-body digest: `{receipt.get('request_body_sha256')}`",
                   f"- HTTP status: `{receipt.get('http_status')}`",
