@@ -116,6 +116,7 @@ def request(
 
         command = [
             "curl",
+            "--http1.1",
             "--silent",
             "--show-error",
             "--no-progress-meter",
@@ -246,6 +247,7 @@ def _classify_curl_failure(exit_code: int, metrics: Mapping[str, Any]) -> str:
         52: "empty_response",
         55: "upload_failed",
         56: "response_receive_failed",
+        92: "http2_stream_error",
     }.get(exit_code, f"curl_exit_{exit_code}")
 
 
