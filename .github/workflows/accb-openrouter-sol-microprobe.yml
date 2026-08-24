@@ -21,6 +21,7 @@ jobs:
       OWNER_SPEND_AUTHORIZED: ${{ inputs.owner_spend_authorized }}
       MAX_BUDGET_RUB: ${{ inputs.max_budget_rub }}
       OPENROUTER_PROXY_URL: ${{ vars.OPENROUTER_PROXY_URL }}
+      OPENROUTER_SOCKS5_URL: ${{ vars.OPENROUTER_SOCKS5_URL }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - name: Guard budget and materialize exact source
@@ -62,15 +63,19 @@ jobs:
               "store": False,
               "raw_model_output_retained": False,
               "proxy_value_retained": False,
+              "proxy_transport": "socks5h",
               "api_key_value_retained": False,
               "max_budget_rub": 1,
               "submission_attempts": 0,
               "model_generation_requests": 0,
               "automatic_retries": 0,
           }
-          proxy = os.environ.get("OPENROUTER_PROXY_URL", "").strip()
           key = os.environ.get("OPENROUTER_API_KEY", "").strip()
           try:
+              proxy = client.resolve_proxy(
+                  os.environ.get("OPENROUTER_PROXY_URL", "").strip(),
+                  os.environ.get("OPENROUTER_SOCKS5_URL", "").strip(),
+              )
               client.validate_proxy_and_key(proxy, key)
               request_body = client.build_response_body(
                   "Reply exactly: AIMETON_SOL_PROXY_OK", max_output_tokens=32

@@ -21,6 +21,7 @@ jobs:
       OWNER_SPEND_AUTHORIZED: ${{ inputs.owner_spend_authorized }}
       MAX_BUDGET_RUB: ${{ inputs.max_budget_rub }}
       OPENROUTER_PROXY_URL: ${{ vars.OPENROUTER_PROXY_URL }}
+      OPENROUTER_SOCKS5_URL: ${{ vars.OPENROUTER_SOCKS5_URL }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - name: Materialize exact reference source
@@ -29,7 +30,7 @@ jobs:
           set -Eeuo pipefail
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$OWNER_SPEND_AUTHORIZED" == "true" ]]
-          [[ "$MAX_BUDGET_RUB" == "100" ]]
+          [[ "$MAX_BUDGET_RUB" == "10000" ]]
           cd "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           if [[ ! -d .git ]]; then git init; fi
@@ -65,8 +66,9 @@ jobs:
               "raw_request_retained": False,
               "raw_model_output_retained": False,
               "proxy_value_retained": False,
+              "proxy_transport": "socks5h",
               "api_key_value_retained": False,
-              "max_budget_rub": 100,
+              "max_budget_rub": 10000,
               "max_output_tokens": 256,
               "submission_attempts": 0,
               "model_generation_requests": 0,
@@ -77,9 +79,12 @@ jobs:
           def persist():
               receipt_path.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
 
-          proxy = os.environ.get("OPENROUTER_PROXY_URL", "").strip()
           key = os.environ.get("OPENROUTER_API_KEY", "").strip()
           try:
+              proxy = client.resolve_proxy(
+                  os.environ.get("OPENROUTER_PROXY_URL", "").strip(),
+                  os.environ.get("OPENROUTER_SOCKS5_URL", "").strip(),
+              )
               client.validate_proxy_and_key(proxy, key)
               snapshot = dry.verify_snapshot()
               scenario = dry._read_json(dry.SCENARIO_PATH)
@@ -227,7 +232,8 @@ jobs:
                   f"- score passed: `{receipt.get('score_passed')}`",
                   f"- provider usage: `{json.dumps(receipt.get('provider_usage') or {}, sort_keys=True)}`",
                   f"- transport: `{json.dumps(receipt.get('transport_metrics') or {}, sort_keys=True)}`",
-                  "- authorized ceiling: `100 RUB`",
+                  f"- proxy transport: `{receipt.get('proxy_transport')}`",
+                  "- authorized session ceiling: `10000 RUB`",
                   f"- submission attempts: `{receipt.get('submission_attempts')}`",
                   f"- confirmed generation requests: `{receipt.get('model_generation_requests')}`",
                   f"- generation confirmed: `{receipt.get('generation_confirmed')}`",

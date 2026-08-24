@@ -19,6 +19,7 @@ jobs:
       EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
       GENERATION_ID: ${{ inputs.generation_id }}
       OPENROUTER_PROXY_URL: ${{ vars.OPENROUTER_PROXY_URL }}
+      OPENROUTER_SOCKS5_URL: ${{ vars.OPENROUTER_SOCKS5_URL }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - name: Materialize exact source
@@ -52,7 +53,6 @@ jobs:
           import openrouter_proxy_client as client
 
           generation_id = os.environ["GENERATION_ID"]
-          proxy = os.environ.get("OPENROUTER_PROXY_URL", "").strip()
           key = os.environ.get("OPENROUTER_API_KEY", "").strip()
           receipt = {
               "status": "OPENROUTER_GENERATION_READBACK_FAILED",
@@ -61,9 +61,14 @@ jobs:
               "paid_spend_authorized_rub": 0,
               "raw_prompt_retained": False,
               "raw_completion_retained": False,
+              "proxy_transport": "socks5h",
               "automatic_retries": 0,
           }
           try:
+              proxy = client.resolve_proxy(
+                  os.environ.get("OPENROUTER_PROXY_URL", "").strip(),
+                  os.environ.get("OPENROUTER_SOCKS5_URL", "").strip(),
+              )
               client.validate_proxy_and_key(proxy, key)
               url = "https://openrouter.ai/api/v1/generation?id=" + urllib.parse.quote(
                   generation_id, safe=""
@@ -138,6 +143,7 @@ jobs:
                   "- raw prompt retained: `false`",
                   "- raw completion retained: `false`",
                   "- automatic retries: `0`",
+                  f"- proxy transport: `{receipt.get('proxy_transport')}`",
                   f"- transport: `{json.dumps(receipt.get('transport_metrics') or {}, sort_keys=True)}`",
                   f"- failure class: `{receipt.get('failure_class')}`",
               ]

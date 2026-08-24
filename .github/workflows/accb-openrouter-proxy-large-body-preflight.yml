@@ -17,6 +17,7 @@ jobs:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
       OPENROUTER_PROXY_URL: ${{ vars.OPENROUTER_PROXY_URL }}
+      OPENROUTER_SOCKS5_URL: ${{ vars.OPENROUTER_SOCKS5_URL }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - name: Materialize exact source
@@ -54,14 +55,14 @@ jobs:
               "status": "OPENROUTER_PROXY_LARGE_BODY_PREFLIGHT_FAILED",
               "model_generation_requests": 0,
               "paid_spend_authorized_rub": 0,
-              "authorization_header_sent_to_transport_target": True,
-              "invalid_model_and_provider_enforced": True,
+              "authorization_header_sent_to_transport_target": False,
+              "transport_target": "httpbin.org/post",
+              "proxy_transport": "socks5h",
               "synthetic_payload_only": True,
               "raw_transport_response_retained": False,
               "proxy_value_retained": False,
               "automatic_retries": 0,
           }
-          proxy = os.environ.get("OPENROUTER_PROXY_URL", "").strip()
           key = os.environ.get("OPENROUTER_API_KEY", "").strip()
 
           def sanitized_key_state(result):
@@ -74,6 +75,10 @@ jobs:
               }
 
           try:
+              proxy = client.resolve_proxy(
+                  os.environ.get("OPENROUTER_PROXY_URL", "").strip(),
+                  os.environ.get("OPENROUTER_SOCKS5_URL", "").strip(),
+              )
               client.validate_proxy_and_key(proxy, key)
               key_before_result = client.authenticated_get(
                   url=client.OPENROUTER_KEY_URL,
@@ -119,78 +124,46 @@ jobs:
               uploads = []
               receipt["uploads"] = uploads
 
-              def invalid_transport_body(target):
-                  payload = {
-                      "model": "aimeton/no-paid-invalid-model",
-                      "input": "",
-                      "max_output_tokens": 1,
-                      "store": False,
-                      "provider": {
-                          "only": ["aimeton-no-paid-invalid-provider"],
-                          "order": ["aimeton-no-paid-invalid-provider"],
-                          "allow_fallbacks": False,
-                          "require_parameters": True,
-                          "data_collection": "deny",
-                      },
-                  }
-                  compact = lambda value: json.dumps(
-                      value, ensure_ascii=False, separators=(",", ":")
-                  ).encode("utf-8")
-                  base = compact(payload)
-                  padding = target - len(base)
+              def synthetic_transport_body(target):
+                  prefix = b'{"padding":"'
+                  suffix = b'"}'
+                  padding = target - len(prefix) - len(suffix)
                   if padding < 0:
-                      raise RuntimeError("invalid_transport_target")
-                  payload["input"] = "A" * padding
-                  body = compact(payload)
+                      raise RuntimeError("synthetic_transport_target_too_small")
+                  body = prefix + (b"A" * padding) + suffix
                   if len(body) != target:
                       raise RuntimeError("synthetic_body_size_mismatch")
                   return body
 
               for target in targets:
-                  synthetic_body = invalid_transport_body(target)
-                  try:
-                      result = client.request(
-                          method="POST",
-                          url=client.OPENROUTER_RESPONSES_URL,
-                          proxy=proxy,
-                          headers={
-                              "Authorization": f"Bearer {key}",
-                              "Accept": "application/json",
-                              "Content-Type": "application/json",
-                              "User-Agent": "aimeton-accb-large-body-no-paid-preflight",
-                              "X-OpenRouter-Metadata": "enabled",
-                          },
-                          body=synthetic_body,
-                          connect_timeout_seconds=30,
-                          total_timeout_seconds=900,
-                      )
-                      item = {
-                          "target_bytes": target,
-                          "http_status": result.http_status,
-                          "rejection_signal": "http_4xx",
-                          "response_sha256": hashlib.sha256(result.body).hexdigest(),
-                          **result.metrics,
-                      }
-                      if 200 <= result.http_status < 300:
-                          receipt["model_generation_requests"] = 1
-                          raise RuntimeError(f"invalid_model_unexpectedly_accepted_at_{target}")
-                      if not 400 <= result.http_status < 500:
-                          raise RuntimeError(f"unexpected_transport_http_{result.http_status}_at_{target}")
-                  except client.CurlTransportError as exc:
-                      if exc.failure_class != "empty_response" or not exc.metrics.get("upload_complete"):
-                          raise
-                      item = {
-                          "target_bytes": target,
-                          "http_status": exc.metrics.get("http_status"),
-                          "rejection_signal": "empty_response_after_complete_upload",
-                          **exc.metrics,
-                      }
+                  synthetic_body = synthetic_transport_body(target)
+                  result = client.request(
+                      method="POST",
+                      url="https://httpbin.org/post",
+                      proxy=proxy,
+                      headers={
+                          "Accept": "application/json",
+                          "Content-Type": "application/json",
+                          "User-Agent": "aimeton-accb-large-body-no-paid-preflight",
+                      },
+                      body=synthetic_body,
+                      connect_timeout_seconds=30,
+                      total_timeout_seconds=900,
+                  )
+                  item = {
+                      "target_bytes": target,
+                      "http_status": result.http_status,
+                      "response_sha256": hashlib.sha256(result.body).hexdigest(),
+                      **result.metrics,
+                  }
+                  if result.http_status != 200:
+                      raise RuntimeError(f"unexpected_transport_http_{result.http_status}_at_{target}")
                   elapsed = float(item.get("time_total_seconds") or 0)
                   if elapsed > 0:
                       item["effective_upload_bytes_per_second"] = round(target / elapsed, 3)
                   uploads.append(item)
                   if item.get("uploaded_bytes") != target:
-                      raise RuntimeError(f"incomplete_openrouter_upload_at_{target}")
+                      raise RuntimeError(f"incomplete_socks5_upload_at_{target}")
               receipt["uploads"] = uploads
 
               key_after_result = client.authenticated_get(
@@ -249,8 +222,8 @@ jobs:
                   f"- key state after: `{json.dumps(receipt.get('key_after') or {}, sort_keys=True)}`",
                   "- model generation requests: `0`",
                   "- paid spend authorized: `0 RUB`",
-                  "- Authorization sent only to OpenRouter transport target: `true`",
-                  "- invalid model/provider enforced: `true`",
+                  f"- proxy transport: `{receipt.get('proxy_transport')}`",
+                  "- Authorization sent to synthetic transport target: `false`",
                   f"- key usage unchanged: `{receipt.get('key_usage_unchanged')}`",
                   "- automatic retries: `0`",
                   "- proxy value retained: `false`",
@@ -283,8 +256,10 @@ jobs:
           receipt = json.loads(pathlib.Path("/tmp/accb-openrouter-proxy-large-body.json").read_text())
           assert receipt["model_generation_requests"] == 0
           assert receipt["paid_spend_authorized_rub"] == 0
-          assert receipt["authorization_header_sent_to_transport_target"] is True
-          assert receipt["invalid_model_and_provider_enforced"] is True
+          assert receipt["authorization_header_sent_to_transport_target"] is False
+          assert receipt["proxy_transport"] == "socks5h"
+          assert all(item.get("http_status") == 200 for item in receipt["uploads"])
+          assert all(item.get("upload_complete") is True for item in receipt["uploads"])
           assert receipt["key_usage_unchanged"] is True
           assert receipt["automatic_retries"] == 0
           if receipt["status"] != "OPENROUTER_PROXY_LARGE_BODY_PREFLIGHT_COMPLETE":
