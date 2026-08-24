@@ -57,7 +57,7 @@ jobs:
               "paid_spend_authorized_rub": 0,
               "authorization_header_sent_to_transport_target": False,
               "transport_target": "httpbin.org/post",
-              "proxy_transport": "socks5h",
+              "proxy_transport": "http",
               "synthetic_payload_only": True,
               "raw_transport_response_retained": False,
               "proxy_value_retained": False,
@@ -75,10 +75,7 @@ jobs:
               }
 
           try:
-              proxy = client.resolve_proxy(
-                  os.environ.get("OPENROUTER_PROXY_URL", "").strip(),
-                  os.environ.get("OPENROUTER_SOCKS5_URL", "").strip(),
-              )
+              proxy = os.environ.get("OPENROUTER_PROXY_URL", "").strip()
               client.validate_proxy_and_key(proxy, key)
               key_before_result = client.authenticated_get(
                   url=client.OPENROUTER_KEY_URL,
@@ -101,13 +98,16 @@ jobs:
                   seed=seed,
                   density=float(scenario["context_targets"]["distractor_density"]),
               )
+              wire_context, wire_manifest = client.compact_accb_context(context)
+              if wire_manifest["logical_whitespace_tokens"] != 32768:
+                  raise RuntimeError("compact_logical_token_target_mismatch")
               checkpoint = str(scenario["events"][5]["payload"])
               task = checkpoint + (
                   " Return JSON only with keys old_policy_status, fallback_authorization_status, "
                   "budget_rub, current_policy, next_safe_step. Use statuses superseded/revoked where applicable."
               )
               model_body = client.build_response_body(
-                  context + "\n\n[CHECKPOINT]\n" + task,
+                  wire_context + "\n\n[CHECKPOINT]\n" + task,
                   max_output_tokens=256,
               )
               receipt.update(
@@ -115,12 +115,15 @@ jobs:
                       "snapshot": snapshot,
                       "logical_context_tokens": manifest["logical_whitespace_tokens"],
                       "context_sha256": manifest["context_sha256"],
+                      **wire_manifest,
                       "exact_model_request_body_bytes": len(model_body),
                       "exact_model_request_body_sha256": hashlib.sha256(model_body).hexdigest(),
                   }
               )
 
-              targets = sorted({65536, 262144, len(model_body)})
+              if len(model_body) >= 196608:
+                  raise RuntimeError("compact_model_body_exceeds_observed_complete_upload_bound")
+              targets = sorted({65536, len(model_body)})
               uploads = []
               receipt["uploads"] = uploads
 
@@ -226,6 +229,9 @@ jobs:
                   f"- runner: `{os.environ.get('RUNNER_NAME')}`",
                   f"- status: **{receipt.get('status')}**",
                   f"- logical context tokens: `{receipt.get('logical_context_tokens')}`",
+                  f"- wire filler corpus: `{receipt.get('wire_filler_corpus_version')}`",
+                  f"- wire context bytes: `{receipt.get('wire_context_bytes')}`",
+                  f"- wire context digest: `{receipt.get('wire_context_sha256')}`",
                   f"- exact model-body bytes: `{receipt.get('exact_model_request_body_bytes')}`",
                   f"- exact model-body digest: `{receipt.get('exact_model_request_body_sha256')}`",
                   f"- synthetic upload results: `{json.dumps(receipt.get('uploads') or [], sort_keys=True)}`",
@@ -268,7 +274,8 @@ jobs:
           assert receipt["model_generation_requests"] == 0
           assert receipt["paid_spend_authorized_rub"] == 0
           assert receipt["authorization_header_sent_to_transport_target"] is False
-          assert receipt["proxy_transport"] == "socks5h"
+          assert receipt["proxy_transport"] == "http"
+          assert receipt["exact_model_request_body_bytes"] < 196608
           assert all(item.get("upload_complete") is True for item in receipt["uploads"])
           assert all(
               item.get("completion_signal") in {
