@@ -21,7 +21,7 @@ jobs:
       OWNER_SPEND_AUTHORIZED: ${{ inputs.owner_spend_authorized }}
       MAX_BUDGET_RUB: ${{ inputs.max_budget_rub }}
       OPENROUTER_PROXY_URL: ${{ vars.OPENROUTER_PROXY_URL }}
-      OPENROUTER_SOCKS5_URL: ${{ vars.OPENROUTER_SOCKS5_URL }}
+      OPENROUTER_SOCKS_URL: ${{ vars.OPENROUTER_SOCKS_URL }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - name: Materialize exact reference source
@@ -50,6 +50,7 @@ jobs:
           import json
           import os
           import pathlib
+          import urllib.parse
           import sys
 
           sys.path.insert(0, "scripts")
@@ -82,7 +83,17 @@ jobs:
 
           key = os.environ.get("OPENROUTER_API_KEY", "").strip()
           try:
-              proxy = os.environ.get("OPENROUTER_PROXY_URL", "").strip()
+              socks_endpoint = os.environ.get("OPENROUTER_SOCKS_URL", "").strip()
+              if socks_endpoint.startswith(("http://", "https://")):
+                  parsed = urllib.parse.urlsplit(socks_endpoint)
+                  if not parsed.hostname or parsed.username or parsed.password:
+                      raise RuntimeError("openrouter_socks_endpoint_invalid")
+                  host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+                  socks_endpoint = f"socks5h://{host}:{parsed.port or 50101}"
+              proxy = client.resolve_proxy(
+                  os.environ.get("OPENROUTER_PROXY_URL", "").strip(),
+                  socks_endpoint,
+              )
               client.validate_proxy_and_key(proxy, key)
               snapshot = dry.verify_snapshot()
               scenario = dry._read_json(dry.SCENARIO_PATH)
