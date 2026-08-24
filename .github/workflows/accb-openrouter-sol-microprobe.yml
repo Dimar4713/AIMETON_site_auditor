@@ -11,6 +11,7 @@ permissions:
   issues: write
 jobs:
   probe:
+    environment: stage
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     env:
