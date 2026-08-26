@@ -20,7 +20,7 @@ jobs:
       OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID || vars.OS_APPLICATION_CREDENTIAL_ID }}
       OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
     steps:
-      - name: Read provider state and external SSH reachability only
+      - name: Read provider state, SSH reachability and serial-console boot markers only
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -28,7 +28,7 @@ jobs:
           test -n "${OS_APPLICATION_CREDENTIAL_SECRET:-}"
           python3 -m pip install --disable-pip-version-check -q 'openstacksdk>=4,<5'
           python3 - <<'PY'
-          import json, os, socket
+          import hashlib, json, os, re, socket
           from openstack.connection import Connection
           conn=Connection(
               auth_url=os.environ['OS_AUTH_URL'],
@@ -56,6 +56,24 @@ jobs:
           finally:
               s.close()
           print('ssh_tcp_22='+ssh)
+
+          try:
+              console=conn.compute.get_server_console_output(srv, length=400) or ''
+              if not isinstance(console,str): console=str(console)
+              print('console_output_available=true')
+              print('console_output_bytes='+str(len(console.encode('utf-8','replace'))))
+              print('console_output_sha256='+hashlib.sha256(console.encode('utf-8','replace')).hexdigest())
+              safe=[]
+              marker=re.compile(r'(?i)(cloud-init|openssh|ssh\.service|network|systemd-resolved|resolved|dns|reached target|login:|failed|failure|error|emergency|degraded)')
+              redact=re.compile(r'(?i)(password|token|secret|private[_ -]?key)\s*[=:]\s*\S+')
+              for line in console.splitlines():
+                  if marker.search(line):
+                      line=redact.sub(r'\1=<redacted>',line)
+                      safe.append(line[:320])
+              for line in safe[-60:]: print('console_marker='+line)
+          except Exception as exc:
+              print('console_output_available=false')
+              print('console_read_error_class='+type(exc).__name__)
           print('provider_mutation=false')
           print('server_mutation=false')
           PY
