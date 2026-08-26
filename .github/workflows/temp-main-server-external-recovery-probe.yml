@@ -1,0 +1,78 @@
+name: TEMP Main Server External Recovery Probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/temp-main-server-external-recovery-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      MAIN_SERVER_IP: "195.209.215.159"
+      EXPECTED_CLIENT_FP: "SHA256:I8bLulMQeitgZVghJe3MJwEVQvvsqtJt4O3aZbOQZLg"
+      RECOVERY_KEY: ${{ secrets.AIMETON_WORKSTATION_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Probe external reachability and recovery credential metadata only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "execution_lane=github-hosted"
+          echo "main_server_ip=$MAIN_SERVER_IP"
+
+          echo "--- external DNS control ---"
+          for host in github.com api.github.com codeload.github.com api.immers.cloud; do
+            if getent ahostsv4 "$host" >/tmp/dns.$$ 2>/dev/null; then
+              echo "dns=$host status=resolved first_ipv4=$(awk 'NR==1{print $1}' /tmp/dns.$$)"
+            else
+              echo "dns=$host status=failed"
+            fi
+          done
+          rm -f /tmp/dns.$$
+
+          echo "--- TCP SSH reachability ---"
+          if timeout 8 bash -c "</dev/tcp/$MAIN_SERVER_IP/22" 2>/dev/null; then
+            echo "ssh_tcp_22=reachable"
+          else
+            echo "ssh_tcp_22=unreachable"
+          fi
+
+          echo "--- observed SSH host-key fingerprints ---"
+          hostscan="$(mktemp)"
+          ssh-keyscan -T 8 -t ed25519,rsa "$MAIN_SERVER_IP" >"$hostscan" 2>/dev/null || true
+          if [[ -s "$hostscan" ]]; then
+            ssh-keygen -lf "$hostscan" -E sha256 | awk '{print "observed_hostkey_bits="$1" observed_hostkey_fp="$2" observed_hostkey_type="$4}'
+          else
+            echo "observed_hostkey=none"
+          fi
+          rm -f "$hostscan"
+
+          echo "--- recovery client capability metadata ---"
+          secret_present=false
+          client_fp=""
+          client_fp_match=false
+          if [[ -n "${RECOVERY_KEY:-}" ]]; then
+            secret_present=true
+            keyfile="$(mktemp)"
+            trap 'rm -f "$keyfile"' EXIT
+            umask 077
+            printf '%s\n' "$RECOVERY_KEY" >"$keyfile"
+            unset RECOVERY_KEY
+            pub="$(ssh-keygen -y -P '' -f "$keyfile" 2>/dev/null || true)"
+            if [[ -n "$pub" ]]; then
+              client_fp="$(printf '%s\n' "$pub" | ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+              [[ "$client_fp" == "$EXPECTED_CLIENT_FP" ]] && client_fp_match=true
+            fi
+            rm -f "$keyfile"
+            trap - EXIT
+          fi
+          echo "recovery_secret_present=$secret_present"
+          echo "recovery_client_fp=${client_fp:-none}"
+          echo "recovery_client_fp_match=$client_fp_match"
+          echo "ssh_auth_attempted=false"
+          echo "server_mutation=false"
+          echo "provider_mutation=false"
