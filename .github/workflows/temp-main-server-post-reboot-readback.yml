@@ -1,0 +1,61 @@
+name: TEMP Main Server Post-Reboot Readback
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/temp-main-server-post-reboot-readback.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    environment: stage
+    timeout-minutes: 8
+    env:
+      MAIN_SERVER_IP: "195.209.215.159"
+      EXPECTED_SERVER_ID: "b880085c-a31f-4cd5-9ed5-e009000179e7"
+      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL || vars.OS_AUTH_URL || 'https://api.immers.cloud:5000/v3' }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID || vars.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+    steps:
+      - name: Read provider state and external SSH reachability only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "${OS_APPLICATION_CREDENTIAL_ID:-}"
+          test -n "${OS_APPLICATION_CREDENTIAL_SECRET:-}"
+          python3 -m pip install --disable-pip-version-check -q 'openstacksdk>=4,<5'
+          python3 - <<'PY'
+          import json, os, socket
+          from openstack.connection import Connection
+          conn=Connection(
+              auth_url=os.environ['OS_AUTH_URL'],
+              auth_type='v3applicationcredential',
+              application_credential_id=os.environ['OS_APPLICATION_CREDENTIAL_ID'],
+              application_credential_secret=os.environ['OS_APPLICATION_CREDENTIAL_SECRET'],
+          )
+          srv=conn.compute.get_server(os.environ['EXPECTED_SERVER_ID'])
+          raw=srv.to_dict()
+          state={
+              'id':raw.get('id'),'name':raw.get('name'),'status':raw.get('status'),
+              'task_state':raw.get('task_state') or raw.get('OS-EXT-STS:task_state'),
+              'vm_state':raw.get('vm_state') or raw.get('OS-EXT-STS:vm_state'),
+              'power_state':raw.get('power_state') or raw.get('OS-EXT-STS:power_state'),
+              'updated_at':str(raw.get('updated_at') or raw.get('updated') or ''),
+          }
+          print('provider_state='+json.dumps(state,sort_keys=True))
+          assert state['id']==os.environ['EXPECTED_SERVER_ID']
+          assert state['name']=='aimeton-main-server'
+          s=socket.socket(); s.settimeout(5)
+          try:
+              s.connect((os.environ['MAIN_SERVER_IP'],22)); ssh='reachable'
+          except OSError:
+              ssh='unreachable'
+          finally:
+              s.close()
+          print('ssh_tcp_22='+ssh)
+          print('provider_mutation=false')
+          print('server_mutation=false')
+          PY
