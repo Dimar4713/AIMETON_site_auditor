@@ -76,3 +76,73 @@ jobs:
           echo "ssh_auth_attempted=false"
           echo "server_mutation=false"
           echo "provider_mutation=false"
+
+  provider-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      MAIN_SERVER_IP: "195.209.215.159"
+      OS_AUTH_URL: ${{ secrets.OS_AUTH_URL || vars.OS_AUTH_URL || 'https://api.immers.cloud:5000/v3' }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID || vars.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+    steps:
+      - name: Check provider credential availability without exposing values
+        id: gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          present=false
+          if [[ -n "${OS_APPLICATION_CREDENTIAL_ID:-}" && -n "${OS_APPLICATION_CREDENTIAL_SECRET:-}" ]]; then
+            present=true
+          fi
+          echo "provider_credentials_present=$present"
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+          echo "provider_mutation=false"
+
+      - name: Read current Immers/OpenStack server reality
+        if: steps.gate.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m pip install --disable-pip-version-check -q 'openstacksdk>=4,<5'
+          python3 - <<'PY'
+          import json, os
+          from openstack.connection import Connection
+
+          conn = Connection(
+              auth_url=os.environ['OS_AUTH_URL'],
+              auth_type='v3applicationcredential',
+              application_credential_id=os.environ['OS_APPLICATION_CREDENTIAL_ID'],
+              application_credential_secret=os.environ['OS_APPLICATION_CREDENTIAL_SECRET'],
+          )
+          target_ip = os.environ['MAIN_SERVER_IP']
+          candidates = []
+          total = 0
+          for srv in conn.compute.servers(details=True):
+              total += 1
+              raw = srv.to_dict()
+              addresses = raw.get('addresses') or {}
+              ips = []
+              for entries in addresses.values():
+                  for entry in entries or []:
+                      addr = entry.get('addr') if isinstance(entry, dict) else None
+                      if addr:
+                          ips.append(addr)
+              name = str(raw.get('name') or '')
+              if name == 'aimeton-main-server' or target_ip in ips:
+                  candidates.append({
+                      'id': raw.get('id'),
+                      'name': name,
+                      'status': raw.get('status'),
+                      'power_state': raw.get('power_state') or raw.get('OS-EXT-STS:power_state'),
+                      'task_state': raw.get('task_state') or raw.get('OS-EXT-STS:task_state'),
+                      'vm_state': raw.get('vm_state') or raw.get('OS-EXT-STS:vm_state'),
+                      'ips': sorted(set(ips)),
+                      'created_at': str(raw.get('created_at') or raw.get('created') or ''),
+                  })
+          print('provider_api_auth=success')
+          print(f'provider_servers_visible={total}')
+          print(f'main_server_candidates={len(candidates)}')
+          print('main_server_reality=' + json.dumps(candidates, sort_keys=True, ensure_ascii=True))
+          print('provider_mutation=false')
+          PY
