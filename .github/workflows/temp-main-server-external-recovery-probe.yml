@@ -79,28 +79,55 @@ jobs:
 
   provider-readonly:
     runs-on: ubuntu-latest
+    environment: stage
     timeout-minutes: 8
     env:
       MAIN_SERVER_IP: "195.209.215.159"
+      EXPECTED_CLIENT_FP: "SHA256:I8bLulMQeitgZVghJe3MJwEVQvvsqtJt4O3aZbOQZLg"
+      RECOVERY_KEY: ${{ secrets.AIMETON_WORKSTATION_SSH_PRIVATE_KEY }}
       OS_AUTH_URL: ${{ secrets.OS_AUTH_URL || vars.OS_AUTH_URL || 'https://api.immers.cloud:5000/v3' }}
       OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID || vars.OS_APPLICATION_CREDENTIAL_ID }}
       OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
     steps:
-      - name: Check provider credential availability without exposing values
+      - name: Check stage-scoped recovery/provider capability without exposing values
         id: gate
         shell: bash
         run: |
           set -Eeuo pipefail
-          present=false
+          provider_present=false
           if [[ -n "${OS_APPLICATION_CREDENTIAL_ID:-}" && -n "${OS_APPLICATION_CREDENTIAL_SECRET:-}" ]]; then
-            present=true
+            provider_present=true
           fi
-          echo "provider_credentials_present=$present"
-          echo "present=$present" >> "$GITHUB_OUTPUT"
+
+          recovery_present=false
+          recovery_fp=""
+          recovery_match=false
+          if [[ -n "${RECOVERY_KEY:-}" ]]; then
+            recovery_present=true
+            keyfile="$(mktemp)"
+            trap 'rm -f "$keyfile"' EXIT
+            umask 077
+            printf '%s\n' "$RECOVERY_KEY" >"$keyfile"
+            unset RECOVERY_KEY
+            pub="$(ssh-keygen -y -P '' -f "$keyfile" 2>/dev/null || true)"
+            if [[ -n "$pub" ]]; then
+              recovery_fp="$(printf '%s\n' "$pub" | ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+              [[ "$recovery_fp" == "$EXPECTED_CLIENT_FP" ]] && recovery_match=true
+            fi
+            rm -f "$keyfile"
+            trap - EXIT
+          fi
+
+          echo "stage_provider_credentials_present=$provider_present"
+          echo "stage_recovery_secret_present=$recovery_present"
+          echo "stage_recovery_client_fp=${recovery_fp:-none}"
+          echo "stage_recovery_client_fp_match=$recovery_match"
+          echo "provider_present=$provider_present" >> "$GITHUB_OUTPUT"
           echo "provider_mutation=false"
+          echo "ssh_auth_attempted=false"
 
       - name: Read current Immers/OpenStack server reality
-        if: steps.gate.outputs.present == 'true'
+        if: steps.gate.outputs.provider_present == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
