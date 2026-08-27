@@ -167,6 +167,7 @@ jobs:
             echo '- GitHub Marketplace actions: `disabled`'
             echo "- runner tool cache: \`${RUNNER_TOOL_CACHE:-MISSING}\`"
             echo "- dependency cache source: \`$(findmnt -n -o SOURCE /mnt/aimeton-dependency-cache 2>/dev/null || echo MISSING)\`"
+            echo "- exact-SHA private fetch: \`x-access-token + credential cleanup\`"
             echo
             echo '### pytest tail'
             echo '```text'
