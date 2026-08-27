@@ -168,6 +168,8 @@ jobs:
             echo "- runner tool cache: \`${RUNNER_TOOL_CACHE:-MISSING}\`"
             echo "- dependency cache source: \`$(findmnt -n -o SOURCE /mnt/aimeton-dependency-cache 2>/dev/null || echo MISSING)\`"
             echo "- exact-SHA private fetch: \`x-access-token + credential cleanup\`"
+            echo '- legacy `_work/_tool` cleanup: `not performed by this workflow`'
+            echo '- runner `_update` cleanup: `out of scope / protected`'
             echo
             echo '### pytest tail'
             echo '```text'
