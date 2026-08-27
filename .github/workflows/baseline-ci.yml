@@ -31,6 +31,8 @@ jobs:
 
     steps:
       - name: Materialize exact commit without marketplace actions
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -41,12 +43,27 @@ jobs:
             git init
           fi
           git remote remove origin 2>/dev/null || true
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          cleanup_auth() {
+            git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git" 2>/dev/null || true
+          }
+          trap cleanup_auth EXIT
+          fetched=false
+          for attempt in 1 2 3 4 5; do
+            if git fetch --no-tags --depth=1 origin "$TARGET_SHA"; then
+              fetched=true
+              break
+            fi
+            test "$attempt" -lt 5
+            sleep $((attempt * attempt + 1))
+          done
+          test "$fetched" = true
           git checkout --detach --force FETCH_HEAD
           git reset --hard "$TARGET_SHA"
           git clean -ffdx
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          cleanup_auth
+          trap - EXIT
 
       - name: Prove external runner tool cache in job context
         shell: bash
