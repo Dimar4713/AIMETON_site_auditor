@@ -1,0 +1,60 @@
+name: TEMP External Health After Main DNS Apply
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/temp-external-health-after-main-dns.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  external-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check AIMETON public service externally read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "readback_only=true"
+          echo "provider_mutation=false"
+          echo "server_mutation=false"
+          echo "network_mutation=false"
+          echo "runner_mutation=false"
+
+          for host in aimeton.ru stage-auditor.aimeton.ru; do
+            echo "--- DNS $host ---"
+            getent ahostsv4 "$host" | head -n 5
+            ip="$(getent ahostsv4 "$host" | awk 'NR==1{print $1}')"
+            echo "external_dns=$host ipv4=$ip"
+            test "$ip" = "195.209.215.159"
+          done
+
+          root_code="$(curl --silent --show-error --location --max-time 20 --output /tmp/aimeton-root.html --write-out '%{http_code}' https://aimeton.ru/)"
+          echo "aimeton_root_http_code=$root_code"
+          test "$root_code" = "200"
+          test -s /tmp/aimeton-root.html
+
+          health="$(curl --fail --silent --show-error --max-time 20 https://stage-auditor.aimeton.ru/api/health)"
+          echo "stage_health=$health"
+          HEALTH_JSON="$health" python3 - <<'PY'
+          import json, os
+          data=json.loads(os.environ['HEALTH_JSON'])
+          if data.get('status') != 'ok':
+              raise SystemExit('stage health status is not ok')
+          print('stage_health_status=ok')
+          print('stage_health_version='+str(data.get('version')))
+          PY
+
+          python3 - <<'PY'
+          import socket
+          for host in ('aimeton.ru','stage-auditor.aimeton.ru'):
+              infos=socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM)
+              ips=sorted({item[4][0] for item in infos})
+              print(f'external_https_dns={host} ips={",".join(ips)}')
+              if '195.209.215.159' not in ips:
+                  raise SystemExit(f'expected AIMETON IP missing for {host}')
+          PY
+
+          echo "external_aimeton_health=healthy"
