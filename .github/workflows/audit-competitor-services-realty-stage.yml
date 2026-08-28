@@ -1,10 +1,21 @@
-name: Audit Competitor Services Realty Stage
+name: Audit Competitor Live Stage
 
 on:
   workflow_dispatch:
     inputs:
       expected_sha:
+        description: Exact deployed source SHA to audit with
         required: true
+        type: string
+      target_url:
+        description: HTTPS website URL to analyze with the deployed auditor
+        required: true
+        default: https://services-realty.ru/checksubject
+        type: string
+      audit_label:
+        description: Human-readable evidence label
+        required: true
+        default: services-realty.ru
         type: string
 
 permissions:
@@ -12,7 +23,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: audit-competitor-services-realty-stage
+  group: audit-competitor-live-stage
   cancel-in-progress: false
 
 jobs:
@@ -23,53 +34,112 @@ jobs:
     env:
       STACK_DIR: /opt/aimeton/auditor-stack
       CONTAINER: aimeton-auditor
-      TARGET: https://services-realty.ru/checksubject
-      REPORT: /tmp/competitor-services-realty-${{ github.run_id }}.md
+      TARGET: ${{ inputs.target_url }}
+      AUDIT_LABEL: ${{ inputs.audit_label }}
+      REPORT: /tmp/competitor-live-audit-${{ github.run_id }}.md
     steps:
-      - name: Verify exact deployed SHA and run current auditor
+      - name: Verify target and exact deployed SHA
         shell: bash
         run: |
           set -Eeuo pipefail
           expected='${{ inputs.expected_sha }}'
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
+          TARGET="$TARGET" python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+
+          target = os.environ['TARGET'].strip()
+          parsed = urlsplit(target)
+          assert parsed.scheme == 'https', 'target_url must use https'
+          assert parsed.hostname, 'target_url must include a hostname'
+          assert parsed.username is None and parsed.password is None, 'target_url credentials are forbidden'
+          assert parsed.fragment == '', 'target_url fragments are forbidden'
+          assert len(target) <= 2048, 'target_url is too long'
+          print(f'target_host={parsed.hostname}')
+          PY
           deployed="$(tr -d '[:space:]' < "$STACK_DIR/app-source-sha.txt")"
           status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
           test "$deployed" = "$expected"
           test "$status" = healthy
+          echo "deployed_sha=$deployed"
+          echo "auditor_status=$status"
+
+      - name: Run current deployed auditor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
           docker exec -e TARGET="$TARGET" -i "$CONTAINER" python - <<'PY' > /tmp/competitor-result.json
           import json, os
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError
-          target=os.environ['TARGET']
-          req=Request('http://127.0.0.1:5000/api/analyze', data=json.dumps({'url':target}).encode(), method='POST', headers={'Content-Type':'application/json'})
+
+          target = os.environ['TARGET']
+          req = Request(
+              'http://127.0.0.1:5000/api/analyze',
+              data=json.dumps({'url': target}).encode(),
+              method='POST',
+              headers={'Content-Type': 'application/json'},
+          )
           try:
-              with urlopen(req, timeout=420) as r:
-                  code=r.status; payload=json.loads(r.read().decode('utf-8'))
-          except HTTPError as e:
-              code=e.code
-              raw=e.read().decode('utf-8','replace')
-              try: payload=json.loads(raw)
-              except Exception: payload={'detail':raw[:5000]}
-          print(json.dumps({'http_status':code,'target':target,'payload':payload}, ensure_ascii=False))
+              with urlopen(req, timeout=420) as response:
+                  code = response.status
+                  payload = json.loads(response.read().decode('utf-8'))
+          except HTTPError as exc:
+              code = exc.code
+              raw = exc.read().decode('utf-8', 'replace')
+              try:
+                  payload = json.loads(raw)
+              except Exception:
+                  payload = {'detail': raw[:5000]}
+          print(json.dumps({'http_status': code, 'target': target, 'payload': payload}, ensure_ascii=False))
           PY
-          python3 - /tmp/competitor-result.json "$REPORT" "$expected" <<'PY'
-          import json,sys
+
+      - name: Build sanitized evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - /tmp/competitor-result.json "$REPORT" '${{ inputs.expected_sha }}' "$AUDIT_LABEL" <<'PY'
+          import json
+          import sys
           from pathlib import Path
-          data=json.load(open(sys.argv[1],encoding='utf-8'))
-          forbidden=('token','secret','password','cookie','authorization','raw_prompt','provider_payload')
-          def clean(v, depth=0):
-              if depth>8: return '<depth-limit>'
-              if isinstance(v,dict):
-                  return {k:clean(x,depth+1) for k,x in v.items() if not any(f in k.lower() for f in forbidden)}
-              if isinstance(v,list): return [clean(x,depth+1) for x in v[:100]]
-              if isinstance(v,str): return v[:12000]
-              return v
-          safe=clean(data)
-          body=json.dumps(safe,ensure_ascii=False,indent=2)
-          lines=['## Competitor live audit — services-realty.ru','',f'- exact deployed SHA: `{sys.argv[3]}`',f'- target: `{data["target"]}`',f'- HTTP status: `{data["http_status"]}`','- execution: current deployed `/api/analyze` on stage','', '```json', body[:55000], '```']
-          Path(sys.argv[2]).write_text('\n'.join(lines)+'\n',encoding='utf-8')
+
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          forbidden = ('token', 'secret', 'password', 'cookie', 'authorization', 'raw_prompt', 'provider_payload')
+
+          def clean(value, depth=0):
+              if depth > 8:
+                  return '<depth-limit>'
+              if isinstance(value, dict):
+                  return {
+                      key: clean(item, depth + 1)
+                      for key, item in value.items()
+                      if not any(marker in key.lower() for marker in forbidden)
+                  }
+              if isinstance(value, list):
+                  return [clean(item, depth + 1) for item in value[:100]]
+              if isinstance(value, str):
+                  return value[:12000]
+              return value
+
+          safe = clean(data)
+          body = json.dumps(safe, ensure_ascii=False, indent=2)
+          label = sys.argv[4][:200]
+          lines = [
+              f'## Competitor live audit — {label}',
+              '',
+              f'- exact deployed SHA: `{sys.argv[3]}`',
+              f'- target: `{data["target"]}`',
+              f'- HTTP status: `{data["http_status"]}`',
+              '- execution: current deployed `/api/analyze` on stage',
+              '',
+              '```json',
+              body[:55000],
+              '```',
+          ]
+          Path(sys.argv[2]).write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
           cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish sanitized evidence
         if: always()
         shell: bash
@@ -78,13 +148,23 @@ jobs:
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
-          import json,os,urllib.request
+          import json
+          import os
+          import urllib.request
           from pathlib import Path
-          p=Path(os.environ['REPORT'])
-          body=p.read_text(encoding='utf-8') if p.exists() else '## Competitor live audit\n\nFailed before evidence was produced.'
-          req=urllib.request.Request(
-            f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/293/comments",
-            data=json.dumps({'body':body[:60000]}).encode(), method='POST',
-            headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'})
-          with urllib.request.urlopen(req,timeout=30) as r: assert r.status==201
+
+          path = Path(os.environ['REPORT'])
+          body = path.read_text(encoding='utf-8') if path.exists() else '## Competitor live audit\n\nFailed before evidence was produced.'
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/293/comments",
+              data=json.dumps({'body': body[:60000]}).encode(),
+              method='POST',
+              headers={
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              assert response.status == 201
           PY
