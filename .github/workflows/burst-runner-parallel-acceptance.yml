@@ -23,7 +23,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  canonical-projection:
+    uses: Dimar4713/aimeton-infrastructure/.github/workflows/site-auditor-runner-projection.yml@main
+    with:
+      expected_projection_sha256: 684d6845ca763614c313c70de5f49242cb009ecea8ebc59d43b25dacc96978db
+
   parallel:
+    needs: canonical-projection
     name: burst-slot-${{ matrix.slot }}
     strategy:
       fail-fast: false
@@ -36,6 +42,7 @@ jobs:
       TARGET_SHA: ${{ inputs.expected_sha }}
       GH_TOKEN: ${{ github.token }}
       AIMETON_RUNNER_CONTRACT: site-auditor-stage
+      AIMETON_CANONICAL_PROJECTION_SHA256: ${{ needs.canonical-projection.outputs.projection_sha256 }}
     steps:
       - name: Materialize exact Site Auditor main without marketplace actions
         shell: bash
@@ -75,7 +82,7 @@ jobs:
 
   verify:
     name: verify-parallel-overlap
-    needs: parallel
+    needs: [canonical-projection, parallel]
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     env:
@@ -83,6 +90,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
       AIMETON_RUNNER_CONTRACT: site-auditor-stage
+      AIMETON_CANONICAL_PROJECTION_SHA256: ${{ needs.canonical-projection.outputs.projection_sha256 }}
     steps:
       - name: Materialize exact Site Auditor main without marketplace actions
         shell: bash

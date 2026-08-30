@@ -18,12 +18,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  canonical-projection:
+    uses: Dimar4713/aimeton-infrastructure/.github/workflows/site-auditor-runner-projection.yml@main
+    with:
+      expected_projection_sha256: 684d6845ca763614c313c70de5f49242cb009ecea8ebc59d43b25dacc96978db
+
   validate-projection:
+    needs: canonical-projection
     runs-on: [self-hosted, Linux, X64, stage, auditor]
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
       TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      AIMETON_CANONICAL_PROJECTION_SHA256: ${{ needs.canonical-projection.outputs.projection_sha256 }}
     steps:
       - name: Materialize exact revision without marketplace actions
         shell: bash
@@ -40,7 +47,7 @@ jobs:
           git clean -ffdx
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
 
-      - name: Fail closed on canonical infrastructure drift
+      - name: Fail closed without canonical infrastructure proof
         run: python3 scripts/validate_runner_contract_projection.py
 
       - name: Validate projection and runtime verifier contracts

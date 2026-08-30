@@ -23,148 +23,78 @@ projection_module = _load(
     ROOT / "scripts" / "validate_runner_contract_projection.py",
 )
 sys.modules["validate_runner_contract_projection"] = projection_module
-verifier = _load(
-    "verify_runner_contract_runtime",
-    ROOT / "scripts" / "verify_runner_contract_runtime.py",
-)
+verifier = _load("verify_runner_contract_runtime", ROOT / "scripts" / "verify_runner_contract_runtime.py")
 
 
-PERSISTENT = {
-    "runners": [
-        {
-            "key": "auditor_stage",
-            "repository": "Dimar4713/AIMETON_site_auditor",
-            "name": "aimeton-site-auditor-stage",
-            "labels": ["stage", "auditor"],
-        }
-    ]
-}
-BURST = {
-    "runners": [
-        {
-            "key": "auditor_burst_stage_01",
-            "repository": "Dimar4713/AIMETON_site_auditor",
-            "name": "aimeton-auditor-burst-stage-01",
-            "labels": ["stage", "auditor", "burst"],
-        },
-        {
-            "key": "auditor_burst_stage_02",
-            "repository": "Dimar4713/AIMETON_site_auditor",
-            "name": "aimeton-auditor-burst-stage-02",
-            "labels": ["stage", "auditor", "burst"],
-        },
-    ]
-}
-POOLS = {
-    "repositories": [
-        {
-            "repository": "Dimar4713/AIMETON_site_auditor",
-            "dispatch_enabled": False,
-            "baseline_slots": 1,
-            "burst_slots": 2,
-            "required_labels": [
-                "self-hosted",
-                "Linux",
-                "X64",
-                "stage",
-                "auditor",
-                "burst",
-            ],
-            "planned_runners": [
-                {"name": "aimeton-auditor-burst-stage-01"},
-                {"name": "aimeton-auditor-burst-stage-02"},
-            ],
-        }
-    ]
-}
-
-
-def test_generated_projection_matches_canonical_documents():
+def _projection_and_digest():
     projection = projection_module.load_projection()
-    contract = projection_module.validate_projection_against_documents(
-        projection, PERSISTENT, BURST, POOLS
-    )
-    assert [runner["runner_name"] for runner in contract["eligible_runners"]] == [
-        "aimeton-site-auditor-stage",
-        "aimeton-auditor-burst-stage-01",
-        "aimeton-auditor-burst-stage-02",
-    ]
+    return projection, projection["generation"]["canonical_projection_sha256"]
 
 
-def test_projection_records_exact_canonical_provenance():
-    generation = projection_module.load_projection()["generation"]
+def test_generated_projection_has_exact_canonical_provenance():
+    projection, digest = _projection_and_digest()
+    generation = projection["generation"]
     assert generation["infrastructure_repository"] == "Dimar4713/aimeton-infrastructure"
     assert len(generation["infrastructure_source_sha"]) == 40
+    assert len(digest) == 64
     assert {source["path"] for source in generation["sources"]} == {
         "ops/main-server/runners.json",
         "ops/burst-runner/site-auditor-runners.json",
         "ops/burst-runner/repository-pools.json",
     }
-    assert all(len(source["git_blob_sha"]) == 40 for source in generation["sources"])
 
 
-@pytest.mark.parametrize(
-    "runner_name",
-    ["aimeton-auditor-burst-stage-01", "aimeton-auditor-burst-stage-02"],
-)
-def test_burst_acceptance_allows_each_projected_identity(runner_name):
+@pytest.mark.parametrize("runner_name", ["aimeton-auditor-burst-stage-01", "aimeton-auditor-burst-stage-02"])
+def test_burst_acceptance_allows_each_canonically_proven_identity(runner_name):
+    _, digest = _projection_and_digest()
     result = verifier.verify_runtime_identity(
-        "site-auditor-stage",
-        runner_name,
-        require_source="burst",
-        validate_drift=False,
+        "site-auditor-stage", runner_name, require_source="burst", canonical_proof_sha256=digest
     )
     assert result["runner_source"] == "burst"
     assert result["identity_membership_verified"] is True
     assert result["runtime_labels_verified"] is False
     assert result["selector_authority"] == "github-scheduler"
+    assert result["canonical_proof_verified"] is True
+
+
+def test_missing_or_stale_canonical_proof_fails_closed():
+    projection, _ = _projection_and_digest()
+    for proof in (None, "0" * 64):
+        with pytest.raises(projection_module.ProjectionError):
+            projection_module.validate_projection_proof(projection, proof)
 
 
 def test_burst_acceptance_rejects_persistent_and_unknown_identity():
+    _, digest = _projection_and_digest()
     for runner_name in ("aimeton-site-auditor-stage", "unregistered-runner"):
         with pytest.raises(projection_module.ProjectionError):
             verifier.verify_runtime_identity(
-                "site-auditor-stage",
-                runner_name,
-                require_source="burst",
-                validate_drift=False,
+                "site-auditor-stage", runner_name, require_source="burst", canonical_proof_sha256=digest
             )
 
 
 def test_explicit_empty_runtime_labels_fail_closed():
+    _, digest = _projection_and_digest()
     with pytest.raises(projection_module.ProjectionError, match="runtime labels"):
         verifier.verify_runtime_identity(
             "site-auditor-stage",
             "aimeton-auditor-burst-stage-01",
             actual_labels=[],
             require_source="burst",
-            validate_drift=False,
+            canonical_proof_sha256=digest,
         )
 
 
-@pytest.mark.parametrize("field", ["name", "repository", "labels"])
-def test_canonical_inventory_drift_fails_closed(field):
-    burst = copy.deepcopy(BURST)
-    burst["runners"][0][field] = "drift" if field != "labels" else ["stage"]
-    with pytest.raises(projection_module.ProjectionError):
-        projection_module.validate_projection_against_documents(
-            projection_module.load_projection(), PERSISTENT, burst, POOLS
-        )
+def test_payload_mutation_fails_local_digest_validation(tmp_path):
+    projection, _ = _projection_and_digest()
+    mutated = copy.deepcopy(projection)
+    mutated["canonical_payload"]["contract"]["eligible_runners"][1]["runner_name"] = "drift"
+    path = tmp_path / "projection.json"
+    path.write_text(json.dumps(mutated))
+    with pytest.raises(projection_module.ProjectionError, match="digest"):
+        projection_module.load_projection(path)
 
 
-def test_repository_pool_policy_drift_fails_closed():
-    pools = copy.deepcopy(POOLS)
-    pools["repositories"][0]["required_labels"] = ["self-hosted", "Linux", "X64"]
-    with pytest.raises(projection_module.ProjectionError, match="labels"):
-        projection_module.validate_projection_against_documents(
-            projection_module.load_projection(), PERSISTENT, BURST, pools
-        )
-
-
-def test_projection_file_has_no_independent_inventory_or_resolver():
+def test_projection_has_no_independent_inventory_or_resolver():
     assert not (ROOT / "ops" / "runner-inventory.json").exists()
     assert not (ROOT / "scripts" / "resolve_runner_contract.py").exists()
-    payload = json.loads(
-        (ROOT / "contracts" / "generated" / "runner-contract-projection.json").read_text()
-    )
-    assert payload["schema_version"] == "1.0-generated"

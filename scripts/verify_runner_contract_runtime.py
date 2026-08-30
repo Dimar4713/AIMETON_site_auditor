@@ -11,7 +11,7 @@ from validate_runner_contract_projection import (
     ProjectionError,
     get_contract,
     load_projection,
-    validate_live_projection,
+    validate_projection_proof,
 )
 
 
@@ -21,14 +21,10 @@ def verify_runtime_identity(
     *,
     actual_labels: list[str] | None = None,
     require_source: str | None = None,
-    validate_drift: bool = True,
+    canonical_proof_sha256: str | None = None,
 ) -> dict[str, object]:
     projection = load_projection()
-    drift = (
-        validate_live_projection(projection, contract_name)
-        if validate_drift
-        else {"canonical_drift": None, "validated_current_main_sha": None}
-    )
+    validate_projection_proof(projection, canonical_proof_sha256)
     contract = get_contract(projection, contract_name)
     eligible = contract["eligible_runners"]
     if require_source is not None:
@@ -52,8 +48,8 @@ def verify_runtime_identity(
         "selector_authority": (
             "runtime-and-scheduler" if actual_labels is not None else "github-scheduler"
         ),
-        "canonical_drift": drift["canonical_drift"],
-        "canonical_main_sha": drift["validated_current_main_sha"],
+        "canonical_projection_sha256": canonical_proof_sha256,
+        "canonical_proof_verified": True,
     }
 
 
@@ -73,6 +69,7 @@ def main() -> int:
             args.runner_name,
             actual_labels=labels,
             require_source=args.require_source,
+            canonical_proof_sha256=os.environ.get("AIMETON_CANONICAL_PROJECTION_SHA256"),
         )
     except ProjectionError as exc:
         parser.error(str(exc))

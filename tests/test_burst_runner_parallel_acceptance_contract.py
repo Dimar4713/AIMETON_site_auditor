@@ -24,7 +24,9 @@ def test_burst_parallel_acceptance_requires_two_dedicated_burst_jobs():
 
 def test_burst_parallel_acceptance_is_provider_and_marketplace_free():
     text = WORKFLOW.read_text(encoding="utf-8")
-    assert "uses:" not in text
+    assert "uses: Dimar4713/aimeton-infrastructure/.github/workflows/site-auditor-runner-projection.yml@main" in text
+    assert "uses: actions/" not in text
+    assert "AIMETON_CANONICAL_PROJECTION_SHA256" in text
     for forbidden in (
         "openstack",
         "routerai",
