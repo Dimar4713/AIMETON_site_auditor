@@ -13,7 +13,8 @@ def test_burst_parallel_acceptance_requires_two_dedicated_burst_jobs():
     assert "runs-on: [self-hosted, Linux, X64, stage, auditor, burst]" in text
     assert "scripts/verify_runner_contract_runtime.py" in text
     assert "--require-source burst" in text
-    assert "scripts/resolve_runner_contract.py" in text
+    assert "scripts/validate_runner_contract_projection.py" in text
+    assert "--list-source', 'burst'" in text
     assert "if set(runners) != expected" in text
     assert "aimeton-auditor-burst-stage-0[12]" not in text
     assert "sleep 20" in text

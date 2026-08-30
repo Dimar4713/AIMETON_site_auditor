@@ -10,7 +10,7 @@ Acceptance is provider/model-free and exact-main pinned. The existing canonical 
 
 No additional `issue_comment` workflow subscriber is introduced. The canonical router validates the owner, command syntax, issue binding and commit existence, then dispatches `burst-runner-parallel-acceptance.yml`. The acceptance workflow itself requires the requested SHA to equal current `main` before running the measurement.
 
-The dispatched workflow starts two jobs with labels `self-hosted,Linux,X64,stage,auditor,burst`. Each job must pass the product runner contract's runtime identity verifier with `source=burst`; the final check derives the complete accepted burst identity set from the same contract and inventory. The workflow requires:
+The dispatched workflow starts two jobs with labels `self-hosted,Linux,X64,stage,auditor,burst`. GitHub scheduler placement is the label authority. Each job validates the generated projection against current canonical inventory in `aimeton-infrastructure`, then the runtime verifier proves physical identity, repository/source binding and contract membership with `source=burst`. The final check derives the complete accepted burst identity set from that validated projection. The workflow requires:
 
 - two successful jobs;
 - the two distinct burst identities declared by the `site-auditor-stage` contract;

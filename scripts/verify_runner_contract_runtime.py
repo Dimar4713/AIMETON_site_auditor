@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed unless the current runner is eligible for a Site Auditor contract."""
+"""Verify runtime identity against the canonical-infrastructure product projection."""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ import argparse
 import json
 import os
 
-from resolve_runner_contract import RunnerContractError, resolve_contract
+from validate_runner_contract_projection import (
+    ProjectionError,
+    get_contract,
+    load_projection,
+    validate_live_projection,
+)
 
 
 def verify_runtime_identity(
@@ -16,25 +21,39 @@ def verify_runtime_identity(
     *,
     actual_labels: list[str] | None = None,
     require_source: str | None = None,
+    validate_drift: bool = True,
 ) -> dict[str, object]:
-    resolved = resolve_contract(contract_name)
-    eligible = resolved["eligible_runners"]
+    projection = load_projection()
+    drift = (
+        validate_live_projection(projection, contract_name)
+        if validate_drift
+        else {"canonical_drift": None, "validated_current_main_sha": None}
+    )
+    contract = get_contract(projection, contract_name)
+    eligible = contract["eligible_runners"]
     if require_source is not None:
         eligible = [runner for runner in eligible if runner["source"] == require_source]
     matching = [runner for runner in eligible if runner["runner_name"] == actual_name]
     if len(matching) != 1:
         allowed = [runner["runner_name"] for runner in eligible]
-        raise RunnerContractError(
+        raise ProjectionError(
             f"runner identity {actual_name!r} is not eligible for {contract_name}; allowed={allowed}"
         )
     runner = matching[0]
-    if actual_labels is not None and not set(resolved["selector"]).issubset(actual_labels):
-        raise RunnerContractError(f"runtime labels do not satisfy contract {contract_name}")
+    if actual_labels is not None and not set(contract["selector"]).issubset(actual_labels):
+        raise ProjectionError(f"runtime labels do not satisfy contract {contract_name}")
     return {
         "contract": contract_name,
+        "repository": runner["repository"],
         "runner_name": actual_name,
-        "source": runner["source"],
-        "verified": True,
+        "runner_source": runner["source"],
+        "identity_membership_verified": True,
+        "runtime_labels_verified": actual_labels is not None,
+        "selector_authority": (
+            "runtime-and-scheduler" if actual_labels is not None else "github-scheduler"
+        ),
+        "canonical_drift": drift["canonical_drift"],
+        "canonical_main_sha": drift["validated_current_main_sha"],
     }
 
 
@@ -45,7 +64,7 @@ def main() -> int:
     parser.add_argument("--runner-labels", default=os.environ.get("AIMETON_RUNNER_LABELS"))
     parser.add_argument("--require-source", choices=("persistent", "burst"))
     args = parser.parse_args()
-    labels = args.runner_labels.split(",") if args.runner_labels else None
+    labels = args.runner_labels.split(",") if args.runner_labels is not None else None
     if not args.runner_name:
         parser.error("runner identity is empty")
     try:
@@ -55,7 +74,7 @@ def main() -> int:
             actual_labels=labels,
             require_source=args.require_source,
         )
-    except RunnerContractError as exc:
+    except ProjectionError as exc:
         parser.error(str(exc))
     print(json.dumps(result, sort_keys=True))
     return 0

@@ -126,15 +126,10 @@ jobs:
           runners=[str(j.get('runner_name') or '') for j in slots]
           if len(set(runners)) != 2:
               raise SystemExit(f'parallel acceptance used fewer than two distinct runners: {runners}')
-          resolved=json.loads(subprocess.check_output(
-              ['python3', 'scripts/resolve_runner_contract.py', os.environ['AIMETON_RUNNER_CONTRACT']],
+          expected=set(json.loads(subprocess.check_output(
+              ['python3', 'scripts/validate_runner_contract_projection.py', '--contract', os.environ['AIMETON_RUNNER_CONTRACT'], '--list-source', 'burst'],
               text=True,
-          ))
-          expected={
-              runner['runner_name']
-              for runner in resolved['eligible_runners']
-              if runner['source'] == 'burst'
-          }
+          )))
           if set(runners) != expected:
               raise SystemExit(f'contract burst identities differ: observed={runners} expected={sorted(expected)}')
           parse=lambda value: datetime.fromisoformat(str(value).replace('Z','+00:00'))

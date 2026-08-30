@@ -1,0 +1,47 @@
+name: Runner Contract Projection Validation
+
+on:
+  pull_request:
+    paths:
+      - "contracts/generated/runner-contract-projection.json"
+      - "scripts/validate_runner_contract_projection.py"
+      - "scripts/verify_runner_contract_runtime.py"
+      - "tests/test_runner_contract_projection.py"
+      - ".github/workflows/runner-contract-projection-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-contract-projection-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-projection:
+    runs-on: [self-hosted, Linux, X64, stage, auditor]
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Materialize exact revision without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+      - name: Fail closed on canonical infrastructure drift
+        run: python3 scripts/validate_runner_contract_projection.py
+
+      - name: Validate projection and runtime verifier contracts
+        run: python3 -m pytest -q tests/test_runner_contract_projection.py tests/test_burst_runner_parallel_acceptance_contract.py

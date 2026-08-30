@@ -17,8 +17,8 @@ The product workflow selects the burst capability by labels, but runtime identit
 
 ## Bounded implementation slice
 
-1. Record the Site Auditor stage contract and its persistent/burst inventory projection.
-2. Resolve the contract to every eligible registered identity while preserving the persistent runner as the compatibility default.
+1. Generate the Site Auditor stage projection from canonical persistent/burst inventory in `aimeton-infrastructure`.
+2. Record exact infrastructure source SHA, source paths and Git blob digests, and fail closed when current canonical blobs or projected runner fields drift.
 3. Fail closed at runtime when the executing identity is outside the resolved pool.
 4. Make the existing two-slot burst acceptance require a `burst` source from that contract.
 5. Keep provider actions, runner registration, topology changes, production workflow changes and merge authority outside this slice.
@@ -32,3 +32,9 @@ The product workflow selects the burst capability by labels, but runtime identit
 - two distinct runners and real execution overlap remain mandatory.
 
 Live queue-delay removal is not claimed until the owner-authorized acceptance workflow runs against current `main` and records terminal evidence.
+
+## Canonical inventory boundary
+
+The independent pilot inventory and resolver were removed on `2026-08-30T13:46:34Z`. The generated projection is not a second source of truth: both PR validation and live acceptance read current `aimeton-infrastructure/main`, compare canonical Git blob digests, reconstruct the selected runner fields, and fail closed on any mismatch. The runtime verifier consumes only the validated projection.
+
+GitHub `runs-on` remains the authority for capability labels. Runtime verification proves physical identity, repository/source binding and contract membership. It reports `runtime_labels_verified=false` when a reliable label signal is unavailable rather than claiming an unperformed check.
