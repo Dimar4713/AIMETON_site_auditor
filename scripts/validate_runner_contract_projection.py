@@ -32,8 +32,10 @@ def load_projection(path: Path = PROJECTION_PATH) -> dict[str, Any]:
     generation = projection.get("generation")
     if not isinstance(generation, dict) or not generation.get("infrastructure_source_sha"):
         raise ProjectionError("projection generation provenance is incomplete")
-    if not isinstance(generation.get("sources"), list) or len(generation["sources"]) != 2:
-        raise ProjectionError("projection must declare exactly two canonical inventory sources")
+    if generation.get("version") != 1 or not str(generation.get("generated_at", "")).endswith("Z"):
+        raise ProjectionError("projection generation version or UTC timestamp is invalid")
+    if not isinstance(generation.get("sources"), list) or len(generation["sources"]) != 3:
+        raise ProjectionError("projection must declare exactly three canonical sources")
     return projection
 
 
@@ -59,6 +61,7 @@ def validate_projection_against_documents(
     projection: dict[str, Any],
     persistent_document: dict[str, Any],
     burst_document: dict[str, Any],
+    repository_pools_document: dict[str, Any],
     contract_name: str = "site-auditor-stage",
 ) -> dict[str, Any]:
     contract = get_contract(projection, contract_name)
@@ -98,6 +101,25 @@ def validate_projection_against_documents(
             raise ProjectionError("generated runner repository ownership mismatch")
         if not selector.issubset(runner["labels"]):
             raise ProjectionError("generated runner does not satisfy contract selector")
+
+    pools = [
+        pool
+        for pool in repository_pools_document.get("repositories", [])
+        if pool.get("repository") == repository
+    ]
+    if len(pools) != 1:
+        raise ProjectionError("canonical Site Auditor repository pool is not unique")
+    pool = pools[0]
+    expected_burst_names = [
+        runner["runner_name"] for runner in observed if runner["source"] == "burst"
+    ]
+    planned_names = [runner.get("name") for runner in pool.get("planned_runners", [])]
+    if planned_names != expected_burst_names:
+        raise ProjectionError("canonical repository pool runner names differ from projection")
+    if pool.get("baseline_slots") != 1 or pool.get("burst_slots") != 2:
+        raise ProjectionError("canonical repository pool slot allocation differs")
+    if pool.get("required_labels") != [*contract["selector"], "burst"]:
+        raise ProjectionError("canonical repository pool labels differ from projection")
     return contract
 
 
@@ -124,6 +146,13 @@ def validate_live_projection(
     for source in generation["sources"]:
         path = source["path"]
         encoded_path = "/".join(quote(part, safe="") for part in path.split("/"))
+        source_payload = _github_json(
+            f"https://api.github.com/repos/{repository}/contents/{encoded_path}"
+            f"?ref={generation['infrastructure_source_sha']}",
+            token,
+        )
+        if source_payload.get("sha") != source["git_blob_sha"]:
+            raise ProjectionError(f"projection provenance digest mismatch: {path}")
         payload = _github_json(
             f"https://api.github.com/repos/{repository}/contents/{encoded_path}?ref={current_main_sha}",
             token,
@@ -138,6 +167,7 @@ def validate_live_projection(
         projection,
         documents["ops/main-server/runners.json"],
         documents["ops/burst-runner/site-auditor-runners.json"],
+        documents["ops/burst-runner/repository-pools.json"],
         contract_name,
     )
     return {

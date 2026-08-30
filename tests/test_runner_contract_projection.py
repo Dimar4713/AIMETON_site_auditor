@@ -55,12 +55,34 @@ BURST = {
         },
     ]
 }
+POOLS = {
+    "repositories": [
+        {
+            "repository": "Dimar4713/AIMETON_site_auditor",
+            "dispatch_enabled": False,
+            "baseline_slots": 1,
+            "burst_slots": 2,
+            "required_labels": [
+                "self-hosted",
+                "Linux",
+                "X64",
+                "stage",
+                "auditor",
+                "burst",
+            ],
+            "planned_runners": [
+                {"name": "aimeton-auditor-burst-stage-01"},
+                {"name": "aimeton-auditor-burst-stage-02"},
+            ],
+        }
+    ]
+}
 
 
 def test_generated_projection_matches_canonical_documents():
     projection = projection_module.load_projection()
     contract = projection_module.validate_projection_against_documents(
-        projection, PERSISTENT, BURST
+        projection, PERSISTENT, BURST, POOLS
     )
     assert [runner["runner_name"] for runner in contract["eligible_runners"]] == [
         "aimeton-site-auditor-stage",
@@ -76,6 +98,7 @@ def test_projection_records_exact_canonical_provenance():
     assert {source["path"] for source in generation["sources"]} == {
         "ops/main-server/runners.json",
         "ops/burst-runner/site-auditor-runners.json",
+        "ops/burst-runner/repository-pools.json",
     }
     assert all(len(source["git_blob_sha"]) == 40 for source in generation["sources"])
 
@@ -125,7 +148,16 @@ def test_canonical_inventory_drift_fails_closed(field):
     burst["runners"][0][field] = "drift" if field != "labels" else ["stage"]
     with pytest.raises(projection_module.ProjectionError):
         projection_module.validate_projection_against_documents(
-            projection_module.load_projection(), PERSISTENT, burst
+            projection_module.load_projection(), PERSISTENT, burst, POOLS
+        )
+
+
+def test_repository_pool_policy_drift_fails_closed():
+    pools = copy.deepcopy(POOLS)
+    pools["repositories"][0]["required_labels"] = ["self-hosted", "Linux", "X64"]
+    with pytest.raises(projection_module.ProjectionError, match="labels"):
+        projection_module.validate_projection_against_documents(
+            projection_module.load_projection(), PERSISTENT, BURST, pools
         )
 
 

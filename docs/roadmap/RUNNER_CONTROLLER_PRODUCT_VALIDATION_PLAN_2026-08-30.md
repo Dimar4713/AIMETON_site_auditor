@@ -35,6 +35,6 @@ Live queue-delay removal is not claimed until the owner-authorized acceptance wo
 
 ## Canonical inventory boundary
 
-The independent pilot inventory and resolver were removed on `2026-08-30T13:46:34Z`. The generated projection is not a second source of truth: both PR validation and live acceptance read current `aimeton-infrastructure/main`, compare canonical Git blob digests, reconstruct the selected runner fields, and fail closed on any mismatch. The runtime verifier consumes only the validated projection.
+The independent pilot inventory and resolver were removed on `2026-08-30T13:46:34Z`. The generated projection is not a second source of truth: both PR validation and live acceptance read current `aimeton-infrastructure/main`, compare canonical Git blob digests for persistent inventory, Site Auditor burst inventory and repository-pool policy, reconstruct the selected runner fields, and fail closed on any identity, ownership, label or slot-policy mismatch. The runtime verifier consumes only the validated projection.
 
 GitHub `runs-on` remains the authority for capability labels. Runtime verification proves physical identity, repository/source binding and contract membership. It reports `runtime_labels_verified=false` when a reliable label signal is unavailable rather than claiming an unperformed check.

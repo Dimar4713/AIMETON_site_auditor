@@ -13,6 +13,10 @@
       {
         "path": "ops/burst-runner/site-auditor-runners.json",
         "git_blob_sha": "153dab4f1e52ddccbe5e1db887780ee9f479b05d"
+      },
+      {
+        "path": "ops/burst-runner/repository-pools.json",
+        "git_blob_sha": "99513f9f0124cc659f14850fbc9bbeeaee4a67ee"
       }
     ]
   },
