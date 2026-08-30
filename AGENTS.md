@@ -15,6 +15,33 @@
 1. Прочитать относящиеся к задаче материалы в `docs/architecture/`, `docs/roadmap/`, `docs/governance/`, `docs/research/`, `docs/baseline/`, `docs/incidents/`, а также связанные Issues и Pull Requests.
 2. Установить действительное состояние, требуемое состояние и ранее принятые ограничения.
 3. Не начинать реализацию на основании только последнего сообщения или отдельной Issue, если она расходится с нормативными источниками.
+4. При межрепозиторной работе до первой mutation прочитать корневые `AGENTS.md` всех затрагиваемых репозиториев; локальные ограничения складываются и не могут ослаблять `Dimar4713/aimeton-architecture/AGENTS.md`.
+
+## 3×3 Reality Check
+
+Канонический принцип: `Dimar4713/aimeton-architecture/Docs/Principles/AIMETON_3x3_Reality_Check_Principle.md`.
+
+Перед blocker, root-cause, strong claim, security/cost decision, production/provider write либо утверждением `нет доступа / невозможно / единственный путь / нужен пользователь` первое объяснение MUST считаться гипотезой.
+
+Проверить минимум:
+
+1. architecture/lifecycle;
+2. alternatives/control paths;
+3. history/live;
+4. source/contract;
+5. runtime/live;
+6. independent evidence;
+7. falsification attempt.
+
+Если полный 3×3 объективно невозможен, вывод маркируется `provisional`; категорический blocker запрещён.
+
+## Canonical source-of-truth / projection anti-drift
+
+`aimeton-infrastructure` является canonical authority для runner inventory, lifecycle, deployment/provider operational contracts и инфраструктурного runtime state. Site Auditor не должен вести независимую mutable-копию этих данных как самостоятельный source of truth.
+
+Если продукту нужен локальный generated projection, он MUST содержать проверяемую provenance: canonical repository, exact source commit SHA, source path, immutable blob/object identifier и/или content digest. CI обязан fail-closed обнаруживать drift. Локальная синтаксическая валидность не доказывает актуальность projection.
+
+Нельзя создавать второй resolver/controller/dispatcher только потому, что локальный `GITHUB_TOKEN`, runner или workflow не видит private canonical repository. Сначала проверить существующий AIMETON access path: connector/MCP/router/trusted-server или canonical-side generation/synchronization.
 
 ### При возникновении решения или уточнения
 
