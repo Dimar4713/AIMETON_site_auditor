@@ -35,6 +35,7 @@ jobs:
     env:
       TARGET_SHA: ${{ inputs.expected_sha }}
       GH_TOKEN: ${{ github.token }}
+      AIMETON_RUNNER_CONTRACT: site-auditor-stage
     steps:
       - name: Materialize exact Site Auditor main without marketplace actions
         shell: bash
@@ -63,11 +64,11 @@ jobs:
           )"
           test "$current_main" = "$TARGET_SHA"
 
-      - name: Prove dedicated burst identity and hold overlap window
+      - name: Verify contract-resolved burst identity and hold overlap window
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$RUNNER_NAME" =~ ^aimeton-auditor-burst-stage-0[12]$ ]]
+          python3 scripts/verify_runner_contract_runtime.py "$AIMETON_RUNNER_CONTRACT" --require-source burst
           printf 'slot=%s runner=%s start_epoch=%s\n' '${{ matrix.slot }}' "$RUNNER_NAME" "$(date +%s)"
           sleep 20
           printf 'slot=%s runner=%s end_epoch=%s\n' '${{ matrix.slot }}' "$RUNNER_NAME" "$(date +%s)"
@@ -81,14 +82,31 @@ jobs:
       TARGET_SHA: ${{ inputs.expected_sha }}
       GH_TOKEN: ${{ github.token }}
       EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
+      AIMETON_RUNNER_CONTRACT: site-auditor-stage
     steps:
+      - name: Materialize exact Site Auditor main without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
       - name: Verify distinct burst runners and actual time overlap
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$EVIDENCE_ISSUE" = "783"
           python3 - <<'PY'
-          import json, os, urllib.request
+          import json, os, subprocess, urllib.request
           from datetime import datetime
 
           repo=os.environ['GITHUB_REPOSITORY']
@@ -108,8 +126,17 @@ jobs:
           runners=[str(j.get('runner_name') or '') for j in slots]
           if len(set(runners)) != 2:
               raise SystemExit(f'parallel acceptance used fewer than two distinct runners: {runners}')
-          if not all(name.startswith('aimeton-auditor-burst-stage-') for name in runners):
-              raise SystemExit(f'non-burst Site Auditor runner observed: {runners}')
+          resolved=json.loads(subprocess.check_output(
+              ['python3', 'scripts/resolve_runner_contract.py', os.environ['AIMETON_RUNNER_CONTRACT']],
+              text=True,
+          ))
+          expected={
+              runner['runner_name']
+              for runner in resolved['eligible_runners']
+              if runner['source'] == 'burst'
+          }
+          if set(runners) != expected:
+              raise SystemExit(f'contract burst identities differ: observed={runners} expected={sorted(expected)}')
           parse=lambda value: datetime.fromisoformat(str(value).replace('Z','+00:00'))
           starts=[parse(j['started_at']) for j in slots]
           ends=[parse(j['completed_at']) for j in slots]
