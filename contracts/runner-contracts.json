@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "owner": "Dimar4713",
+  "repository": "Dimar4713/AIMETON_site_auditor",
+  "contracts": {
+    "site-auditor-stage": {
+      "capability": "site-auditor-stage-validation",
+      "selector": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "stage",
+        "auditor"
+      ],
+      "inventory_key": "site_auditor_stage",
+      "burst_inventory_keys": [
+        "auditor_burst_stage_01",
+        "auditor_burst_stage_02"
+      ]
+    }
+  }
+}
