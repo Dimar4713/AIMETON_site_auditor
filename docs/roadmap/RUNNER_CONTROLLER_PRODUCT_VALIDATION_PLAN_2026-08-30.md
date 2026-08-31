@@ -22,7 +22,7 @@ Scope: provider-free Site Auditor acceptance only
 
 The first implementation called a reusable workflow in private `aimeton-infrastructure` from public Site Auditor. Run `33317877557` failed before creating any job, so this was a workflow accessibility failure, not a runner shortage.
 
-The product now validates immutable projection integrity on `ubuntu-latest` without private credentials. Canonical freshness and synchronization are executed from the existing trusted infrastructure control-plane/server path using the central credential contract. Product runtime evidence explicitly reports that it verifies projection integrity and identity membership, not live canonical freshness.
+The product now validates immutable projection integrity on `ubuntu-latest` without private credentials. Canonical generation and synchronization are executed from the existing trusted infrastructure control-plane/server path using the central credential contract. That path publishes to the machine-owned Site Auditor branch `aimeton-control/runner-projection-sync`; product CI and live acceptance read it with their ordinary same-repository token and fail closed on any document mismatch. Runtime evidence separately reports scheduler label authority, projection equality and identity/repository/source membership.
 
 ## Remaining acceptance
 

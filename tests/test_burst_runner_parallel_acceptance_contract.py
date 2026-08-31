@@ -27,6 +27,7 @@ def test_burst_parallel_acceptance_has_no_private_reusable_workflow():
     assert "uses: Dimar4713/aimeton-infrastructure/" not in text
     assert "uses: actions/" not in text
     assert "AIMETON_EXPECTED_PROJECTION_SHA256" in text
+    assert "aimeton-control/runner-projection-sync" in text
     assert "canonical freshness authority" in text
     for forbidden in (
         "openstack",

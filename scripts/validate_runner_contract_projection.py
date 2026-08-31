@@ -97,11 +97,27 @@ def validate_projection_integrity(
     return projection["canonical_payload"]
 
 
+def validate_control_plane_projection(
+    projection: dict[str, Any], control_plane_path: Path | None
+) -> None:
+    if control_plane_path is None:
+        raise ProjectionError("trusted control-plane projection is required")
+    control_plane_projection = load_projection(control_plane_path)
+    if control_plane_projection != projection:
+        raise ProjectionError("product projection differs from trusted control-plane projection")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--contract", default="site-auditor-stage")
     parser.add_argument("--list-source", choices=("persistent", "burst"))
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument(
+        "--control-plane-projection",
+        type=Path,
+        default=(Path(os.environ["AIMETON_CONTROL_PLANE_PROJECTION_PATH"])
+                 if os.environ.get("AIMETON_CONTROL_PLANE_PROJECTION_PATH") else None),
+    )
     args = parser.parse_args()
     projection = load_projection()
     integrity_verified = False
@@ -109,6 +125,7 @@ def main() -> int:
         validate_projection_integrity(
             projection, os.environ.get("AIMETON_EXPECTED_PROJECTION_SHA256")
         )
+        validate_control_plane_projection(projection, args.control_plane_projection)
         integrity_verified = True
     contract = get_contract(projection, args.contract)
     if args.list_source:
@@ -122,8 +139,8 @@ def main() -> int:
             "contract": args.contract,
             "projection_sha256": projection["generation"]["canonical_projection_sha256"],
             "projection_integrity_verified": integrity_verified,
-            "canonical_freshness_verified_at_runtime": False,
-            "canonical_freshness_authority": "aimeton-infrastructure canonical-side drift gate",
+            "canonical_projection_match_verified": not args.offline,
+            "canonical_freshness_authority": "trusted server projection branch",
             "eligible_runners": contract["eligible_runners"],
         }
     print(json.dumps(output, sort_keys=True))

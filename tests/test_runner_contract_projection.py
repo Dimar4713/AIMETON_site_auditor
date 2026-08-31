@@ -51,14 +51,16 @@ class RunnerProjectionTests(unittest.TestCase):
         for runner_name in ("aimeton-auditor-burst-stage-01", "aimeton-auditor-burst-stage-02"):
             with self.subTest(runner_name=runner_name):
                 result = verifier.verify_runtime_identity(
-                    "site-auditor-stage", runner_name, require_source="burst", expected_projection_sha256=digest
+                    "site-auditor-stage", runner_name, require_source="burst",
+                    expected_projection_sha256=digest,
+                    control_plane_projection_path=projection_module.PROJECTION_PATH,
                 )
                 self.assertEqual(result["runner_source"], "burst")
                 self.assertTrue(result["identity_membership_verified"])
                 self.assertFalse(result["runtime_labels_verified"])
                 self.assertEqual(result["selector_authority"], "github-scheduler")
                 self.assertTrue(result["projection_integrity_verified"])
-                self.assertFalse(result["canonical_freshness_verified_at_runtime"])
+                self.assertTrue(result["canonical_projection_match_verified"])
 
     def test_missing_or_stale_expected_digest_fails_closed(self):
         projection, _ = self.projection_and_digest()
@@ -71,7 +73,9 @@ class RunnerProjectionTests(unittest.TestCase):
         for runner_name in ("aimeton-site-auditor-stage", "unregistered-runner"):
             with self.subTest(runner_name=runner_name), self.assertRaises(projection_module.ProjectionError):
                 verifier.verify_runtime_identity(
-                    "site-auditor-stage", runner_name, require_source="burst", expected_projection_sha256=digest
+                    "site-auditor-stage", runner_name, require_source="burst",
+                    expected_projection_sha256=digest,
+                    control_plane_projection_path=projection_module.PROJECTION_PATH,
                 )
 
     def test_explicit_empty_runtime_labels_fail_closed(self):
@@ -83,7 +87,20 @@ class RunnerProjectionTests(unittest.TestCase):
                 actual_labels=[],
                 require_source="burst",
                 expected_projection_sha256=digest,
+                control_plane_projection_path=projection_module.PROJECTION_PATH,
             )
+
+    def test_missing_or_stale_control_plane_projection_fails_closed(self):
+        projection, _ = self.projection_and_digest()
+        with self.assertRaises(projection_module.ProjectionError):
+            projection_module.validate_control_plane_projection(projection, None)
+        mutated = copy.deepcopy(projection)
+        mutated["generation"]["infrastructure_source_sha"] = "0" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "control.json"
+            path.write_text(json.dumps(mutated))
+            with self.assertRaises(projection_module.ProjectionError):
+                projection_module.validate_control_plane_projection(projection, path)
 
     def test_payload_mutation_fails_local_digest_validation(self):
         projection, _ = self.projection_and_digest()

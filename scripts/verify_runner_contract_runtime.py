@@ -6,11 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
 
 from validate_runner_contract_projection import (
     ProjectionError,
     get_contract,
     load_projection,
+    validate_control_plane_projection,
     validate_projection_integrity,
 )
 
@@ -22,9 +24,11 @@ def verify_runtime_identity(
     actual_labels: list[str] | None = None,
     require_source: str | None = None,
     expected_projection_sha256: str | None = None,
+    control_plane_projection_path: Path | None = None,
 ) -> dict[str, object]:
     projection = load_projection()
     validate_projection_integrity(projection, expected_projection_sha256)
+    validate_control_plane_projection(projection, control_plane_projection_path)
     contract = get_contract(projection, contract_name)
     eligible = contract["eligible_runners"]
     if require_source is not None:
@@ -50,8 +54,8 @@ def verify_runtime_identity(
         ),
         "projection_sha256": expected_projection_sha256,
         "projection_integrity_verified": True,
-        "canonical_freshness_verified_at_runtime": False,
-        "canonical_freshness_authority": "aimeton-infrastructure canonical-side drift gate",
+        "canonical_projection_match_verified": True,
+        "canonical_freshness_authority": "trusted server projection branch",
     }
 
 
@@ -72,6 +76,10 @@ def main() -> int:
             actual_labels=labels,
             require_source=args.require_source,
             expected_projection_sha256=os.environ.get("AIMETON_EXPECTED_PROJECTION_SHA256"),
+            control_plane_projection_path=(
+                Path(os.environ["AIMETON_CONTROL_PLANE_PROJECTION_PATH"])
+                if os.environ.get("AIMETON_CONTROL_PLANE_PROJECTION_PATH") else None
+            ),
         )
     except ProjectionError as exc:
         parser.error(str(exc))

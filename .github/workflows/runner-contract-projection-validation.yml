@@ -43,6 +43,10 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
           trap - EXIT
+          git fetch --no-tags --depth=1 origin refs/heads/aimeton-control/runner-projection-sync
+          control_projection="$RUNNER_TEMP/control-plane-runner-projection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          git show FETCH_HEAD:contracts/generated/runner-contract-projection.json > "$control_projection"
+          echo "AIMETON_CONTROL_PLANE_PROJECTION_PATH=$control_projection" >> "$GITHUB_ENV"
 
       - name: Validate immutable projection integrity
         shell: bash

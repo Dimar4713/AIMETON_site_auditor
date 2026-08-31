@@ -13,6 +13,6 @@ GitHub scheduler `runs-on` labels are capability-placement authority. Each runti
 - actual overlap of execution intervals;
 - no provider/model call, release authority or hard-gate override.
 
-The public product workflow does not call the private infrastructure repository. Canonical freshness belongs to the infrastructure-side drift/synchronization gate executed from the trusted control plane. The product artifact records exact infrastructure SHA, source paths, blob IDs and payload digest; local validation proves integrity, not canonical freshness.
+The public product workflow does not call the private infrastructure repository. The trusted infrastructure control plane publishes the canonical generated document to the machine-owned same-repository branch `aimeton-control/runner-projection-sync`. Product CI and live acceptance fetch that branch with the ordinary read-only Site Auditor token and fail closed unless its document exactly equals the PR/main artifact. The document records exact infrastructure SHA, source paths, blob IDs and payload digest. No privileged credential is copied into Site Auditor workflows.
 
 This workflow is an acceptance measurement only. It does not wake/shelve infrastructure, register runners or activate autoscaling.

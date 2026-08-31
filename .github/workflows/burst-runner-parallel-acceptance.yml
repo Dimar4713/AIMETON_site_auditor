@@ -64,6 +64,10 @@ jobs:
           PY
           )"
           test "$current_main" = "$TARGET_SHA"
+          git fetch --no-tags --depth=1 origin refs/heads/aimeton-control/runner-projection-sync
+          control_projection="$RUNNER_TEMP/control-plane-runner-projection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.slot }}.json"
+          git show FETCH_HEAD:contracts/generated/runner-contract-projection.json > "$control_projection"
+          echo "AIMETON_CONTROL_PLANE_PROJECTION_PATH=$control_projection" >> "$GITHUB_ENV"
 
       - name: Verify contract-resolved burst identity and hold overlap window
         shell: bash
@@ -101,6 +105,10 @@ jobs:
           git reset --hard "$TARGET_SHA"
           git clean -ffdx
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          git fetch --no-tags --depth=1 origin refs/heads/aimeton-control/runner-projection-sync
+          control_projection="$RUNNER_TEMP/control-plane-runner-projection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-verify.json"
+          git show FETCH_HEAD:contracts/generated/runner-contract-projection.json > "$control_projection"
+          echo "AIMETON_CONTROL_PLANE_PROJECTION_PATH=$control_projection" >> "$GITHUB_ENV"
 
       - name: Verify distinct burst runners and actual time overlap
         shell: bash
