@@ -11,6 +11,7 @@
 ## Главный план развития
 
 - [Полный план развития системы поиска, анализа и действий](roadmap/AIMETON_Site_Auditor_full_system_development_plan.md) — целевая архитектура Site Auditor как прикладного Runtime AIMETON: 12 РПТК, федеративный поиск, многоплоскостность, фрактальные ветви, усушение поиска, свойства мишеней, сценарии, Evidence/Entity Graph, Hunter, отчётность, Capability Management и очередность реализации.
+- [План продуктовой проверки Runner Controller](roadmap/RUNNER_CONTROLLER_PRODUCT_VALIDATION_PLAN_2026-08-30.md) — ограниченный provider-free срез `contract → inventory → runtime identity` на существующем Site Auditor burst acceptance.
 - [SEF T0 baseline](baseline/SEF-T0-BASELINE-2026-07-28.md) — точные SHA сервиса, stage, Sentinel и инфраструктуры, evidence ATS-09A, teardown/no-orphan и честная фиксация красного внешнего валидатора.
 - [SEF Benchmark-20 v0.1](benchmarks/SEF-BENCHMARK-20-V0.1.md) — замороженная выборка из 20 компаний и ручной identity-эталон для первых пяти.
 - [Identity Benchmark-5 v0.1](benchmarks/IDENTITY-BENCHMARK-5-V0.1.md) — воспроизводимый HTML → signals → Entity Resolution regression по Golden-5.

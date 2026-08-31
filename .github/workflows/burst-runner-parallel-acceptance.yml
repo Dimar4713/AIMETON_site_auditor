@@ -35,6 +35,8 @@ jobs:
     env:
       TARGET_SHA: ${{ inputs.expected_sha }}
       GH_TOKEN: ${{ github.token }}
+      AIMETON_RUNNER_CONTRACT: site-auditor-stage
+      AIMETON_EXPECTED_PROJECTION_SHA256: 684d6845ca763614c313c70de5f49242cb009ecea8ebc59d43b25dacc96978db
     steps:
       - name: Materialize exact Site Auditor main without marketplace actions
         shell: bash
@@ -62,12 +64,16 @@ jobs:
           PY
           )"
           test "$current_main" = "$TARGET_SHA"
+          git fetch --no-tags --depth=1 origin refs/heads/aimeton-control/runner-projection-sync
+          control_projection="$RUNNER_TEMP/control-plane-runner-projection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.slot }}.json"
+          git show FETCH_HEAD:contracts/generated/runner-contract-projection.json > "$control_projection"
+          echo "AIMETON_CONTROL_PLANE_PROJECTION_PATH=$control_projection" >> "$GITHUB_ENV"
 
-      - name: Prove dedicated burst identity and hold overlap window
+      - name: Verify contract-resolved burst identity and hold overlap window
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$RUNNER_NAME" =~ ^aimeton-auditor-burst-stage-0[12]$ ]]
+          python3 scripts/verify_runner_contract_runtime.py "$AIMETON_RUNNER_CONTRACT" --require-source burst
           printf 'slot=%s runner=%s start_epoch=%s\n' '${{ matrix.slot }}' "$RUNNER_NAME" "$(date +%s)"
           sleep 20
           printf 'slot=%s runner=%s end_epoch=%s\n' '${{ matrix.slot }}' "$RUNNER_NAME" "$(date +%s)"
@@ -81,14 +87,36 @@ jobs:
       TARGET_SHA: ${{ inputs.expected_sha }}
       GH_TOKEN: ${{ github.token }}
       EVIDENCE_ISSUE: ${{ inputs.evidence_issue }}
+      AIMETON_RUNNER_CONTRACT: site-auditor-stage
+      AIMETON_EXPECTED_PROJECTION_SHA256: 684d6845ca763614c313c70de5f49242cb009ecea8ebc59d43b25dacc96978db
     steps:
+      - name: Materialize exact Site Auditor main without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then git init; fi
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          git reset --hard "$TARGET_SHA"
+          git clean -ffdx
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          git fetch --no-tags --depth=1 origin refs/heads/aimeton-control/runner-projection-sync
+          control_projection="$RUNNER_TEMP/control-plane-runner-projection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-verify.json"
+          git show FETCH_HEAD:contracts/generated/runner-contract-projection.json > "$control_projection"
+          echo "AIMETON_CONTROL_PLANE_PROJECTION_PATH=$control_projection" >> "$GITHUB_ENV"
+
       - name: Verify distinct burst runners and actual time overlap
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$EVIDENCE_ISSUE" = "783"
           python3 - <<'PY'
-          import json, os, urllib.request
+          import json, os, subprocess, urllib.request
           from datetime import datetime
 
           repo=os.environ['GITHUB_REPOSITORY']
@@ -108,8 +136,12 @@ jobs:
           runners=[str(j.get('runner_name') or '') for j in slots]
           if len(set(runners)) != 2:
               raise SystemExit(f'parallel acceptance used fewer than two distinct runners: {runners}')
-          if not all(name.startswith('aimeton-auditor-burst-stage-') for name in runners):
-              raise SystemExit(f'non-burst Site Auditor runner observed: {runners}')
+          expected=set(json.loads(subprocess.check_output(
+              ['python3', 'scripts/validate_runner_contract_projection.py', '--contract', os.environ['AIMETON_RUNNER_CONTRACT'], '--list-source', 'burst'],
+              text=True,
+          )))
+          if set(runners) != expected:
+              raise SystemExit(f'contract burst identities differ: observed={runners} expected={sorted(expected)}')
           parse=lambda value: datetime.fromisoformat(str(value).replace('Z','+00:00'))
           starts=[parse(j['started_at']) for j in slots]
           ends=[parse(j['completed_at']) for j in slots]
@@ -121,9 +153,13 @@ jobs:
               '## Site Auditor burst parallel acceptance evidence\n\n'
               f'- workflow run: `{run_id}`\n'
               f'- exact Site Auditor SHA: `{os.environ["TARGET_SHA"]}`\n'
+              f'- projection digest: `{os.environ["AIMETON_EXPECTED_PROJECTION_SHA256"]}`\n'
               f'- burst runners: `{runners}`\n'
               '- distinct burst runners: `2`\n'
               '- execution intervals overlap: `true`\n'
+              '- scheduler label authority: `GitHub`\n'
+              '- runtime identity/repository/source membership: `verified`\n'
+              '- canonical freshness authority: `aimeton-infrastructure canonical-side drift gate`\n'
               '- provider/model calls: `none`\n'
               '- release authority: `none`\n'
           )

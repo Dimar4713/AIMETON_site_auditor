@@ -1,0 +1,82 @@
+name: Runner Contract Projection Validation
+
+on:
+  pull_request:
+    paths:
+      - "contracts/generated/runner-contract-projection.json"
+      - "scripts/validate_runner_contract_projection.py"
+      - "scripts/verify_runner_contract_runtime.py"
+      - "tests/test_runner_contract_projection.py"
+      - "tests/test_burst_runner_parallel_acceptance_contract.py"
+      - ".github/workflows/runner-contract-projection-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-contract-projection-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-projection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      AIMETON_EXPECTED_PROJECTION_SHA256: 684d6845ca763614c313c70de5f49242cb009ecea8ebc59d43b25dacc96978db
+    steps:
+      - name: Materialize exact revision without marketplace actions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          workdir="$RUNNER_TEMP/runner-projection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$workdir"
+          mkdir -p "$workdir"
+          cd "$workdir"
+          git init .
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          trap 'git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git" 2>/dev/null || true' EXIT
+          git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          git checkout --detach --force FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          trap - EXIT
+          git fetch --no-tags --depth=1 origin refs/heads/aimeton-control/runner-projection-sync
+          control_projection="$RUNNER_TEMP/control-plane-runner-projection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          git show FETCH_HEAD:contracts/generated/runner-contract-projection.json > "$control_projection"
+          echo "AIMETON_CONTROL_PLANE_PROJECTION_PATH=$control_projection" >> "$GITHUB_ENV"
+
+      - name: Validate immutable projection integrity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          workdir="$RUNNER_TEMP/runner-projection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cd "$workdir"
+          python3 scripts/validate_runner_contract_projection.py
+
+      - name: Validate projection and runtime verifier contracts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          workdir="$RUNNER_TEMP/runner-projection-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cd "$workdir"
+          python3 -m unittest -v tests.test_runner_contract_projection
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+
+          path = Path('tests/test_burst_runner_parallel_acceptance_contract.py')
+          spec = importlib.util.spec_from_file_location(path.stem, path)
+          module = importlib.util.module_from_spec(spec)
+          assert spec and spec.loader
+          spec.loader.exec_module(module)
+          count = 0
+          for name in sorted(dir(module)):
+              test = getattr(module, name)
+              if name.startswith('test_') and callable(test):
+                  test()
+                  count += 1
+          print(f'burst_acceptance_contract_tests_passed={count}')
+          PY
