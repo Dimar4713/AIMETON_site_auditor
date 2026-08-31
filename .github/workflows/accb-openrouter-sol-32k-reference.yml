@@ -67,7 +67,7 @@ jobs:
               "raw_request_retained": False,
               "raw_model_output_retained": False,
               "proxy_value_retained": False,
-              "proxy_transport": "http",
+              "proxy_transport": "unresolved",
               "api_key_value_retained": False,
               "max_budget_rub": 100,
               "max_output_tokens": 256,
@@ -94,6 +94,7 @@ jobs:
                   os.environ.get("OPENROUTER_PROXY_URL", "").strip(),
                   socks_endpoint,
               )
+              receipt["proxy_transport"] = urllib.parse.urlsplit(proxy).scheme
               client.validate_proxy_and_key(proxy, key)
               snapshot = dry.verify_snapshot()
               scenario = dry._read_json(dry.SCENARIO_PATH)
