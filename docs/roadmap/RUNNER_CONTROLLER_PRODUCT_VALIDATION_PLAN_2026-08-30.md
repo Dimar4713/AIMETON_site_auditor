@@ -1,40 +1,32 @@
 # Runner Controller product validation plan
 
-Status: implementation started  
-Recorded: `2026-08-30T13:19:44Z`  
+Status: implementation correction in progress  
+Recorded: `2026-08-31T11:13:33Z`  
 Scope: provider-free Site Auditor acceptance only
 
 ## Traceability
 
-- Architecture: `Dimar4713/aimeton-architecture#128`.
+- Infrastructure implementation: `Dimar4713/aimeton-infrastructure#567`, merged as `1270bab9161f7b90c426c55445f3b19800e6ce51`.
 - Infrastructure lifecycle: `Dimar4713/aimeton-infrastructure#240` and `#329`.
-- Infrastructure inventory: `Dimar4713/aimeton-infrastructure#353`.
-- Existing product acceptance: `burst-runner-parallel-acceptance.yml`.
+- Product implementation: #854; supersedes closed draft #851.
 
-## Observed gap
+## Implemented product slice
 
-The product workflow selects the burst capability by labels, but runtime identity validation was a hardcoded runner-name regular expression. It could neither consume an inventory nor prove that the selected identity belongs to the contract-resolved pool.
+1. The independent pilot inventory and resolver are absent.
+2. The generated projection records canonical repository, exact infrastructure source SHA, three source paths, immutable Git blob IDs and payload SHA-256.
+3. Runtime verification fails closed on unknown identity, wrong repository/source, duplicate key/name, selector incompatibility and missing/stale expected projection digest.
+4. The existing parallel acceptance derives both burst identities from the projection; no runner-name regex is identity authority.
+5. GitHub scheduler owns label placement. Runtime labels are verified only when an explicit trusted signal is available.
 
-## Bounded implementation slice
+## Cross-repository correction
 
-1. Generate the Site Auditor stage projection from canonical persistent/burst inventory in `aimeton-infrastructure`.
-2. Record exact infrastructure source SHA, source paths and Git blob digests, and fail closed when current canonical blobs or projected runner fields drift.
-3. Fail closed at runtime when the executing identity is outside the resolved pool.
-4. Make the existing two-slot burst acceptance require a `burst` source from that contract.
-5. Keep provider actions, runner registration, topology changes, production workflow changes and merge authority outside this slice.
+The first implementation called a reusable workflow in private `aimeton-infrastructure` from public Site Auditor. Run `33317877557` failed before creating any job, so this was a workflow accessibility failure, not a runner shortage.
 
-## Acceptance
+The product now validates immutable projection integrity on `ubuntu-latest` without private credentials. Canonical freshness and synchronization are executed from the existing trusted infrastructure control-plane/server path using the central credential contract. Product runtime evidence explicitly reports that it verifies projection integrity and identity membership, not live canonical freshness.
 
-- provider-free tests accept both declared burst identities;
-- the persistent runner remains eligible for the stage contract but is rejected by burst-only acceptance;
-- an unknown, duplicate, cross-repository or selector-incompatible identity fails closed;
-- the live acceptance workflow derives accepted names from contract output rather than a name prefix;
-- two distinct runners and real execution overlap remain mandatory.
+## Remaining acceptance
 
-Live queue-delay removal is not claimed until the owner-authorized acceptance workflow runs against current `main` and records terminal evidence.
-
-## Canonical inventory boundary
-
-The independent pilot inventory and resolver were removed on `2026-08-30T13:46:34Z`. The generated projection is not a second source of truth. Because both repositories are private and cross-repository credentials are forbidden, validation uses the canonical reusable workflow in `aimeton-infrastructure/main`: it renders the projection from persistent inventory, Site Auditor burst inventory and repository-pool policy, then returns a SHA-256 proof. Product PR validation and live acceptance fail closed when that proof differs from the generated artifact. The runtime verifier requires the same proof before accepting an identity.
-
-GitHub `runs-on` remains the authority for capability labels. Runtime verification proves physical identity, repository/source binding and contract membership. It reports `runtime_labels_verified=false` when a reliable label signal is unavailable rather than claiming an unperformed check.
+- merge #854 only after provider-free CI is terminal GREEN and the canonical-side sync/drift slice is reviewable;
+- perform exactly one owner-authorized lifecycle acceptance after merged exact-main prerequisites;
+- measure `queue_created_at → runner_job_started_at`, distinct identities, overlap, drain, cooldown and shelve/read-back;
+- do not claim queue-delay removal or lifecycle completion before terminal live evidence.

@@ -35,7 +35,7 @@ def test_generated_projection_has_exact_canonical_provenance():
     projection, digest = _projection_and_digest()
     generation = projection["generation"]
     assert generation["infrastructure_repository"] == "Dimar4713/aimeton-infrastructure"
-    assert len(generation["infrastructure_source_sha"]) == 40
+    assert generation["infrastructure_source_sha"] == "1270bab9161f7b90c426c55445f3b19800e6ce51"
     assert len(digest) == 64
     assert {source["path"] for source in generation["sources"]} == {
         "ops/main-server/runners.json",
@@ -45,23 +45,24 @@ def test_generated_projection_has_exact_canonical_provenance():
 
 
 @pytest.mark.parametrize("runner_name", ["aimeton-auditor-burst-stage-01", "aimeton-auditor-burst-stage-02"])
-def test_burst_acceptance_allows_each_canonically_proven_identity(runner_name):
+def test_burst_acceptance_allows_each_projected_identity(runner_name):
     _, digest = _projection_and_digest()
     result = verifier.verify_runtime_identity(
-        "site-auditor-stage", runner_name, require_source="burst", canonical_proof_sha256=digest
+        "site-auditor-stage", runner_name, require_source="burst", expected_projection_sha256=digest
     )
     assert result["runner_source"] == "burst"
     assert result["identity_membership_verified"] is True
     assert result["runtime_labels_verified"] is False
     assert result["selector_authority"] == "github-scheduler"
-    assert result["canonical_proof_verified"] is True
+    assert result["projection_integrity_verified"] is True
+    assert result["canonical_freshness_verified_at_runtime"] is False
 
 
-def test_missing_or_stale_canonical_proof_fails_closed():
+def test_missing_or_stale_expected_digest_fails_closed():
     projection, _ = _projection_and_digest()
     for proof in (None, "0" * 64):
         with pytest.raises(projection_module.ProjectionError):
-            projection_module.validate_projection_proof(projection, proof)
+            projection_module.validate_projection_integrity(projection, proof)
 
 
 def test_burst_acceptance_rejects_persistent_and_unknown_identity():
@@ -69,7 +70,7 @@ def test_burst_acceptance_rejects_persistent_and_unknown_identity():
     for runner_name in ("aimeton-site-auditor-stage", "unregistered-runner"):
         with pytest.raises(projection_module.ProjectionError):
             verifier.verify_runtime_identity(
-                "site-auditor-stage", runner_name, require_source="burst", canonical_proof_sha256=digest
+                "site-auditor-stage", runner_name, require_source="burst", expected_projection_sha256=digest
             )
 
 
@@ -81,7 +82,7 @@ def test_explicit_empty_runtime_labels_fail_closed():
             "aimeton-auditor-burst-stage-01",
             actual_labels=[],
             require_source="burst",
-            canonical_proof_sha256=digest,
+            expected_projection_sha256=digest,
         )
 
 

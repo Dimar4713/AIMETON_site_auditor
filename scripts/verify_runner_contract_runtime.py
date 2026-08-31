@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify runtime identity against the canonical-infrastructure product projection."""
+"""Verify runtime identity against the immutable infrastructure projection."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from validate_runner_contract_projection import (
     ProjectionError,
     get_contract,
     load_projection,
-    validate_projection_proof,
+    validate_projection_integrity,
 )
 
 
@@ -21,10 +21,10 @@ def verify_runtime_identity(
     *,
     actual_labels: list[str] | None = None,
     require_source: str | None = None,
-    canonical_proof_sha256: str | None = None,
+    expected_projection_sha256: str | None = None,
 ) -> dict[str, object]:
     projection = load_projection()
-    validate_projection_proof(projection, canonical_proof_sha256)
+    validate_projection_integrity(projection, expected_projection_sha256)
     contract = get_contract(projection, contract_name)
     eligible = contract["eligible_runners"]
     if require_source is not None:
@@ -48,8 +48,10 @@ def verify_runtime_identity(
         "selector_authority": (
             "runtime-and-scheduler" if actual_labels is not None else "github-scheduler"
         ),
-        "canonical_projection_sha256": canonical_proof_sha256,
-        "canonical_proof_verified": True,
+        "projection_sha256": expected_projection_sha256,
+        "projection_integrity_verified": True,
+        "canonical_freshness_verified_at_runtime": False,
+        "canonical_freshness_authority": "aimeton-infrastructure canonical-side drift gate",
     }
 
 
@@ -69,7 +71,7 @@ def main() -> int:
             args.runner_name,
             actual_labels=labels,
             require_source=args.require_source,
-            canonical_proof_sha256=os.environ.get("AIMETON_CANONICAL_PROJECTION_SHA256"),
+            expected_projection_sha256=os.environ.get("AIMETON_EXPECTED_PROJECTION_SHA256"),
         )
     except ProjectionError as exc:
         parser.error(str(exc))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a generated projection and canonical reusable-workflow proof."""
+"""Validate the immutable runner projection checked into Site Auditor."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ PROJECTION_PATH = ROOT / "contracts" / "generated" / "runner-contract-projection
 
 
 class ProjectionError(ValueError):
-    """Raised when generated projection or canonical proof is invalid."""
+    """Raised when generated projection integrity or membership is invalid."""
 
 
 def projection_sha256(payload: dict[str, Any]) -> str:
@@ -34,19 +35,26 @@ def load_projection(path: Path = PROJECTION_PATH) -> dict[str, Any]:
     generation = projection.get("generation")
     if not isinstance(generation, dict) or generation.get("version") != 2:
         raise ProjectionError("projection generation version is invalid")
+    if generation.get("infrastructure_repository") != "Dimar4713/aimeton-infrastructure":
+        raise ProjectionError("projection canonical repository is invalid")
     if not str(generation.get("generated_at", "")).endswith("Z"):
         raise ProjectionError("projection generation timestamp must be UTC")
-    if not generation.get("infrastructure_source_sha"):
-        raise ProjectionError("projection infrastructure source SHA is missing")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(generation.get("infrastructure_source_sha", ""))):
+        raise ProjectionError("projection infrastructure source SHA is invalid")
     sources = generation.get("sources")
     if not isinstance(sources, list) or len(sources) != 3:
         raise ProjectionError("projection canonical source provenance is incomplete")
-    if any(len(str(source.get("git_blob_sha", ""))) != 40 for source in sources):
-        raise ProjectionError("projection source digest is invalid")
+    if any(
+        not isinstance(source, dict)
+        or not source.get("path")
+        or not re.fullmatch(r"[0-9a-f]{40}", str(source.get("git_blob_sha", "")))
+        for source in sources
+    ):
+        raise ProjectionError("projection source provenance is invalid")
     payload = projection.get("canonical_payload")
     if not isinstance(payload, dict):
         raise ProjectionError("canonical projection payload is missing")
-    expected = generation.get("canonical_projection_sha256")
+    expected = str(generation.get("canonical_projection_sha256", ""))
     if projection_sha256(payload) != expected:
         raise ProjectionError("generated projection payload digest mismatch")
     return projection
@@ -59,27 +67,32 @@ def get_contract(projection: dict[str, Any], contract_name: str) -> dict[str, An
         raise ProjectionError(f"unknown projected runner contract: {contract_name}")
     repository = payload.get("repository")
     names: set[str] = set()
+    keys: set[str] = set()
     for runner in contract.get("eligible_runners", []):
         if runner.get("repository") != repository:
             raise ProjectionError("projected runner repository ownership mismatch")
-        if runner.get("runner_name") in names:
-            raise ProjectionError("projected runner identity is duplicated")
+        name = str(runner.get("runner_name") or "")
+        key = str(runner.get("inventory_key") or "")
+        if not name or name in names:
+            raise ProjectionError("projected runner identity is empty or duplicated")
+        if not key or key in keys:
+            raise ProjectionError("projected inventory key is empty or duplicated")
         if not set(contract.get("selector", [])).issubset(runner.get("labels", [])):
             raise ProjectionError("projected runner does not satisfy contract selector")
-        names.add(runner["runner_name"])
+        names.add(name)
+        keys.add(key)
     return contract
 
 
-def validate_projection_proof(
-    projection: dict[str, Any], canonical_proof_sha256: str | None
+def validate_projection_integrity(
+    projection: dict[str, Any], expected_projection_sha256: str | None
 ) -> dict[str, Any]:
-    expected = projection["generation"]["canonical_projection_sha256"]
-    if not canonical_proof_sha256:
-        raise ProjectionError("canonical infrastructure projection proof is required")
-    if canonical_proof_sha256 != expected:
+    actual = projection["generation"]["canonical_projection_sha256"]
+    if not expected_projection_sha256:
+        raise ProjectionError("expected immutable projection digest is required")
+    if expected_projection_sha256 != actual:
         raise ProjectionError(
-            f"canonical infrastructure projection drift: expected={expected} "
-            f"observed={canonical_proof_sha256}"
+            f"immutable projection digest mismatch: expected={expected_projection_sha256} observed={actual}"
         )
     return projection["canonical_payload"]
 
@@ -91,13 +104,15 @@ def main() -> int:
     parser.add_argument("--offline", action="store_true")
     args = parser.parse_args()
     projection = load_projection()
+    integrity_verified = False
     if not args.offline:
-        validate_projection_proof(
-            projection, os.environ.get("AIMETON_CANONICAL_PROJECTION_SHA256")
+        validate_projection_integrity(
+            projection, os.environ.get("AIMETON_EXPECTED_PROJECTION_SHA256")
         )
+        integrity_verified = True
     contract = get_contract(projection, args.contract)
     if args.list_source:
-        output = [
+        output: Any = [
             runner["runner_name"]
             for runner in contract["eligible_runners"]
             if runner["source"] == args.list_source
@@ -105,8 +120,10 @@ def main() -> int:
     else:
         output = {
             "contract": args.contract,
-            "canonical_projection_sha256": projection["generation"]["canonical_projection_sha256"],
-            "canonical_proof_verified": not args.offline,
+            "projection_sha256": projection["generation"]["canonical_projection_sha256"],
+            "projection_integrity_verified": integrity_verified,
+            "canonical_freshness_verified_at_runtime": False,
+            "canonical_freshness_authority": "aimeton-infrastructure canonical-side drift gate",
             "eligible_runners": contract["eligible_runners"],
         }
     print(json.dumps(output, sort_keys=True))
